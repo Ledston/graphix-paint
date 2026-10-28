@@ -1,5 +1,6 @@
 #pragma once
 #include <QDialog>
+#include <QWidget>
 
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -9,10 +10,12 @@ class QLabel;
 
 namespace gx {
 
-class ShortcutsDialog : public QDialog {
+// The shortcut list with search and editing. Used in its own window and inside Settings.
+class ShortcutsEditor : public QWidget {
     Q_OBJECT
 public:
-    explicit ShortcutsDialog(QWidget* parent = nullptr);
+    explicit ShortcutsEditor(QWidget* parent = nullptr);
+    void resetAll();
 
 private:
     void populate();
@@ -21,6 +24,12 @@ private:
     QKeySequenceEdit* m_edit;
     QLineEdit* m_filter;
     QLabel* m_info;
+};
+
+class ShortcutsDialog : public QDialog {
+    Q_OBJECT
+public:
+    explicit ShortcutsDialog(QWidget* parent = nullptr);
 };
 
 }  // namespace gx

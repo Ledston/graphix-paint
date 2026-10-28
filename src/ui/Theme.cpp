@@ -105,6 +105,7 @@ QMainWindow, QDialog { background: %WINDOW%; }
 QMainWindow::separator { background: %BORDER%; width: 3px; height: 3px; }
 QDockWidget { titlebar-close-icon: none; }
 QDockWidget::title { background: %PANEL%; padding: 3px 6px; border-bottom: 1px solid %BORDER%; }
+QLabel#dockTitle { background: %PANEL%; padding: 3px 6px; border-bottom: 1px solid %BORDER%; color: %TEXT%; }
 QToolBar { background: %PANEL%; border: none; border-bottom: 1px solid %BORDER%; spacing: 2px; padding: 2px; }
 QToolBar::separator { background: %BORDER%; width: 1px; margin: 4px 4px; }
 QToolButton { border: 1px solid transparent; border-radius: 3px; padding: 2px; background: transparent; }
@@ -676,6 +677,99 @@ void drawIcon(QPainter& p, const QString& n, const QColor& col, const QColor& ac
         p.drawRoundedRect(QRectF(3, 5, 18, 14), 2, 2);
         poly({{5, 17}, {10, 11}, {13, 14}, {15, 12}, {19, 17}}, true, acc);
         circle(16, 9, 1.6, true);
+    } else if (n == "keyboard") {
+        p.drawRoundedRect(QRectF(3, 7, 18, 11), 2, 2);
+        for (int i = 0; i < 4; ++i) line(6 + i * 4, 10.5, 6.5 + i * 4, 10.5);
+        line(6, 14.5, 6.5, 14.5);
+        line(9, 14.5, 15, 14.5);
+        line(18, 14.5, 18.5, 14.5);
+    } else if (n == "speed") {
+        QPainterPath arc;
+        arc.arcMoveTo(QRectF(4, 6, 16, 16), 180);
+        arc.arcTo(QRectF(4, 6, 16, 16), 180, -180);
+        p.drawPath(arc);
+        p.setPen(QPen(acc, 2.0, Qt::SolidLine, Qt::RoundCap));
+        line(12, 14, 16.5, 9);
+        p.setPen(pen);
+        circle(12, 14, 1.2, true);
+    } else if (n == "cursor") {
+        circle(12, 12, 7);
+        line(12, 9, 12, 15);
+        line(9, 12, 15, 12);
+    } else if (n == "language") {
+        circle(12, 12, 8);
+        p.drawEllipse(QPointF(12, 12), 3.5, 8);
+        line(4, 12, 20, 12);
+    } else if (n == "theme") {
+        circle(12, 12, 8);
+        QPainterPath half;
+        half.moveTo(12, 4);
+        half.arcTo(QRectF(4, 4, 16, 16), 90, 180);
+        half.closeSubpath();
+        path(half, true);
+    } else if (n == "tablet") {
+        p.drawRoundedRect(QRectF(3, 5, 18, 13), 2, 2);
+        p.drawRect(QRectF(6, 8, 12, 7));
+        p.setPen(QPen(acc, 1.8, Qt::SolidLine, Qt::RoundCap));
+        line(14, 21, 20, 12);
+        p.setPen(pen);
+    } else if (n == "channels") {
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(229, 83, 75, 200));
+        p.drawEllipse(QPointF(9.5, 9.5), 5.5, 5.5);
+        p.setBrush(QColor(80, 190, 110, 200));
+        p.drawEllipse(QPointF(14.5, 9.5), 5.5, 5.5);
+        p.setBrush(QColor(80, 140, 240, 200));
+        p.drawEllipse(QPointF(12, 14.5), 5.5, 5.5);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+    } else if (n == "lineart") {
+        QPainterPath a;
+        a.moveTo(4, 18);
+        a.cubicTo(7, 6, 11, 6, 12, 12);
+        a.cubicTo(13, 18, 17, 18, 20, 6);
+        p.drawPath(a);
+        dashed(true);
+        p.drawRect(QRectF(3, 3, 18, 18));
+        dashed(false);
+    } else if (n == "preview") {
+        p.drawRoundedRect(QRectF(3, 5, 18, 14), 2, 2);
+        line(12, 5, 12, 19);
+        QPainterPath l;
+        l.moveTo(5, 16);
+        l.lineTo(8, 10);
+        l.lineTo(11, 16);
+        path(l, true, acc);
+        QPainterPath r;
+        r.moveTo(19, 16);
+        r.lineTo(16, 10);
+        r.lineTo(13, 16);
+        p.drawPath(r);
+    } else if (n == "timelapse") {
+        circle(12, 12, 8);
+        line(12, 12, 12, 7);
+        line(12, 12, 15.5, 14);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(229, 83, 75));
+        p.drawEllipse(QPointF(18.5, 5.5), 2.6, 2.6);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+    } else if (n == "harmony") {
+        circle(12, 12, 8);
+        p.setPen(QPen(acc, 1.6));
+        p.drawPolygon(QPolygonF({QPointF(12, 4), QPointF(18.9, 16), QPointF(5.1, 16)}));
+        p.setPen(pen);
+    } else if (n == "reference") {
+        QPainterPath a;
+        a.moveTo(4, 18);
+        a.cubicTo(8, 8, 12, 8, 14, 12);
+        p.drawPath(a);
+        p.setPen(Qt::NoPen);
+        p.setBrush(acc);
+        p.drawEllipse(QPointF(18, 6), 3, 3);
+        p.setPen(pen);
+        p.setBrush(Qt::NoBrush);
+        line(15.8, 8.2, 13, 11);
     } else if (n == "grid") {
         for (int i = 0; i <= 3; ++i) {
             line(4 + i * 5.33, 4, 4 + i * 5.33, 20);

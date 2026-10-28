@@ -79,7 +79,11 @@ Q_SIGNALS:
     void requestAdjustmentEdit(quint32 layerId);
     void requestNewAdjustment(int type);
 
+protected:
+    bool eventFilter(QObject* o, QEvent* e) override;
+
 private:
+    QList<quint32> targets() const;  // selected layers, or the current one
     void rebuild();
     void syncControls();
     void selectCurrent();
@@ -94,6 +98,7 @@ private:
     ValueBar* m_opacity;
     QToolButton *m_alphaLock, *m_clip, *m_lock, *m_maskEdit, *m_pass;
     bool m_updating = false;
+    quint32 m_pendingSingle = 0;
 };
 
 }  // namespace gx

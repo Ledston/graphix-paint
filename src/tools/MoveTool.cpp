@@ -95,7 +95,7 @@ void MoveTool::press(const PointerEvent& e) {
     m_start = e.pos;
     m_delta = QPoint();
     m_active = true;
-    m_selMode = doc->hasSelection() && l->isRaster();
+    m_selMode = doc->hasSelection() && l->isRaster() && doc->selectedCount() <= 1;
     m_targets.clear();
     if (m_selMode) {
         doc->pushUndo(T("Move selection"));
@@ -124,7 +124,10 @@ void MoveTool::press(const PointerEvent& e) {
         m_lastPreview = QRect();
     } else {
         doc->pushUndo(T("Move layer"));
-        collectTargets(l, m_targets);
+        // every selected layer moves together (Ctrl / Shift + click in the layer list)
+        for (quint32 id : doc->topLevelSelectedIds())
+            if (Layer* t = doc->layer(id); t && !t->isEffectivelyLocked()) collectTargets(t, m_targets);
+        if (m_targets.isEmpty()) collectTargets(doc->currentLayer(), m_targets);
     }
 }
 
@@ -197,7 +200,8 @@ bool MoveTool::keyPress(QKeyEvent* e, CanvasView* v) {
     if (!l || l->isEffectivelyLocked()) return true;
     doc->pushUndo(T("Nudge layer"), "nudge");
     QVector<quint32> ids;
-    collectTargets(l, ids);
+    for (quint32 id : doc->topLevelSelectedIds())
+        if (Layer* t = doc->layer(id); t && !t->isEffectivelyLocked()) collectTargets(t, ids);
     QRect before;
     for (quint32 id : ids)
         if (Layer* t = doc->layer(id)) before |= doc->layerBounds(t);

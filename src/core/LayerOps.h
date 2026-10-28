@@ -32,6 +32,14 @@ void clearLayer(Document& doc, quint32 id);  // respects the selection
 void fillLayer(Document& doc, quint32 id, const QColor& c);  // respects the selection
 void flipLayer(Document& doc, quint32 id, bool horizontal);
 
+// ---- several layers at once (one undo step each) ----
+void deleteLayers(Document& doc, const QList<quint32>& ids);
+void duplicateLayers(Document& doc, const QList<quint32>& ids);
+GroupLayer* groupLayers(Document& doc, const QList<quint32>& ids);   // into one new folder
+Layer* mergeLayers(Document& doc, const QList<quint32>& ids, QString* error = nullptr);  // into one pixel layer
+void moveLayers(Document& doc, const QList<quint32>& ids, GroupLayer* newParent, int index);
+void setLayersVisible(Document& doc, const QList<quint32>& ids, bool visible);
+
 // ---- masks ----
 void addMask(Document& doc, quint32 id, bool fromSelection);
 void deleteMask(Document& doc, quint32 id);

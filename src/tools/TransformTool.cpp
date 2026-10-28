@@ -151,7 +151,40 @@ bool TransformTool::start() {
     m_view = v;
     m_doc = d;
     m_layerId = l->id;
-    if (l->isRaster()) {
+    m_originals.clear();
+    auto contentBounds = [d](Layer* x) {
+        QRect b = d->layerBounds(x);
+        if (x->type() == LayerType::Text) b = x->displaySurface()->exactBounds();
+        if (x->type() == LayerType::Vector) {
+            b = QRect();
+            for (const auto& s : static_cast<VectorLayer*>(x)->strokes) b |= s.bounds().toAlignedRect();
+        }
+        if (x->isGroup()) {
+            b = QRect();
+            forEachLayer(static_cast<GroupLayer*>(x), [&](Layer* c) {
+                if (const RasterSurface* s = c->displaySurface()) b |= s->exactBounds();
+                return true;
+            });
+        }
+        return b;
+    };
+    const QList<quint32> many = d->topLevelSelectedIds();
+    if (many.size() > 1) {
+        // several selected layers: all of them get the same transformation
+        QRect b;
+        for (quint32 id : many)
+            if (Layer* x = d->layer(id); x && x->type() != LayerType::Adjustment && !x->isEffectivelyLocked()) b |= contentBounds(x);
+        if (b.isEmpty()) {
+            app()->showStatus(T("The layer is empty."));
+            return false;
+        }
+        d->pushUndo(T("Transform"));
+        for (quint32 id : many)
+            if (Layer* x = d->layer(id); x && x->type() != LayerType::Adjustment && !x->isEffectivelyLocked())
+                m_originals.emplace_back(id, x->clone());
+        m_rasterMode = false;
+        m_src = QRectF(b);
+    } else if (l->isRaster()) {
         QString err;
         if (!m_float.begin(d, static_cast<RasterLayer*>(l), T("Transform"), false, &err)) {
             app()->showStatus(T(err));
@@ -160,26 +193,14 @@ bool TransformTool::start() {
         m_rasterMode = true;
         m_src = QRectF(m_float.srcRect);
     } else {
-        QRect b = d->layerBounds(l);
-        if (l->type() == LayerType::Text) b = l->displaySurface()->exactBounds();
-        if (l->type() == LayerType::Vector) {
-            b = QRect();
-            for (const auto& s : static_cast<VectorLayer*>(l)->strokes) b |= s.bounds().toAlignedRect();
-        }
-        if (l->isGroup()) {
-            b = QRect();
-            forEachLayer(static_cast<GroupLayer*>(l), [&](Layer* c) {
-                if (const RasterSurface* s = c->displaySurface()) b |= s->exactBounds();
-                return true;
-            });
-        }
+        QRect b = contentBounds(l);
         if (b.isEmpty()) {
             app()->showStatus(T("The layer is empty."));
             return false;
         }
         d->pushUndo(T("Transform"));
         l = d->layer(m_layerId);
-        m_original = l->clone();
+        m_originals.emplace_back(m_layerId, l->clone());
         m_rasterMode = false;
         m_src = QRectF(b);
     }
@@ -234,16 +255,18 @@ void TransformTool::updatePreview(bool final) {
         }
         m_float.showImage(dst, dr.topLeft());
     } else {
-        Layer* cur = d->layer(m_layerId);
-        if (!cur || !m_original) return;
-        QRect before = d->layerBounds(cur);
-        LayerPtr fresh = m_original->clone();
-        ops::transformLayerContent(*fresh, t, smooth);
-        GroupLayer* parent = cur->parent;
-        int idx = parent->indexOf(cur);
-        parent->take(idx);
-        parent->insert(idx, fresh);
-        d->pixelsChanged(before | d->layerBounds(fresh.get()), fresh.get());
+        for (const auto& [id, original] : m_originals) {
+            Layer* cur = d->layer(id);
+            if (!cur || !original || !cur->parent) continue;
+            QRect before = d->layerBounds(cur);
+            LayerPtr fresh = original->clone();
+            ops::transformLayerContent(*fresh, t, smooth);
+            GroupLayer* parent = cur->parent;
+            int idx = parent->indexOf(cur);
+            parent->take(idx);
+            parent->insert(idx, fresh);
+            d->pixelsChanged(before | d->layerBounds(fresh.get()), fresh.get());
+        }
     }
     Q_EMIT overlayChanged();
 }
@@ -421,7 +444,7 @@ void TransformTool::apply() {
             m_doc->selectionModified();
         }
     } else {
-        m_original.reset();
+        m_originals.clear();
     }
     Q_EMIT overlayChanged();
 }
@@ -432,7 +455,7 @@ void TransformTool::cancel() {
     m_active = false;
     if (m_rasterMode) m_float.cancel();
     else if (m_doc) {
-        m_original.reset();
+        m_originals.clear();
         m_doc->revertLastUndo();
     }
     Q_EMIT overlayChanged();
@@ -588,14 +611,19 @@ void WarpTool::render(bool final) {
     const int N = cells * S + 1;
     std::vector<QPointF> pos(size_t(N) * N), uv(size_t(N) * N);
     const QRectF sr(m_float.srcRect);
-    QRectF bb;
+    // Bounding box of the mesh. (QRectF::united ignores empty rects, so track min/max by hand.)
+    double minX = 1e300, minY = 1e300, maxX = -1e300, maxY = -1e300;
     for (int j = 0; j < N; ++j)
         for (int i = 0; i < N; ++i) {
             QPointF p = gridPoint(double(i) / S, double(j) / S);
             pos[size_t(j) * N + i] = p;
             uv[size_t(j) * N + i] = QPointF(sr.width() * i / (N - 1), sr.height() * j / (N - 1));
-            bb = bb.isNull() ? QRectF(p, QSizeF(0, 0)) : bb.united(QRectF(p, QSizeF(0, 0)));
+            minX = std::min(minX, p.x());
+            minY = std::min(minY, p.y());
+            maxX = std::max(maxX, p.x());
+            maxY = std::max(maxY, p.y());
         }
+    const QRectF bb(QPointF(minX, minY), QPointF(maxX, maxY));
     QRect limit = d->bounds().adjusted(-d->size().width(), -d->size().height(), d->size().width(), d->size().height());
     QRect dr = bb.toAlignedRect().adjusted(-1, -1, 1, 1) & limit;
     if (dr.isEmpty()) return;

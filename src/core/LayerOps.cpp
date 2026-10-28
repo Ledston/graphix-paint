@@ -1,5 +1,7 @@
 #include "core/LayerOps.h"
 
+#include <QSet>
+
 #include <QImage>
 #include <QMutex>
 #include <QPainter>
@@ -449,6 +451,182 @@ void flipLayer(Document& doc, quint32 id, bool horizontal) {
 }
 
 // ============================================================================ masks
+
+// ---------------------------------------------------------------------------- several layers
+
+namespace {
+// Keeps only layers that exist and are not inside another listed folder (bottom first).
+QList<quint32> topLevel(Document& doc, const QList<quint32>& ids) {
+    QSet<quint32> set(ids.begin(), ids.end());
+    QList<quint32> out;
+    forEachLayer(doc.root(), [&](Layer* l) {
+        if (!set.contains(l->id)) return true;
+        for (const GroupLayer* p = l->parent; p; p = p->parent)
+            if (set.contains(p->id)) return true;
+        out << l->id;
+        return true;
+    });
+    return out;
+}
+}  // namespace
+
+void deleteLayers(Document& doc, const QList<quint32>& ids) {
+    QList<quint32> list = topLevel(doc, ids);
+    if (list.isEmpty()) return;
+    if (list.size() == 1) {
+        deleteLayer(doc, list.first());
+        return;
+    }
+    doc.pushUndo("Delete layers");
+    // the layer just below the lowest deleted one becomes current
+    Layer* first = doc.layer(list.first());
+    GroupLayer* fp = first ? first->parent : nullptr;
+    int fi = fp ? fp->indexOf(first) : -1;
+    quint32 nextId = 0;
+    if (fp && fi > 0) nextId = fp->children[size_t(fi - 1)]->id;
+    for (quint32 id : list)
+        if (Layer* l = doc.layer(id); l && l->parent) l->parent->take(l->parent->indexOf(l));
+    ensureOneLayer(doc);
+    if (!doc.layer(nextId)) nextId = doc.root()->children.empty() ? 0 : doc.root()->children.back()->id;
+    doc.setCurrentLayer(nextId);
+    doc.structureChanged();
+}
+
+void duplicateLayers(Document& doc, const QList<quint32>& ids) {
+    QList<quint32> list = topLevel(doc, ids);
+    if (list.isEmpty()) return;
+    if (list.size() == 1) {
+        if (Layer* c = duplicateLayer(doc, list.first())) doc.setCurrentLayer(c->id);
+        return;
+    }
+    doc.pushUndo("Duplicate layers");
+    QList<quint32> copies;
+    for (quint32 id : list) {
+        Layer* l = doc.layer(id);
+        if (!l || !l->parent) continue;
+        auto c = l->clone();
+        assignNewIds(doc, c.get());
+        c->name = l->name + " copy";
+        GroupLayer* p = l->parent;
+        p->insert(p->indexOf(l) + 1, c);
+        copies << c->id;
+    }
+    if (!copies.isEmpty()) doc.setLayerSelection(copies, copies.last());
+    doc.structureChanged();
+}
+
+GroupLayer* groupLayers(Document& doc, const QList<quint32>& ids) {
+    QList<quint32> list = topLevel(doc, ids);
+    if (list.isEmpty()) return nullptr;
+    if (list.size() == 1) return groupLayer(doc, list.first());
+    doc.pushUndo("Group into folder");
+    // the folder goes where the topmost layer was
+    Layer* top = doc.layer(list.last());
+    GroupLayer* parent = top->parent;
+    std::vector<LayerPtr> moving;
+    for (quint32 id : list) moving.push_back(sharedOf(doc.layer(id)));
+    // position: right above the topmost layer, counted after the others leave
+    for (const LayerPtr& m : moving)
+        if (m && m.get() != top && m->parent) m->parent->take(m->parent->indexOf(m.get()));
+    int at = parent->indexOf(top);
+    parent->take(at);
+    auto g = std::make_shared<GroupLayer>();
+    g->id = doc.newLayerId();
+    g->name = doc.uniqueLayerName("Folder");
+    int k = 0;
+    for (const LayerPtr& m : moving) {
+        if (!m) continue;
+        g->insert(k++, m);
+    }
+    parent->insert(std::clamp(at, 0, int(parent->children.size())), g);
+    g->expanded = true;
+    doc.setCurrentLayer(g->id);
+    doc.structureChanged();
+    return g.get();
+}
+
+Layer* mergeLayers(Document& doc, const QList<quint32>& ids, QString* error) {
+    QList<quint32> list = topLevel(doc, ids);
+    if (list.size() < 2) {
+        if (error) *error = "Select two or more layers to merge.";
+        return nullptr;
+    }
+    for (quint32 id : list)
+        if (Layer* l = doc.layer(id); l && l->isEffectivelyLocked()) {
+            if (error) *error = "The layer is locked.";
+            return nullptr;
+        }
+    doc.pushUndo("Merge layers");
+    std::vector<LayerPtr> parts;
+    QRect b;
+    for (quint32 id : list) {
+        Layer* l = doc.layer(id);
+        if (!l) continue;
+        parts.push_back(sharedOf(l));
+        if (l->type() != LayerType::Adjustment) b |= doc.layerBounds(l);
+    }
+    // the lowest layer keeps its own look, everything is drawn as it was
+    RasterSurface merged = renderLayers(doc, parts, b);
+    Layer* top = doc.layer(list.last());
+    GroupLayer* parent = top->parent;
+    int at = parent->indexOf(top);
+    auto r = std::make_shared<RasterLayer>();
+    r->id = doc.newLayerId();
+    r->name = top->name;
+    r->pixels = std::move(merged);
+    r->pixels.optimize();
+    parent->insert(at + 1, r);
+    for (quint32 id : list)
+        if (Layer* l = doc.layer(id); l && l->parent) l->parent->take(l->parent->indexOf(l));
+    doc.setCurrentLayer(r->id);
+    doc.structureChanged();
+    return r.get();
+}
+
+void moveLayers(Document& doc, const QList<quint32>& ids, GroupLayer* newParent, int index) {
+    QList<quint32> list = topLevel(doc, ids);
+    if (list.isEmpty() || !newParent) return;
+    if (list.size() == 1) {
+        moveLayer(doc, list.first(), newParent, index);
+        return;
+    }
+    for (quint32 id : list) {
+        Layer* l = doc.layer(id);
+        if (!l || l == newParent || isAncestor(l, newParent)) return;  // a folder can't go inside itself
+    }
+    const quint32 parentId = newParent->id;
+    const bool toRoot = newParent == doc.root();
+    // remember a layer to insert next to, since indexes change when layers leave
+    Layer* anchor = index < int(newParent->children.size()) ? newParent->children[size_t(std::max(0, index))].get() : nullptr;
+    const quint32 anchorId = anchor ? anchor->id : 0;
+    const quint32 current = doc.currentLayerId();
+    doc.pushUndo("Move layer");
+    GroupLayer* target = toRoot ? doc.root() : static_cast<GroupLayer*>(doc.layer(parentId));
+    if (!target) return;
+    std::vector<LayerPtr> moving;
+    for (quint32 id : list) {
+        Layer* l = doc.layer(id);
+        if (!l || !l->parent) continue;
+        moving.push_back(sharedOf(l));
+    }
+    for (const LayerPtr& m : moving) m->parent->take(m->parent->indexOf(m.get()));
+    int at = int(target->children.size());
+    if (anchorId && !list.contains(anchorId))
+        if (Layer* a = doc.layer(anchorId); a && a->parent == target) at = target->indexOf(a);
+    for (const LayerPtr& m : moving) target->insert(at++, m);
+    doc.setLayerSelection(list, current);
+    doc.structureChanged();
+}
+
+void setLayersVisible(Document& doc, const QList<quint32>& ids, bool visible) {
+    if (ids.isEmpty()) return;
+    doc.pushUndo("Layer visibility", "visibility");
+    for (quint32 id : ids)
+        if (Layer* l = doc.layer(id)) {
+            l->visible = visible;
+            doc.layerChanged(l);
+        }
+}
 
 void addMask(Document& doc, quint32 id, bool fromSelection) {
     Layer* l = doc.layer(id);

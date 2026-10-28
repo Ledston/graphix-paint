@@ -88,6 +88,7 @@ private:
     void paintOverlays(QPainter& p);
     void drawSelection(QPainter& p);
     void drawGuides(QPainter& p);
+    void drawCompositionGrid(QPainter& p);
     void drawBrushOutline(QPainter& p);
     void rebuildSelectionPath();
     void viewTransformChanged();

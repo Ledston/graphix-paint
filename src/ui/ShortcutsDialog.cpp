@@ -19,6 +19,26 @@ namespace gx {
 ShortcutsDialog::ShortcutsDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(T("Keyboard shortcuts"));
     auto* v = new QVBoxLayout(this);
+    auto* ed = new ShortcutsEditor(this);
+    v->addWidget(ed, 1);
+    auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok, this);
+    auto* resetAll = bb->addButton(T("Reset all"), QDialogButtonBox::ResetRole);
+    v->addWidget(bb);
+    connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(resetAll, &QPushButton::clicked, ed, &ShortcutsEditor::resetAll);
+    resize(620, 620);
+}
+
+void ShortcutsEditor::resetAll() {
+    if (QMessageBox::question(this, T("Reset all"), T("Restore every shortcut to its default?")) == QMessageBox::Yes) {
+        Shortcuts::instance().resetAll();
+        populate();
+    }
+}
+
+ShortcutsEditor::ShortcutsEditor(QWidget* parent) : QWidget(parent) {
+    auto* v = new QVBoxLayout(this);
+    v->setContentsMargins(0, 0, 0, 0);
     m_filter = new QLineEdit(this);
     m_filter->setPlaceholderText(T("Search..."));
     v->addWidget(m_filter);
@@ -44,17 +64,7 @@ ShortcutsDialog::ShortcutsDialog(QWidget* parent) : QDialog(parent) {
     m_info->setObjectName("sectionTitle");
     m_info->setWordWrap(true);
     v->addWidget(m_info);
-    auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok, this);
-    auto* resetAll = bb->addButton(T("Reset all"), QDialogButtonBox::ResetRole);
-    v->addWidget(bb);
-    connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
-    connect(resetAll, &QPushButton::clicked, this, [this] {
-        if (QMessageBox::question(this, T("Reset all"), T("Restore every shortcut to its default?")) == QMessageBox::Yes) {
-            Shortcuts::instance().resetAll();
-            populate();
-        }
-    });
-    connect(setB, &QPushButton::clicked, this, &ShortcutsDialog::assign);
+    connect(setB, &QPushButton::clicked, this, &ShortcutsEditor::assign);
     connect(clearB, &QPushButton::clicked, this, [this] {
         auto* it = m_tree->currentItem();
         if (!it || it->data(0, Qt::UserRole).toString().isEmpty()) return;
@@ -69,7 +79,7 @@ ShortcutsDialog::ShortcutsDialog(QWidget* parent) : QDialog(parent) {
             if (s.id == id) Shortcuts::instance().set(id, s.defaultSeq);
         populate();
     });
-    connect(m_filter, &QLineEdit::textChanged, this, &ShortcutsDialog::populate);
+    connect(m_filter, &QLineEdit::textChanged, this, &ShortcutsEditor::populate);
     connect(m_tree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* it) {
         m_edit->clear();
         if (it && !it->data(0, Qt::UserRole).toString().isEmpty()) m_edit->setKeySequence(QKeySequence(it->text(1), QKeySequence::NativeText));
@@ -77,10 +87,9 @@ ShortcutsDialog::ShortcutsDialog(QWidget* parent) : QDialog(parent) {
     connect(m_tree, &QTreeWidget::itemDoubleClicked, this, [this] { m_edit->setFocus(); });
     populate();
     m_info->setText(T("Select a command, press the keys in the box and click Assign. Held keys (pan, zoom, rotate, eyedropper) work while the key is held down."));
-    resize(620, 620);
 }
 
-void ShortcutsDialog::populate() {
+void ShortcutsEditor::populate() {
     QString sel = m_tree->currentItem() ? m_tree->currentItem()->data(0, Qt::UserRole).toString() : QString();
     m_tree->clear();
     QHash<QString, QTreeWidgetItem*> cats;
@@ -110,7 +119,7 @@ void ShortcutsDialog::populate() {
     m_tree->expandAll();
 }
 
-void ShortcutsDialog::assign() {
+void ShortcutsEditor::assign() {
     auto* it = m_tree->currentItem();
     if (!it) return;
     QString id = it->data(0, Qt::UserRole).toString();

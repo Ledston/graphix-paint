@@ -121,7 +121,13 @@ QStringList LayerModel::mimeTypes() const { return {kMime}; }
 
 QMimeData* LayerModel::mimeData(const QModelIndexList& indexes) const {
     auto* md = new QMimeData;
-    if (!indexes.isEmpty()) md->setData(kMime, QByteArray::number(quint32(indexes.first().internalId())));
+    if (!indexes.isEmpty() && m_doc) {
+        const quint32 id = quint32(indexes.first().internalId());
+        QList<quint32> ids = m_doc->isLayerSelected(id) ? m_doc->selectedLayerIds() : QList<quint32>{id};
+        QStringList parts;
+        for (quint32 x : ids) parts << QString::number(x);
+        md->setData(kMime, parts.join(',').toLatin1());
+    }
     return md;
 }
 
@@ -131,7 +137,11 @@ bool LayerModel::canDropMimeData(const QMimeData* data, Qt::DropAction, int, int
 
 bool LayerModel::dropMimeData(const QMimeData* data, Qt::DropAction, int row, int, const QModelIndex& parent) {
     if (!m_doc || !data->hasFormat(kMime)) return false;
-    quint32 id = data->data(kMime).toUInt();
+    QList<quint32> ids;
+    for (const QByteArray& part : data->data(kMime).split(','))
+        if (quint32 x = part.toUInt()) ids << x;
+    if (ids.isEmpty()) return false;
+    const quint32 id = ids.first();
     Layer* moving = m_doc->layer(id);
     if (!moving) return false;
     GroupLayer* g = nullptr;
@@ -148,15 +158,16 @@ bool LayerModel::dropMimeData(const QMimeData* data, Qt::DropAction, int row, in
         }
     }
     if (!g) return false;
-    if (g == moving || isAncestor(moving, g)) return false;
+    for (quint32 x : ids)
+        if (Layer* ml = m_doc->layer(x); !ml || g == ml || isAncestor(ml, g)) return false;
     if (row >= 0) childIndex = int(g->children.size()) - row;
     else if (parent.isValid() && layerAt(parent) && layerAt(parent)->isGroup()) childIndex = int(g->children.size());
     quint32 gid = g->id;
     bool isRoot = g == m_doc->root();
-    QMetaObject::invokeMethod(this, [doc = m_doc, id, gid, isRoot, childIndex] {
+    QMetaObject::invokeMethod(this, [doc = m_doc, ids, gid, isRoot, childIndex] {
         if (!doc) return;
         GroupLayer* target = isRoot ? doc->root() : static_cast<GroupLayer*>(doc->layer(gid));
-        if (target) ops::moveLayer(*doc, id, target, childIndex);
+        if (target) ops::moveLayers(*doc, ids, target, childIndex);
     }, Qt::QueuedConnection);
     return false;
 }
@@ -208,9 +219,13 @@ void LayerDelegate::paint(QPainter* p, const QStyleOptionViewItem& opt, const QM
     if (!l || !d) return;
     const ThemeColors& c = Theme::colors();
     const QRect r = opt.rect;
-    const bool sel = opt.state & QStyle::State_Selected;
+    const bool isCurrent = d->currentLayerId() == l->id || (opt.state & QStyle::State_Selected);
+    const bool sel = isCurrent || d->isLayerSelected(l->id);
     p->save();
-    p->fillRect(r, sel ? c.accent : (idx.row() % 2 ? c.alt : c.base));
+    QColor selBg = c.accent;
+    if (sel && !isCurrent) selBg.setAlphaF(0.55);  // also selected, but not the active layer
+    p->fillRect(r, idx.row() % 2 ? c.alt : c.base);
+    if (sel) p->fillRect(r, selBg);
     if (l->labelColor.isValid()) p->fillRect(QRect(r.left(), r.top(), 3, r.height()), l->labelColor);
     QColor fg = sel ? c.accentText : c.text;
     QColor dim = sel ? c.accentText : c.dim;
@@ -288,11 +303,9 @@ bool LayerDelegate::editorEvent(QEvent* e, QAbstractItemModel* model, const QSty
         if (me->button() != Qt::LeftButton) return false;
         QPoint pos = me->position().toPoint();
         if (eyeRect(opt.rect).adjusted(-2, -8, 4, 8).contains(pos)) {
-            d->pushUndo(T("Layer visibility"), "visibility");
-            if (Layer* ll = m->layerAt(idx)) {
-                ll->visible = !ll->visible;
-                d->layerChanged(ll);
-            }
+            const bool show = !l->visible;
+            if (d->isLayerSelected(l->id) && d->selectedCount() > 1) ops::setLayersVisible(*d, d->selectedLayerIds(), show);
+            else ops::setLayersVisible(*d, {l->id}, show);
             return true;
         }
         if (thumbRect(opt.rect).contains(pos) && (me->modifiers() & Qt::ControlModifier)) {
@@ -415,13 +428,14 @@ LayerPanel::LayerPanel(QWidget* parent) : QWidget(parent) {
     btn("mask", T("Add layer mask (from the selection if there is one)"), [this] {
         if (Layer* l = current()) ops::addMask(*m_doc, l->id, m_doc->hasSelection());
     });
-    btn("duplicate", T("Duplicate layer"), [this] {
-        if (Layer* l = current()) ops::duplicateLayer(*m_doc, l->id);
-    });
-    btn("merge", T("Merge down"), [this] {
+    btn("duplicate", T("Duplicate layer"), [this] { ops::duplicateLayers(*m_doc, targets()); });
+    btn("merge", T("Merge down (or merge the selected layers)"), [this] {
         QString err;
-        if (Layer* l = current())
+        if (m_doc->selectedCount() > 1) {
+            if (!ops::mergeLayers(*m_doc, targets(), &err) && !err.isEmpty()) app()->showStatus(T(err));
+        } else if (Layer* l = current()) {
             if (!ops::mergeDown(*m_doc, l->id, &err) && !err.isEmpty()) app()->showStatus(T(err));
+        }
     });
     btn("fx", T("Layer effects"), [this] {
         if (Layer* l = current()) Q_EMIT requestEffects(l->id);
@@ -430,16 +444,15 @@ LayerPanel::LayerPanel(QWidget* parent) : QWidget(parent) {
         if (Layer* l = current()) ops::clearLayer(*m_doc, l->id);
     });
     bottom->addStretch();
-    btn("trash", T("Delete layer"), [this] {
-        if (Layer* l = current()) ops::deleteLayer(*m_doc, l->id);
-    });
+    btn("trash", T("Delete layer"), [this] { ops::deleteLayers(*m_doc, targets()); });
     v->addLayout(bottom);
 
     connect(m_tree->selectionModel(), &QItemSelectionModel::currentChanged, this, [this](const QModelIndex& i) {
         if (m_updating || !m_doc) return;
         if (Layer* l = m_model->layerAt(i)) {
             if (!l->hasMask) BrushTool::editMask = false;
-            m_doc->setCurrentLayer(l->id);
+            if (m_doc->selectedCount() > 1 && m_doc->isLayerSelected(l->id)) m_doc->setLayerSelection(m_doc->selectedLayerIds(), l->id);
+            else m_doc->setCurrentLayer(l->id);
         }
     });
     connect(m_tree, &QTreeView::expanded, this, [this](const QModelIndex& i) {
@@ -453,14 +466,17 @@ LayerPanel::LayerPanel(QWidget* parent) : QWidget(parent) {
         if (l && l->type() == LayerType::Adjustment) Q_EMIT requestAdjustmentEdit(l->id);
     });
     connect(m_tree, &QTreeView::customContextMenuRequested, this, &LayerPanel::contextMenu);
+    m_tree->viewport()->installEventFilter(this);
 
     connect(m_blend, &QComboBox::activated, this, [this](int idx) {
         Layer* l = current();
         if (!l || m_updating) return;
         m_doc->pushUndo(T("Blending mode"));
-        l = current();
-        l->blend = BlendMode(m_blend->itemData(idx).toInt());
-        m_doc->layerChanged(l);
+        for (quint32 id : targets())
+            if (Layer* x = m_doc->layer(id)) {
+                x->blend = BlendMode(m_blend->itemData(idx).toInt());
+                m_doc->layerChanged(x);
+            }
     });
     connect(m_pass, &QToolButton::toggled, this, [this](bool on) {
         Layer* l = current();
@@ -474,18 +490,22 @@ LayerPanel::LayerPanel(QWidget* parent) : QWidget(parent) {
         Layer* l = current();
         if (!l || m_updating) return;
         m_doc->pushUndo(T("Layer opacity"), QStringLiteral("opacity-%1").arg(l->id));
-        l = current();
-        l->opacity = float(v);
-        m_doc->layerChanged(l);
+        for (quint32 id : targets())
+            if (Layer* x = m_doc->layer(id)) {
+                x->opacity = float(v);
+                m_doc->layerChanged(x);
+            }
     });
     auto flagToggle = [this](QToolButton* b, const QString& name, std::function<void(Layer*, bool)> set) {
         connect(b, &QToolButton::toggled, this, [this, name, set](bool on) {
             Layer* l = current();
             if (!l || m_updating) return;
             m_doc->pushUndo(name);
-            l = current();
-            set(l, on);
-            m_doc->layerChanged(l);
+            for (quint32 id : targets())
+                if (Layer* x = m_doc->layer(id)) {
+                    set(x, on);
+                    m_doc->layerChanged(x);
+                }
             m_doc->layersChanged();
         });
     };
@@ -504,6 +524,51 @@ LayerPanel::LayerPanel(QWidget* parent) : QWidget(parent) {
 }
 
 Layer* LayerPanel::current() const { return m_doc ? m_doc->currentLayer() : nullptr; }
+
+QList<quint32> LayerPanel::targets() const {
+    if (!m_doc) return {};
+    QList<quint32> ids = m_doc->selectedLayerIds();
+    if (ids.isEmpty())
+        if (Layer* l = current()) ids << l->id;
+    return ids;
+}
+
+// Ctrl + click adds or removes a layer, Shift + click selects a run of layers.
+bool LayerPanel::eventFilter(QObject* o, QEvent* e) {
+    if (o == m_tree->viewport() && e->type() == QEvent::MouseButtonPress && m_doc) {
+        auto* me = static_cast<QMouseEvent*>(e);
+        const auto mods = me->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier);
+        if (me->button() == Qt::LeftButton && mods) {
+            QModelIndex i = m_tree->indexAt(me->position().toPoint());
+            Layer* l = m_model->layerAt(i);
+            if (!l) return false;
+            QRect r = m_tree->visualRect(i);
+            QPoint p = me->position().toPoint();
+            if (LayerDelegate::eyeRect(r).adjusted(-2, -8, 4, 8).contains(p)) return false;
+            // Ctrl + click on the thumbnail selects the layer's pixels (handled by the list)
+            if ((mods & Qt::ControlModifier) && LayerDelegate::thumbRect(r).contains(p)) return false;
+            if (mods & Qt::ShiftModifier) m_doc->selectLayerRange(m_doc->currentLayerId(), l->id);
+            else m_doc->toggleLayerSelected(l->id);
+            m_tree->viewport()->update();
+            return true;
+        }
+        // a plain click on one of several selected layers: keep them selected in case they
+        // get dragged; a click without dragging selects just that layer (on release)
+        m_pendingSingle = 0;
+        if (me->button() == Qt::LeftButton && !mods && m_doc->selectedCount() > 1) {
+            QModelIndex i = m_tree->indexAt(me->position().toPoint());
+            if (Layer* l = m_model->layerAt(i); l && m_doc->isLayerSelected(l->id) &&
+                                                !LayerDelegate::eyeRect(m_tree->visualRect(i)).adjusted(-2, -8, 4, 8).contains(me->position().toPoint()))
+                m_pendingSingle = l->id;
+        }
+    }
+    if (o == m_tree->viewport() && e->type() == QEvent::MouseButtonRelease && m_doc && m_pendingSingle) {
+        const quint32 id = m_pendingSingle;
+        m_pendingSingle = 0;
+        if (m_doc->layer(id)) m_doc->setCurrentLayer(id);
+    }
+    return QWidget::eventFilter(o, e);
+}
 
 void LayerPanel::setDocument(Document* d) {
     if (m_doc == d) return;

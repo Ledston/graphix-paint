@@ -13,6 +13,8 @@ class QStackedWidget;
 class QToolButton;
 class QLabel;
 
+class QGridLayout;
+
 namespace gx {
 
 class Tool;
@@ -71,6 +73,9 @@ private:
     void showOptionsFor(Tool* t);
     QButtonGroup* m_group;
     QHash<QString, QToolButton*> m_buttons;
+    QList<QToolButton*> m_buttonOrder;
+    QGridLayout* m_grid = nullptr;
+    void layoutToolButtons();
     QStackedWidget* m_stack;
     BrushSettingsWidget* m_brush;
     QHash<Tool*, QWidget*> m_options;

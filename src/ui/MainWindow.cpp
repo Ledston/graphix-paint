@@ -10,6 +10,8 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QActionGroup>
+#include <QProcess>
 #include <QLineEdit>
 #include <QMdiArea>
 #include <QMdiSubWindow>
@@ -26,6 +28,7 @@
 #include <QUrl>
 
 #include "app/App.h"
+#include "app/TabletInput.h"
 #include "app/BrushLibrary.h"
 #include "app/I18n.h"
 #include "app/Shortcuts.h"
@@ -139,7 +142,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         app()->showStatus(T("Recovery copy saved: %1").arg(title), 2500);
     });
     connect(app(), &App::prefsChanged, this, [this] {
-        Recovery::instance().setInterval(app()->prefs().autosaveMinutes);
+        const Preferences& p = app()->prefs();
+        Recovery::instance().setInterval(p.autosaveMinutes);
+        if (TabletInput::active() != p.tabletApi) TabletInput::apply(p.tabletApi);
+        for (QToolBar* tb : findChildren<QToolBar*>()) tb->setIconSize(QSize(p.iconSize - 2, p.iconSize - 2));
+        while (m_recentMenu && app()->settings().value("recent").toStringList().size() > p.recentCount) {
+            QStringList r = app()->settings().value("recent").toStringList();
+            r.removeLast();
+            app()->settings().setValue("recent", r);
+        }
+        updateRecentMenu();
         for (QMdiSubWindow* sw : m_mdi->subWindowList())
             if (auto* cw = dynamic_cast<CanvasWindow*>(sw)) cw->view()->doc()->setUndoLimit(app()->prefs().undoLimit);
     });
@@ -238,8 +250,9 @@ void MainWindow::createActions() {
     act("edit.transform", "Free transform", "Edit", QKeySequence(Qt::CTRL | Qt::Key_T), [] { app()->tools()->setCurrent("transform"); }, "transform");
     act("edit.warp", "Mesh warp", "Edit", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_T), [] { app()->tools()->setCurrent("warp"); }, "warp");
     act("edit.liquify", "Liquify", "Edit", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_X), [] { app()->tools()->setCurrent("liquify"); }, "liquify");
-    act("edit.prefs", "Preferences...", "Edit", QKeySequence(Qt::CTRL | Qt::Key_K), [this] { preferences(); }, "settings", false);
-    act("edit.shortcuts", "Keyboard shortcuts...", "Edit", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_K), [this] { shortcutsDialog(); }, {}, false);
+    act("edit.prefs", "Program settings...", "Settings", QKeySequence(Qt::CTRL | Qt::Key_K), [this] { preferences(); }, "settings", false);
+    act("edit.shortcuts", "Keyboard shortcuts...", "Settings", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_K), [this] { shortcutsDialog(); }, "keyboard", false);
+    act("settings.pen", "Pen and tablet...", "Settings", {}, [this] { preferences(int(PreferencesDialog::Pen)); }, "tablet", false);
 
     // Canvas
     act("canvas.size", "Canvas size...", "Canvas", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C), [this] { canvasSize(); });
@@ -256,26 +269,40 @@ void MainWindow::createActions() {
     act("layer.new", "New layer", "Layer", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N), [doc] { ops::addRasterLayer(*doc()); }, "layer-new");
     act("layer.newvector", "New linework layer", "Layer", {}, [doc] { ops::addVectorLayer(*doc()); }, "linework-new");
     act("layer.newfolder", "New folder", "Layer", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_G), [doc] { ops::addGroup(*doc()); }, "folder-new");
-    act("layer.duplicate", "Duplicate layer", "Layer", QKeySequence(Qt::CTRL | Qt::Key_J), [doc, cur] { if (auto* l = cur()) ops::duplicateLayer(*doc(), l->id); }, "duplicate");
-    act("layer.delete", "Delete layer", "Layer", QKeySequence(Qt::CTRL | Qt::Key_Delete), [doc, cur] { if (auto* l = cur()) ops::deleteLayer(*doc(), l->id); }, "trash");
+    act("layer.duplicate", "Duplicate layer", "Layer", QKeySequence(Qt::CTRL | Qt::Key_J), [doc] { ops::duplicateLayers(*doc(), doc()->selectedLayerIds()); }, "duplicate");
+    act("layer.delete", "Delete layer", "Layer", QKeySequence(Qt::CTRL | Qt::Key_Delete), [doc] { ops::deleteLayers(*doc(), doc()->selectedLayerIds()); }, "trash");
     act("layer.mergedown", "Merge down", "Layer", QKeySequence(Qt::CTRL | Qt::Key_E), [doc, cur] {
         QString err;
-        if (auto* l = cur()) if (!ops::mergeDown(*doc(), l->id, &err) && !err.isEmpty()) app()->showStatus(T(err));
+        if (doc()->selectedCount() > 1) {
+            if (!ops::mergeLayers(*doc(), doc()->selectedLayerIds(), &err) && !err.isEmpty()) app()->showStatus(T(err));
+        } else if (auto* l = cur()) {
+            if (!ops::mergeDown(*doc(), l->id, &err) && !err.isEmpty()) app()->showStatus(T(err));
+        }
     }, "merge");
+    act("layer.mergeselected", "Merge selected layers", "Layer", {}, [doc] {
+        QString err;
+        if (!ops::mergeLayers(*doc(), doc()->selectedLayerIds(), &err) && !err.isEmpty()) app()->showStatus(T(err));
+    });
     act("layer.mergevisible", "Merge visible", "Layer", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E), [doc] { ops::mergeVisible(*doc()); });
     act("layer.flatten", "Flatten image", "Layer", {}, [doc] { ops::flatten(*doc()); });
-    act("layer.group", "Put into a new folder", "Layer", QKeySequence(Qt::CTRL | Qt::Key_G), [doc, cur] { if (auto* l = cur()) ops::groupLayer(*doc(), l->id); });
+    act("layer.group", "Put into a new folder", "Layer", QKeySequence(Qt::CTRL | Qt::Key_G), [doc] { ops::groupLayers(*doc(), doc()->selectedLayerIds()); });
     act("layer.rasterize", "Rasterize layer", "Layer", {}, [doc, cur] { if (auto* l = cur()) ops::rasterize(*doc(), l->id); });
     act("layer.up", "Move layer up", "Layer", QKeySequence(Qt::CTRL | Qt::Key_BracketRight), [doc, cur] { if (auto* l = cur()) ops::moveLayerUp(*doc(), l->id); }, "up");
     act("layer.down", "Move layer down", "Layer", QKeySequence(Qt::CTRL | Qt::Key_BracketLeft), [doc, cur] { if (auto* l = cur()) ops::moveLayerDown(*doc(), l->id); }, "down");
     act("layer.clip", "Toggle clipping", "Layer", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G), [doc, cur] {
-        if (auto* l = cur()) { doc()->pushUndo(T("Clipping")); l = cur(); l->clipping = !l->clipping; doc()->layerChanged(l); doc()->layersChanged(); }
+        if (auto* l = cur()) {
+            const bool on = !l->clipping;
+            doc()->pushUndo(T("Clipping"));
+            for (quint32 id : doc()->selectedLayerIds())
+                if (Layer* x = doc()->layer(id)) { x->clipping = on; doc()->layerChanged(x); }
+            doc()->layersChanged();
+        }
     }, "clip");
     act("layer.alphalock", "Toggle preserve opacity", "Layer", QKeySequence(Qt::Key_Slash), [doc, cur] {
         if (auto* l = cur()) { doc()->pushUndo(T("Preserve opacity")); l = cur(); l->alphaLock = !l->alphaLock; doc()->layerChanged(l); doc()->layersChanged(); }
     }, "alpha-lock");
     act("layer.hide", "Show / hide layer", "Layer", {}, [doc, cur] {
-        if (auto* l = cur()) { doc()->pushUndo(T("Layer visibility"), "visibility"); l = cur(); l->visible = !l->visible; doc()->layerChanged(l); doc()->layersChanged(); }
+        if (auto* l = cur()) ops::setLayersVisible(*doc(), doc()->selectedLayerIds(), !l->visible);
     }, "eye");
     act("layer.fliph", "Flip layer horizontally", "Layer", {}, [doc, cur] { if (auto* l = cur()) ops::flipLayer(*doc(), l->id, true); });
     act("layer.flipv", "Flip layer vertically", "Layer", {}, [doc, cur] { if (auto* l = cur()) ops::flipLayer(*doc(), l->id, false); });
@@ -344,8 +371,8 @@ void MainWindow::createActions() {
     act("view.zoomout", "Zoom out", "View", QKeySequence(Qt::CTRL | Qt::Key_Minus), [view] { view()->zoomOut(); }, "minus");
     act("view.fit", "Fit to window", "View", QKeySequence(Qt::CTRL | Qt::Key_0), [view] { view()->fitToWindow(); }, "zoom");
     act("view.actual", "Actual pixels", "View", QKeySequence(Qt::CTRL | Qt::Key_1), [view] { view()->actualPixels(); }, "image");
-    act("view.rotl", "Rotate view left", "View", QKeySequence(Qt::Key_Minus), [view] { view()->rotateBy(-15); });
-    act("view.rotr", "Rotate view right", "View", QKeySequence(Qt::Key_Equal), [view] { view()->rotateBy(15); });
+    act("view.rotl", "Rotate view left", "View", QKeySequence(Qt::Key_Minus), [view] { view()->rotateBy(-app()->prefs().rotateStepDeg); });
+    act("view.rotr", "Rotate view right", "View", QKeySequence(Qt::Key_Equal), [view] { view()->rotateBy(app()->prefs().rotateStepDeg); });
     act("view.rotreset", "Reset rotation", "View", QKeySequence(Qt::Key_Backspace), [view] { view()->setRotation(0); }, "rotate");
     act("view.reset", "Reset view", "View", QKeySequence(Qt::Key_Home), [view] { view()->resetView(); }, "reset");
     act("view.flip", "Flip view horizontally", "View", QKeySequence(Qt::Key_H), [view] { view()->setFlipped(!view()->isFlipped()); }, "flip");
@@ -362,11 +389,25 @@ void MainWindow::createActions() {
     }, "grid", false);
     grid->setCheckable(true);
     grid->setChecked(app()->prefs().showPixelGrid);
+    auto toggle = [this](const QString& id, const QString& text, const QKeySequence& key, bool Preferences::*field, const QString& icon) {
+        QAction* a = act(id, text, "View", key, [field] {
+            app()->prefs().*field = !(app()->prefs().*field);
+            app()->preferencesChanged();
+        }, icon, false);
+        a->setCheckable(true);
+        a->setChecked(app()->prefs().*field);
+        connect(app(), &App::prefsChanged, a, [a, field] { a->setChecked(app()->prefs().*field); });
+    };
+    toggle("view.grid", "Grid", QKeySequence(Qt::CTRL | Qt::Key_Apostrophe), &Preferences::showGrid, "grid");
+    toggle("view.thirds", "Rule of thirds", {}, &Preferences::showThirds, {});
+    toggle("view.golden", "Golden ratio", {}, &Preferences::showGoldenRatio, {});
+    toggle("view.center", "Center lines", {}, &Preferences::showCenterLines, {});
+    act("view.gridsettings", "Grid settings...", "View", {}, [this] { preferences(int(PreferencesDialog::Canvas)); }, {}, false);
     act("view.panels", "Hide / show panels", "View", QKeySequence(Qt::Key_Tab), [this] { togglePanels(); }, {}, false);
     act("view.fullscreen", "Full screen", "View", QKeySequence(Qt::Key_F11), [this] { isFullScreen() ? showNormal() : showFullScreen(); }, {}, false);
     for (const QString& th : {QString("dark"), QString("gray"), QString("light")}) {
         QString label = th == "dark" ? "Dark theme" : th == "gray" ? "Gray theme" : "Light theme";
-        act("view.theme." + th, label, "View", {}, [th] {
+        act("view.theme." + th, label, "Settings", {}, [th] {
             app()->prefs().theme = th;
             Theme::apply(th, app()->prefs().uiFontSize);
             app()->preferencesChanged();
@@ -403,13 +444,13 @@ void MainWindow::createActions() {
     act("brush.smaller", "Smaller brush", "Tools", QKeySequence(Qt::Key_BracketLeft), [] {
         BrushLibrary* b = app()->brushes();
         BrushSettings s = b->current();
-        s.size = std::max(0.5, s.size / 1.15);
+        s.size = std::max(0.5, s.size / (1.0 + app()->prefs().brushStepPercent / 100.0));
         b->update(b->currentIndex(), s);
     }, {}, false);
     act("brush.bigger", "Bigger brush", "Tools", QKeySequence(Qt::Key_BracketRight), [] {
         BrushLibrary* b = app()->brushes();
         BrushSettings s = b->current();
-        s.size = std::min(5000.0, s.size * 1.15);
+        s.size = std::min(5000.0, s.size * (1.0 + app()->prefs().brushStepPercent / 100.0));
         b->update(b->currentIndex(), s);
     }, {}, false);
     act("color.swap", "Swap main and sub color", "Tools", QKeySequence(Qt::Key_X), [] { app()->swapColors(); }, "swap", false);
@@ -451,8 +492,7 @@ void MainWindow::createMenus() {
 
     QMenu* edit = mb->addMenu(T("&Edit"));
     for (const char* id : {"edit.undo", "edit.redo", "", "edit.cut", "edit.copy", "edit.copymerged", "edit.paste", "edit.pastenew",
-                           "", "edit.clear", "edit.fill", "", "edit.transform", "edit.warp", "edit.liquify", "", "edit.prefs",
-                           "edit.shortcuts"}) {
+                           "", "edit.clear", "edit.fill", "", "edit.transform", "edit.warp", "edit.liquify"}) {
         if (!*id) edit->addSeparator();
         else add(edit, id);
     }
@@ -468,7 +508,7 @@ void MainWindow::createMenus() {
     for (const char* id : {"layer.new", "layer.newvector", "layer.newfolder"}) add(layer, id);
     QMenu* adjLayer = layer->addMenu(Theme::icon("adjustment"), T("New adjustment layer"));
     for (int t = 0; t < int(AdjustmentType::Count); ++t) add(adjLayer, QStringLiteral("adjustlayer.%1").arg(t));
-    for (const char* id : {"", "layer.duplicate", "layer.delete", "", "layer.mergedown", "layer.mergevisible", "layer.flatten",
+    for (const char* id : {"", "layer.duplicate", "layer.delete", "", "layer.mergedown", "layer.mergeselected", "layer.mergevisible", "layer.flatten",
                            "layer.group", "layer.rasterize", "", "layer.up", "layer.down", "", "layer.clip", "layer.alphalock",
                            "layer.hide", "", "layer.fliph", "layer.flipv", "", "layer.mask", "layer.applymask",
                            "layer.deletemask", "", "layer.effects"}) {
@@ -491,18 +531,68 @@ void MainWindow::createMenus() {
 
     QMenu* viewM = mb->addMenu(T("&View"));
     for (const char* id : {"view.newview", "", "view.zoomin", "view.zoomout", "view.fit", "view.actual", "", "view.rotl", "view.rotr",
-                           "view.rotreset", "view.flip", "view.reset", "", "view.checker", "view.pixelgrid", "", "view.panels",
-                           "view.fullscreen"}) {
+                           "view.rotreset", "view.flip", "view.reset", "", "view.checker", "view.pixelgrid"}) {
         if (!*id) viewM->addSeparator();
         else add(viewM, id);
     }
-    QMenu* theme = viewM->addMenu(T("Theme"));
-    add(theme, "view.theme.dark");
-    add(theme, "view.theme.gray");
-    add(theme, "view.theme.light");
+    QMenu* gridM = viewM->addMenu(Theme::icon("grid"), T("Grid and guides"));
+    for (const char* id : {"view.grid", "view.thirds", "view.golden", "view.center", "", "view.gridsettings"}) {
+        if (!*id) gridM->addSeparator();
+        else add(gridM, id);
+    }
+    viewM->addSeparator();
+    add(viewM, "view.panels");
+    add(viewM, "view.fullscreen");
 
     QMenu* win = mb->addMenu(T("&Window"));
     win->setObjectName("windowMenu");
+
+    // ---- Settings: everything about the program itself
+    QMenu* setM = mb->addMenu(T("&Settings"));
+    add(setM, "edit.prefs");
+    add(setM, "edit.shortcuts");
+    add(setM, "settings.pen");
+    setM->addSeparator();
+    QMenu* langM = setM->addMenu(Theme::icon("language"), T("Language"));
+    auto* langGroup = new QActionGroup(langM);
+    for (const auto& l : {qMakePair(QStringLiteral("auto"), T("Automatic (as Windows)")), qMakePair(QStringLiteral("en"), QStringLiteral("English")),
+                          qMakePair(QStringLiteral("ru"), QString::fromUtf8("Русский"))}) {
+        QAction* a = langM->addAction(l.second);
+        a->setCheckable(true);
+        a->setChecked(app()->prefs().language == l.first);
+        langGroup->addAction(a);
+        const QString code = l.first;
+        connect(a, &QAction::triggered, this, [this, code] { switchLanguage(code); });
+    }
+    QMenu* themeM = setM->addMenu(Theme::icon("theme"), T("Theme"));
+    auto* themeGroup = new QActionGroup(themeM);
+    for (const char* id : {"view.theme.dark", "view.theme.gray", "view.theme.light"}) {
+        if (QAction* a = m_actions.value(id)) {
+            a->setCheckable(true);
+            a->setChecked(QString(id).endsWith(app()->prefs().theme));
+            themeGroup->addAction(a);
+            themeM->addAction(a);
+        }
+    }
+    connect(app(), &App::prefsChanged, themeM, [this] {
+        for (const char* id : {"view.theme.dark", "view.theme.gray", "view.theme.light"})
+            if (QAction* a = m_actions.value(id)) a->setChecked(QString(id).endsWith(app()->prefs().theme));
+    });
+    QMenu* tabM = setM->addMenu(Theme::icon("tablet"), T("Pen input"));
+    auto* tabGroup = new QActionGroup(tabM);
+    for (const auto& t : {qMakePair(QStringLiteral("wintab"), T("Wintab (like SAI, recommended)")), qMakePair(QStringLiteral("ink"), T("Windows Ink"))}) {
+        QAction* a = tabM->addAction(t.second);
+        a->setCheckable(true);
+        tabGroup->addAction(a);
+        const QString api = t.first;
+        connect(a, &QAction::triggered, this, [api] {
+            app()->prefs().tabletApi = api;
+            app()->preferencesChanged();
+            app()->showStatus(TabletInput::describe());
+        });
+        connect(tabM, &QMenu::aboutToShow, a, [a, api] { a->setChecked(TabletInput::active() == api); });
+    }
+
     QMenu* help = mb->addMenu(T("&Help"));
     for (const char* id : {"help.textures", "help.reloadtextures", "help.data", "", "help.about"}) {
         if (!*id) help->addSeparator();
@@ -514,7 +604,7 @@ void MainWindow::createToolbar() {
     QToolBar* tb = addToolBar(T("Main"));
     tb->setObjectName("mainToolbar");
     tb->setMovable(false);
-    tb->setIconSize(QSize(18, 18));
+    tb->setIconSize(QSize(app()->prefs().iconSize - 2, app()->prefs().iconSize - 2));
     for (const char* id : {"edit.undo", "edit.redo"}) tb->addAction(m_actions.value(id));
     tb->addSeparator();
     for (const char* id : {"select.none", "select.invert"}) tb->addAction(m_actions.value(id));
@@ -593,7 +683,14 @@ void MainWindow::createDocks() {
         auto* d = new QDockWidget(T(title), this);
         d->setObjectName(id);
         d->setWidget(w);
-        d->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
+        d->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+        // Plain title without the small float / close buttons: drag the title to move the
+        // panel out, double-click it to put it back. Panels are shown and hidden in Window.
+        auto* head = new QLabel(d->windowTitle(), d);
+        head->setObjectName("dockTitle");
+        head->setToolTip(T("Drag to move the panel. Double-click to put it back into the window."));
+        connect(d, &QDockWidget::windowTitleChanged, head, &QLabel::setText);
+        d->setTitleBarWidget(head);
         addDockWidget(area, d);
         m_docks << d;
         if (QMenu* wm = menuBar()->findChild<QMenu*>("windowMenu")) wm->addAction(d->toggleViewAction());
@@ -776,11 +873,12 @@ bool MainWindow::save(Document* d, bool saveAs) {
     if (saveAs || path.isEmpty() || !io::canKeepLayers(path)) {
         QString dir = path.isEmpty() ? app()->settings().value("paths/lastDir").toString() : QFileInfo(path).absolutePath();
         QString base = path.isEmpty() ? T("Untitled") : QFileInfo(path).completeBaseName();
-        QString suggested = dir.isEmpty() ? base + ".gxp" : dir + "/" + base + ".gxp";
-        QString selected;
+        const QString ext = app()->prefs().defaultFormat == "psd" ? ".psd" : ".gxp";
+        QString suggested = dir.isEmpty() ? base + ext : dir + "/" + base + ext;
+        QString selected = ext == ".psd" ? QStringLiteral("Photoshop (*.psd)") : QString();
         path = QFileDialog::getSaveFileName(this, T("Save as"), suggested, io::saveFilter(), &selected);
         if (path.isEmpty()) return false;
-        if (QFileInfo(path).suffix().isEmpty()) path += ".gxp";
+        if (QFileInfo(path).suffix().isEmpty()) path += ext;
         app()->settings().setValue("paths/lastDir", QFileInfo(path).absolutePath());
     }
     QString err;
@@ -820,9 +918,10 @@ void MainWindow::exportDialog() {
     int quality = 92;
     QString ext = QFileInfo(path).suffix().toLower();
     if (ext == "jpg" || ext == "jpeg" || ext == "webp") {
-        quality = Dialogs::askInt(this, T("Export"), T("Quality (1-100):"), app()->settings().value("export/quality", 92).toInt(), 1, 100);
+        quality = Dialogs::askInt(this, T("Export"), T("Quality (1-100):"), app()->prefs().jpegQuality, 1, 100);
         if (quality <= 0) return;
-        app()->settings().setValue("export/quality", quality);
+        app()->prefs().jpegQuality = quality;
+        app()->savePrefs();
     }
     QString err;
     QApplication::setOverrideCursor(Qt::WaitCursor);
@@ -1035,9 +1134,28 @@ void MainWindow::imageSize() {
     if (dlg.newSize() != d->size()) ops::scaleImage(*d, dlg.newSize(), dlg.smooth());
 }
 
-void MainWindow::preferences() {
-    PreferencesDialog dlg(this);
+void MainWindow::preferences(int page) {
+    PreferencesDialog dlg(this, PreferencesDialog::Page(std::clamp(page, 0, int(PreferencesDialog::PageCount) - 1)));
+    connect(&dlg, &PreferencesDialog::restartRequested, this, [this, &dlg] {
+        dlg.close();
+        QTimer::singleShot(0, this, &MainWindow::restartApp);
+    });
     dlg.exec();
+}
+
+void MainWindow::switchLanguage(const QString& code) {
+    if (app()->prefs().language == code) return;
+    app()->prefs().language = code;
+    app()->preferencesChanged();
+    if (QMessageBox::question(this, T("Language"), T("Restart GraphiX Paint now to switch the language?")) == QMessageBox::Yes)
+        QTimer::singleShot(0, this, &MainWindow::restartApp);
+}
+
+// Closes the program (asking to save pictures) and starts it again.
+void MainWindow::restartApp() {
+    if (!close()) return;
+    app()->shutdown();  // write every setting before the new copy reads them
+    QProcess::startDetached(QCoreApplication::applicationFilePath(), {});
 }
 
 void MainWindow::shortcutsDialog() {
@@ -1066,7 +1184,7 @@ void MainWindow::addRecent(const QString& path) {
     QStringList r = app()->settings().value("recent").toStringList();
     r.removeAll(path);
     r.prepend(path);
-    while (r.size() > 12) r.removeLast();
+    while (r.size() > std::max(0, app()->prefs().recentCount)) r.removeLast();
     app()->settings().setValue("recent", r);
     updateRecentMenu();
 }

@@ -54,7 +54,7 @@ jobs:
           $dist = "dist\GraphiX Paint"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Copy-Item build\GraphiX.exe $dist\
-          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw --no-compiler-runtime "$dist\GraphiX.exe"
+          windeployqt --release --translations ru,en --no-system-d3d-compiler --no-opengl-sw --no-compiler-runtime "$dist\GraphiX.exe"
           # MSVC runtime next to the program, so it starts on a clean Windows without installers
           $redist = Get-ChildItem "$env:VCToolsRedistDir\x64" -Directory -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
           if (-not $redist) { throw "MSVC runtime not found in $env:VCToolsRedistDir" }

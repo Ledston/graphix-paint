@@ -466,6 +466,7 @@ ToolPanel::ToolPanel(QWidget* parent) : QWidget(parent) {
     v->setContentsMargins(4, 4, 4, 4);
     v->setSpacing(4);
     auto* grid = new QGridLayout;
+    m_grid = grid;
     grid->setSpacing(1);
     m_group = new QButtonGroup(this);
     m_group->setExclusive(true);
@@ -478,18 +479,20 @@ ToolPanel::ToolPanel(QWidget* parent) : QWidget(parent) {
         if (!t) continue;
         auto* b = new QToolButton(this);
         b->setIcon(Theme::icon(t->iconName()));
-        b->setIconSize(QSize(20, 20));
+        b->setIconSize(QSize(app()->prefs().iconSize, app()->prefs().iconSize));
         b->setCheckable(true);
         b->setAutoRaise(true);
         QKeySequence ks = Shortcuts::instance().get("tool." + id);
         b->setToolTip(ks.isEmpty() ? T(t->name()) : QStringLiteral("%1  (%2)").arg(T(t->name()), ks.toString(QKeySequence::NativeText)));
         m_group->addButton(b);
         m_buttons.insert(id, b);
-        grid->addWidget(b, i / 8, i % 8);
+        m_buttonOrder << b;
         connect(b, &QToolButton::clicked, this, [id] { app()->tools()->setCurrent(id); });
         ++i;
     }
     v->addLayout(grid);
+    layoutToolButtons();
+    connect(app(), &App::prefsChanged, this, &ToolPanel::layoutToolButtons);
     v->addWidget(new BrushSlots(this));
 
     m_stack = new QStackedWidget(this);
@@ -504,6 +507,17 @@ ToolPanel::ToolPanel(QWidget* parent) : QWidget(parent) {
 
     connect(app()->tools(), &ToolManager::currentChanged, this, &ToolPanel::showOptionsFor);
     showOptionsFor(app()->tools()->current());
+}
+
+void ToolPanel::layoutToolButtons() {
+    const int s = app()->prefs().iconSize;
+    const int cols = s <= 22 ? 8 : s <= 28 ? 6 : 5;  // keep the panel narrow with big icons
+    int i = 0;
+    for (QToolButton* b : m_buttonOrder) {
+        b->setIconSize(QSize(s, s));
+        m_grid->addWidget(b, i / cols, i % cols);
+        ++i;
+    }
 }
 
 void ToolPanel::showOptionsFor(Tool* t) {

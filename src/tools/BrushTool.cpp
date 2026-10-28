@@ -64,7 +64,7 @@ void BrushTool::press(const PointerEvent& e) {
     if (!l->isEffectivelyVisible()) app()->showStatus(T("Painting on a hidden layer."));
 
     BrushLibrary* lib = app()->brushes();
-    m_usingEraser = e.eraser && lib->eraserIndex() >= 0;
+    m_usingEraser = e.eraser && app()->prefs().eraserEndUsesEraser && lib->eraserIndex() >= 0;
     StrokeContext ctx;
     ctx.doc = doc;
     ctx.layer = l;

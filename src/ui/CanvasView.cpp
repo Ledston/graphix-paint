@@ -4,6 +4,8 @@
 #include <QPaintEvent>
 #include <QPainter>
 #include <QTabletEvent>
+
+#include "app/TabletInput.h"
 #include <QtConcurrent/QtConcurrentMap>
 #include <QtMath>
 #include <algorithm>
@@ -379,10 +381,57 @@ void CanvasView::paintOverlays(QPainter& p) {
             p.restore();
         }
     }
+    drawCompositionGrid(p);
     drawGuides(p);
     drawSelection(p);
     app()->tools()->drawOverlay(p, this);
     drawBrushOutline(p);
+}
+
+// View > Grid and guides: a drawing grid and composition helpers. Only shown, never painted.
+void CanvasView::drawCompositionGrid(QPainter& p) {
+    const Preferences& pr = app()->prefs();
+    if (!pr.showGrid && !pr.showThirds && !pr.showGoldenRatio && !pr.showCenterLines) return;
+    const QRectF b(m_doc->bounds());
+    QRectF vis = visibleCanvas().boundingRect() & b;
+    if (vis.isEmpty()) return;
+    p.save();
+    p.setTransform(canvasToWidget(), true);
+    auto pen = [](QColor c, int alpha, qreal w = 1.0) {
+        c.setAlpha(alpha);
+        QPen q(c, w);
+        q.setCosmetic(true);
+        return q;
+    };
+    if (pr.showGrid && pr.gridSize > 0) {
+        const double step = pr.gridSize;
+        const double sub = step / std::max(1, pr.gridSubdivisions);
+        // skip the fine lines when they would be closer than 6 screen pixels
+        auto lines = [&](double st, const QPen& q) {
+            if (st * m_zoom < 6) return;
+            p.setPen(q);
+            for (double x = std::ceil(vis.left() / st) * st; x <= vis.right(); x += st) p.drawLine(QPointF(x, vis.top()), QPointF(x, vis.bottom()));
+            for (double y = std::ceil(vis.top() / st) * st; y <= vis.bottom(); y += st) p.drawLine(QPointF(vis.left(), y), QPointF(vis.right(), y));
+        };
+        if (pr.gridSubdivisions > 1) lines(sub, pen(pr.gridColor, 45));
+        lines(step, pen(pr.gridColor, 130));
+    }
+    auto vline = [&](double f) { p.drawLine(QPointF(b.left() + b.width() * f, b.top()), QPointF(b.left() + b.width() * f, b.bottom())); };
+    auto hline = [&](double f) { p.drawLine(QPointF(b.left(), b.top() + b.height() * f), QPointF(b.right(), b.top() + b.height() * f)); };
+    if (pr.showThirds) {
+        p.setPen(pen(QColor(255, 120, 60), 170, 1.2));
+        for (double f : {1.0 / 3, 2.0 / 3}) { vline(f); hline(f); }
+    }
+    if (pr.showGoldenRatio) {
+        p.setPen(pen(QColor(240, 200, 40), 170, 1.2));
+        for (double f : {0.381966, 0.618034}) { vline(f); hline(f); }
+    }
+    if (pr.showCenterLines) {
+        p.setPen(pen(QColor(60, 200, 120), 170, 1.2));
+        vline(0.5);
+        hline(0.5);
+    }
+    p.restore();
 }
 
 void CanvasView::drawGuides(QPainter& p) {
@@ -513,6 +562,7 @@ void CanvasView::drawBrushOutline(QPainter& p) {
     if (!m_inside) return;
     Tool* t = app()->tools()->active();
     if (!t || !t->showsBrushOutline() || !app()->prefs().showBrushOutline) return;
+    if (app()->prefs().hideCursorWhilePainting && app()->tools()->isDragging() && (m_tabletDown || m_mouseDown)) return;
     double r = t->outlineDiameter() * 0.5 * m_zoom;
     QPointF c = m_hover;
     p.save();
@@ -558,8 +608,11 @@ PointerEvent CanvasView::makeEvent(const QPointF& wpos, double pressure, Qt::Mou
 
 void CanvasView::tabletEvent(QTabletEvent* ev) {
     ev->accept();
+    if (TabletInput::shouldIgnore(ev)) return;  // same pen reported twice (Wintab + Windows Ink)
     m_sinceTablet.restart();
-    PointerEvent e = makeEvent(ev->position(), ev->pressure(), ev->button(), ev->buttons(), ev->modifiers(),
+    double pressure = ev->pressure();
+    if (const double th = app()->prefs().pressureThreshold; th > 0) pressure = std::max(0.0, (pressure - th) / (1.0 - th));
+    PointerEvent e = makeEvent(ev->position(), pressure, ev->button(), ev->buttons(), ev->modifiers(),
                                double(ev->timestamp()), true);
     e.tiltX = ev->xTilt();
     e.tiltY = ev->yTilt();
@@ -638,20 +691,21 @@ void CanvasView::mouseDoubleClickEvent(QMouseEvent* ev) {
 void CanvasView::wheelEvent(QWheelEvent* ev) {
     QPoint ad = ev->angleDelta();
     double steps = (ad.y() != 0 ? ad.y() : ad.x()) / 120.0;
+    if (app()->prefs().invertWheel) steps = -steps;
     if (steps == 0) return;
     const auto mods = ev->modifiers();
-    if (mods & Qt::ControlModifier) {
+    if ((mods & Qt::ControlModifier) && app()->prefs().ctrlWheelBrushSize) {
         BrushLibrary* b = app()->brushes();
         BrushSettings s = b->current();
         s.size = std::clamp(s.size * std::pow(1.12, steps), 0.5, 5000.0);
         b->update(b->currentIndex(), s);
         update();
     } else if (mods & Qt::AltModifier) {
-        rotateBy(15.0 * (steps > 0 ? 1 : -1));
+        rotateBy(app()->prefs().rotateStepDeg * (steps > 0 ? 1 : -1));
     } else if (mods & Qt::ShiftModifier) {
         panBy(QPointF(steps * 60, 0));
     } else if (app()->prefs().wheelZooms) {
-        zoomBy(std::pow(1.2, steps), ev->position());
+        zoomBy(std::pow(1.0 + app()->prefs().zoomStepPercent / 100.0, steps), ev->position());
     } else {
         panBy(QPointF(0, steps * 60));
     }

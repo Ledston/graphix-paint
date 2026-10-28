@@ -1,5 +1,6 @@
 #pragma once
 #include <QDateTime>
+#include <QSet>
 #include <QObject>
 #include <QSize>
 #include <QString>
@@ -47,7 +48,17 @@ public:
     GroupLayer* root() const { return m_state.root.get(); }
     Layer* currentLayer() const;
     quint32 currentLayerId() const { return m_state.currentId; }
-    void setCurrentLayer(quint32 id);
+    void setCurrentLayer(quint32 id);  // also makes it the only selected layer
+
+    // ---- several selected layers (Ctrl / Shift + click in the layer list) ----
+    // The current layer is always one of them. Lists are in stacking order, bottom first.
+    QList<quint32> selectedLayerIds() const;
+    QList<quint32> topLevelSelectedIds() const;  // without layers inside a selected folder
+    bool isLayerSelected(quint32 id) const;
+    int selectedCount() const { return int(selectedLayerIds().size()); }
+    void toggleLayerSelected(quint32 id);
+    void selectLayerRange(quint32 from, quint32 to);
+    void setLayerSelection(const QList<quint32>& ids, quint32 current);
     Layer* layer(quint32 id) const { return findLayer(root(), id); }
     quint32 newLayerId();
     QString uniqueLayerName(const QString& base) const;
@@ -117,6 +128,7 @@ private:
     void touch();
 
     DocState m_state;
+    QSet<quint32> m_selectedLayers;
     std::vector<HistoryEntry> m_undo, m_redo;
     int m_undoLimit = 200;
     std::unique_ptr<Projection> m_projection;

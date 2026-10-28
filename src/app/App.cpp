@@ -4,6 +4,8 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QThread>
+#include <QThreadPool>
 
 #include "app/BrushLibrary.h"
 #include "app/I18n.h"
@@ -51,8 +53,8 @@ void App::init() {
 
     // Textures live next to the program when possible (easy to find and add to),
     // otherwise in the user data folder.
-    m_texturesDir = dirWritable(exeDir + "/textures") ? exeDir + "/textures" : m_dataDir + "/textures";
-    TextureLibrary::instance().setRoot(m_texturesDir);
+    applyTexturesDir();
+    applyThreads();
 
     m_curve.set(m_prefs.pressureCurve);
     m_brushes = std::make_unique<BrushLibrary>(m_dataDir + "/brushes.json");
@@ -85,7 +87,26 @@ void App::savePrefs() {
     m_settings->sync();
 }
 
+QString App::defaultTexturesDir() const {
+    QString exeDir = QCoreApplication::applicationDirPath();
+    return dirWritable(exeDir + "/textures") ? exeDir + "/textures" : m_dataDir + "/textures";
+}
+
+void App::applyTexturesDir() {
+    QString want = m_prefs.texturesDir.isEmpty() ? defaultTexturesDir() : m_prefs.texturesDir;
+    if (!m_prefs.texturesDir.isEmpty() && !dirWritable(want)) want = defaultTexturesDir();
+    if (want == m_texturesDir) return;
+    m_texturesDir = want;
+    TextureLibrary::instance().setRoot(m_texturesDir);
+}
+
+void App::applyThreads() {
+    QThreadPool::globalInstance()->setMaxThreadCount(m_prefs.threads > 0 ? m_prefs.threads : QThread::idealThreadCount());
+}
+
 void App::preferencesChanged() {
+    applyTexturesDir();
+    applyThreads();
     savePrefs();
     Q_EMIT prefsChanged();
 }

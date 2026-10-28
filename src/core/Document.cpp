@@ -1,6 +1,7 @@
 #include "core/Document.h"
 
 #include <QFileInfo>
+#include <functional>
 #include "app/I18n.h"
 #include <QRandomGenerator>
 
@@ -68,8 +69,87 @@ Layer* Document::currentLayer() const {
 }
 
 void Document::setCurrentLayer(quint32 id) {
-    if (m_state.currentId == id) return;
+    const bool selChanged = !(m_selectedLayers.size() == 1 && m_selectedLayers.contains(id));
+    if (m_state.currentId == id && !selChanged) return;
     m_state.currentId = id;
+    m_selectedLayers = {id};
+    Q_EMIT currentLayerChanged();
+}
+
+QList<quint32> Document::selectedLayerIds() const {
+    QList<quint32> out;
+    const Layer* cur = currentLayer();
+    forEachLayer(root(), [&](Layer* l) {
+        if (m_selectedLayers.contains(l->id) || (cur && l == cur)) out << l->id;
+        return true;
+    });
+    return out;
+}
+
+QList<quint32> Document::topLevelSelectedIds() const {
+    QList<quint32> all = selectedLayerIds();
+    QSet<quint32> set(all.begin(), all.end());
+    QList<quint32> out;
+    for (quint32 id : all) {
+        const Layer* l = layer(id);
+        bool inside = false;
+        for (const GroupLayer* p = l ? l->parent : nullptr; p; p = p->parent)
+            if (set.contains(p->id)) inside = true;
+        if (!inside) out << id;
+    }
+    return out;
+}
+
+bool Document::isLayerSelected(quint32 id) const {
+    if (const Layer* cur = currentLayer(); cur && cur->id == id) return true;
+    return m_selectedLayers.contains(id) && layer(id);
+}
+
+void Document::toggleLayerSelected(quint32 id) {
+    if (!layer(id)) return;
+    if (const Layer* cur = currentLayer()) m_selectedLayers.insert(cur->id);
+    if (m_selectedLayers.contains(id) && m_selectedLayers.size() > 1) {
+        m_selectedLayers.remove(id);
+        if (m_state.currentId == id || !layer(m_state.currentId)) {
+            // the clicked layer was the active one: the topmost remaining becomes active
+            QList<quint32> rest = selectedLayerIds();
+            rest.removeAll(id);
+            if (!rest.isEmpty()) m_state.currentId = rest.last();
+        }
+    } else {
+        m_selectedLayers.insert(id);
+        m_state.currentId = id;
+    }
+    Q_EMIT currentLayerChanged();
+}
+
+void Document::selectLayerRange(quint32 from, quint32 to) {
+    if (!layer(to)) return;
+    if (!layer(from)) {
+        setCurrentLayer(to);
+        return;
+    }
+    // the order the rows have in the layer list: top layer first, folder before its contents
+    QList<quint32> order;
+    std::function<void(const GroupLayer*)> visual = [&](const GroupLayer* g) {
+        for (auto it = g->children.rbegin(); it != g->children.rend(); ++it) {
+            order << (*it)->id;
+            if ((*it)->isGroup()) visual(static_cast<const GroupLayer*>(it->get()));
+        }
+    };
+    visual(root());
+    int a = order.indexOf(from), b = order.indexOf(to);
+    if (a > b) std::swap(a, b);
+    m_selectedLayers.clear();
+    for (int i = a; i <= b; ++i) m_selectedLayers.insert(order[i]);
+    m_state.currentId = to;
+    Q_EMIT currentLayerChanged();
+}
+
+void Document::setLayerSelection(const QList<quint32>& ids, quint32 current) {
+    m_selectedLayers = QSet<quint32>(ids.begin(), ids.end());
+    if (layer(current)) m_selectedLayers.insert(current);
+    m_state.currentId = current;
     Q_EMIT currentLayerChanged();
 }
 

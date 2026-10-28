@@ -2,6 +2,8 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QIcon>
+#include <QLocale>
+#include <QTranslator>
 #include <QMessageBox>
 #include <QSettings>
 #include <QStandardPaths>
@@ -13,6 +15,7 @@
 
 #include "app/App.h"
 #include "app/I18n.h"
+#include "app/TabletInput.h"
 #include "core/Document.h"
 #include "core/Pixel.h"
 #include "io/Recovery.h"
@@ -56,17 +59,6 @@ private:
     }
 };
 
-QString readTabletApi(const char* argv0) {
-    // The platform plugin options must be chosen before the application object exists.
-    QString exeDir = QFileInfo(QString::fromLocal8Bit(argv0)).absolutePath();
-    QString ini;
-    if (QFileInfo::exists(exeDir + "/portable") || QFileInfo::exists(exeDir + "/portable.txt")) ini = exeDir + "/data/settings.ini";
-    else ini = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/settings.ini";
-    if (!QFileInfo::exists(ini)) return "ink";
-    QSettings s(ini, QSettings::IniFormat);
-    return s.value("prefs/tabletApi", "ink").toString();
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -78,31 +70,19 @@ int main(int argc, char** argv) {
     QCoreApplication::setAttribute(Qt::AA_CompressHighFrequencyEvents, false);
     QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
 
-    std::vector<char*> args(argv, argv + argc);
-    static char platformFlag[] = "-platform";
-    static char wintab[] = "windows:wintab";
-#ifdef Q_OS_WIN
-    bool hasPlatform = false;
-    for (int i = 1; i < argc; ++i)
-        if (QByteArray(argv[i]) == "-platform") hasPlatform = true;
-    if (!hasPlatform && readTabletApi(argv[0]) == "wintab") {
-        args.push_back(platformFlag);
-        args.push_back(wintab);
-    }
-#else
-    (void)platformFlag;
-    (void)wintab;
-    (void)readTabletApi;
-#endif
-    int ac = int(args.size());
-    args.push_back(nullptr);
-    GxApplication a(ac, args.data());
+    GxApplication a(argc, argv);
     a.setWindowIcon(QIcon(":/icons/app.png"));
 
     gx::App app;
     app.init();
+    // Qt's own texts (OK, Cancel, Yes, No, file dialogs) in the chosen language
+    static QTranslator qtTranslator;
+    if (gx::language() != "en" &&
+        qtTranslator.load(QLocale(gx::language()), "qtbase", "_", QCoreApplication::applicationDirPath() + "/translations"))
+        a.installTranslator(&qtTranslator);
     gx::Theme::apply(app.prefs().theme, app.prefs().uiFontSize);
     gx::Recovery::instance().start(app.dataDir() + "/recovery", app.prefs().autosaveMinutes);
+    gx::TabletInput::apply(app.prefs().tabletApi);  // Wintab like SAI, Windows Ink as fallback
 
     gx::MainWindow w;
     if (!app.settings().contains("window/geometry")) {
@@ -128,7 +108,7 @@ int main(int argc, char** argv) {
     QTimer::singleShot(0, &w, [&w, files] {
         w.checkRecovery();
         for (const QString& f : files) w.openFile(f);
-        if (!w.activeDocument()) {
+        if (!w.activeDocument() && gx::app()->prefs().newCanvasOnStart) {
             // Start with a ready canvas so you can draw right away.
             QSettings& s = gx::app()->settings();
             QSize size(s.value("newdoc/w", 3000).toInt(), s.value("newdoc/h", 3000).toInt());

@@ -29,6 +29,7 @@ public:
 
     QString dataDir() const { return m_dataDir; }
     QString texturesDir() const { return m_texturesDir; }
+    QString defaultTexturesDir() const;
     QSettings& settings() { return *m_settings; }
 
     Preferences& prefs() { return m_prefs; }
@@ -77,6 +78,8 @@ Q_SIGNALS:
     void statusMessage(const QString& text, int ms);
 
 private:
+    void applyTexturesDir();
+    void applyThreads();
     QString m_dataDir, m_texturesDir;
     std::unique_ptr<QSettings> m_settings;
     Preferences m_prefs;

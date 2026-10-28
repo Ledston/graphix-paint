@@ -71,7 +71,7 @@ private:
     bool m_rasterMode = true;
     FloatingPixels m_float;
     // non-raster layers are transformed from a clean copy
-    LayerPtr m_original;
+    std::vector<std::pair<quint32, LayerPtr>> m_originals;  // one or several layers
     QPointer<Document> m_doc;
     quint32 m_layerId = 0;
     QRectF m_src;

@@ -71,7 +71,9 @@ private:
     void editAdjustmentLayer(quint32 id);
     void canvasSize();
     void imageSize();
-    void preferences();
+    void preferences(int page = 0);
+    void switchLanguage(const QString& code);
+    void restartApp();
     void shortcutsDialog();
     void togglePanels();
     void about();
