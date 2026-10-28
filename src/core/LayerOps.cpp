@@ -971,8 +971,13 @@ void moveLayers(Document& doc, const QList<quint32>& ids, GroupLayer* newParent,
     const quint32 parentId = newParent->id;
     const bool toRoot = newParent == doc.root();
     // remember a layer to insert next to, since indexes change when layers leave
-    Layer* anchor = index < int(newParent->children.size()) ? newParent->children[size_t(std::max(0, index))].get() : nullptr;
-    const quint32 anchorId = anchor ? anchor->id : 0;
+    // the first layer at or above the drop place that stays where it is
+    quint32 anchorId = 0;
+    for (int k = std::max(0, index); k < int(newParent->children.size()); ++k)
+        if (!list.contains(newParent->children[size_t(k)]->id)) {
+            anchorId = newParent->children[size_t(k)]->id;
+            break;
+        }
     const quint32 current = doc.currentLayerId();
     doc.pushUndo("Move layer");
     GroupLayer* target = toRoot ? doc.root() : static_cast<GroupLayer*>(doc.layer(parentId));
@@ -985,7 +990,7 @@ void moveLayers(Document& doc, const QList<quint32>& ids, GroupLayer* newParent,
     }
     for (const LayerPtr& m : moving) m->parent->take(m->parent->indexOf(m.get()));
     int at = int(target->children.size());
-    if (anchorId && !list.contains(anchorId))
+    if (anchorId)
         if (Layer* a = doc.layer(anchorId); a && a->parent == target) at = target->indexOf(a);
     for (const LayerPtr& m : moving) target->insert(at++, m);
     doc.setLayerSelection(list, current);

@@ -19,8 +19,8 @@
 2-point	2 точки
 3-point	3 точки
 4K UHD 3840 x 2160	4K UHD 3840 x 2160
-90° left	90° влево
-90° right	90° вправо
+90° left	⟲ 90°
+90° right	⟳ 90°
 A drawing program in the spirit of PaintTool SAI 2.	Программа для рисования в духе PaintTool SAI 2.
 A layer in this file is too large.	Слой в этом файле слишком большой.
 A4 landscape, 300 dpi	A4 альбомная, 300 dpi
@@ -317,8 +317,8 @@ Fit to window	Вписать в окно
 Flat	Плоская
 Flats	Плоские цвета
 Flatten image	Свести изображение
-Flip H	Отразить по гор.
-Flip V	Отразить по верт.
+Flip H	Отразить ↔
+Flip V	Отразить ↕
 Flip canvas horizontally	Отразить холст по горизонтали
 Flip canvas vertically	Отразить холст по вертикали
 Flip horizontally	Отразить по горизонтали

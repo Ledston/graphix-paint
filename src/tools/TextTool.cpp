@@ -154,8 +154,11 @@ QWidget* TextTool::createOptions(QWidget* parent) {
     m_under = new QCheckBox(T("Underline"), w);
     row->addWidget(m_bold);
     row->addWidget(m_italic);
-    row->addWidget(m_under);
+    auto* row2 = new QHBoxLayout;  // two short rows keep the panel narrow
+    row2->addWidget(m_under);
+    row2->addStretch();
     v->addLayout(row);
+    v->addLayout(row2);
     m_align = new QComboBox(w);
     m_align->addItems({T("Align left"), T("Align center"), T("Align right")});
     v->addWidget(m_align);

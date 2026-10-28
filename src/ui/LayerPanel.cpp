@@ -1,6 +1,7 @@
 #include "ui/LayerPanel.h"
 
 #include <QComboBox>
+#include <QCursor>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLineEdit>
@@ -464,6 +465,10 @@ LayerPanel::LayerPanel(QWidget* parent) : QWidget(parent) {
         if (Layer* l = m_model->layerAt(i); l && l->isGroup()) static_cast<GroupLayer*>(l)->expanded = false;
     });
     connect(m_tree, &QTreeView::doubleClicked, this, [this](const QModelIndex& i) {
+        // a quick double click on the eye only toggles visibility twice, no window
+        const QPoint at = m_tree->viewport()->mapFromGlobal(QCursor::pos());
+        const QRect r = m_tree->visualRect(i);
+        if (LayerDelegate::eyeRect(r).adjusted(-2, -8, 4, 8).contains(at)) return;
         if (Layer* l = m_model->layerAt(i)) openProperties(l->id);
     });
     connect(m_tree, &QTreeView::customContextMenuRequested, this, &LayerPanel::contextMenu);

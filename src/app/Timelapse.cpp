@@ -119,7 +119,7 @@ void Timelapse::capture(Document* d) {
     if (it == m_docs.end() || !it->recording) return;
     QImage img;
     // the whole picture, about 1600 px across
-    for (int i = 0; i < 200 && !d->projection()->thumbnail(1600, 50.0, img); ++i) {}
+    for (int i = 0; i < 60 && !d->projection()->thumbnail(1600, 50.0, img); ++i) {}
     if (img.isNull()) return;
     QDir().mkpath(it->dir);
     const QString file = QStringLiteral("%1/frame_%2.jpg").arg(it->dir).arg(it->frames, 6, 10, QChar('0'));

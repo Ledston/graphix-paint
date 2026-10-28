@@ -467,6 +467,40 @@ static void testLineartColoring() {
     }
 }
 
+static void testMultiLayerOps() {
+    Document doc(QSize(64, 64));
+    QList<quint32> ids;
+    for (int i = 0; i < 4; ++i) {
+        auto l = std::make_shared<RasterLayer>();
+        l->id = doc.newLayerId();
+        l->name = QString("L%1").arg(i + 1);
+        l->pixels.fillRect(QRect(i * 10, 0, 8, 8), 0xff000000u | quint32(i * 40));
+        doc.root()->insert(i, l);
+        ids << l->id;
+    }
+    auto order = [&] {
+        QStringList n;
+        for (auto& c : doc.root()->children) n << c->name;
+        return n.join(',');
+    };
+    CHECK(order() == "L1,L2,L3,L4");
+    ops::moveLayers(doc, {ids[0], ids[1]}, doc.root(), 4);  // to the top
+    CHECK(order() == "L3,L4,L1,L2");
+    ops::moveLayers(doc, {ids[0], ids[1]}, doc.root(), 1);  // between L3 and L4
+    CHECK(order() == "L3,L1,L2,L4");
+    doc.undo();
+    doc.undo();
+    CHECK(order() == "L1,L2,L3,L4");
+    ops::duplicateLayers(doc, {ids[1], ids[2]});
+    CHECK(doc.root()->children.size() == 6);
+    CHECK(doc.selectedCount() == 2);
+    doc.undo();
+    GroupLayer* g = ops::groupLayers(doc, {ids[0], ids[2]});
+    CHECK(g && g->children.size() == 2 && order() == "L2,Folder 1,L4");
+    doc.undo();
+    CHECK(order() == "L1,L2,L3,L4");
+}
+
 int main(int argc, char** argv) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
@@ -484,6 +518,7 @@ int main(int argc, char** argv) {
     testCanvasOps();
     testChannels();
     testLineartColoring();
+    testMultiLayerOps();
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

@@ -12,6 +12,7 @@
 #include <QMouseEvent>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QStackedWidget>
 #include <QTimer>
 #include <cmath>
 #include <cstdio>
@@ -152,10 +153,21 @@ int main(int argc, char** argv) {
         if (t->id() == "text") key(v, Qt::Key_A);
         app()->tools()->commitPending();
         pump(60);
-        if (t->id() == "brush" || t->id() == "transform" || t->id() == "liquify" || t->id() == "gradient")
+        if (t->id() == "brush" || t->id() == "transform" || t->id() == "liquify" || t->id() == "gradient" || t->id() == "fill")
             w.grab().save(QString("%1/tool_%2.png").arg(g_out, safeName(t->id())));
     }
     app()->tools()->setCurrent("brush");
+    if (qEnvironmentVariableIsSet("GX_DUMP_WIDE")) {
+        // which tool options page makes the tool panel wide
+        for (Tool* t : app()->tools()->tools()) {
+            app()->tools()->setCurrent(t->id());
+            pump(10);
+            for (QStackedWidget* sw : w.findChildren<QStackedWidget*>())
+                if (sw->currentWidget() && sw->currentWidget()->minimumSizeHint().width() > 230)
+                    std::fprintf(stderr, "wide page %s: %d\n", qPrintable(t->id()), sw->currentWidget()->minimumSizeHint().width());
+        }
+        app()->tools()->setCurrent("brush");
+    }
 
     // ---- each theme ----
     for (const QString th : {"gray", "light", "dark"}) {
