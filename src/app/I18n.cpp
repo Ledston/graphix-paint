@@ -43,7 +43,12 @@ QString T(const char* english) { return T(QString::fromUtf8(english)); }
 QString T(const QString& english) {
     if (table().isEmpty()) return english;
     auto it = table().constFind(english);
-    return it == table().cend() ? english : it.value();
+    if (it != table().cend()) return it.value();
+    if (english.endsWith(QLatin1String("..."))) {  // "Curves..." from "Curves"
+        auto base = table().constFind(english.chopped(3));
+        if (base != table().cend()) return base.value() + QStringLiteral("...");
+    }
+    return english;
 }
 
 void setLanguage(const QString& code) {

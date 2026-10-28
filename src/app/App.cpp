@@ -10,6 +10,7 @@
 #include "app/BrushLibrary.h"
 #include "app/I18n.h"
 #include "app/Shortcuts.h"
+#include "app/Timelapse.h"
 #include "core/Textures.h"
 #include "tools/ToolManager.h"
 #include "ui/CanvasView.h"
@@ -66,6 +67,7 @@ void App::init() {
     m_settings->endGroup();
 
     m_tools = new ToolManager(this);
+    Timelapse::instance().setRoot(m_dataDir + "/timelapse");
 }
 
 void App::shutdown() {

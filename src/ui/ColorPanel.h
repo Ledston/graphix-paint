@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <functional>
 
+class QComboBox;
 class QLineEdit;
 class QStackedWidget;
 class QToolButton;
@@ -17,6 +18,7 @@ public:
     explicit ColorWheel(QWidget* parent = nullptr);
     void setColor(const QColor& c);
     QColor color() const { return QColor::fromHsvF(m_h, m_s, m_v); }
+    void setHarmony(const QList<float>& hues) { m_harmony = hues; update(); }  // extra marks on the ring (0..1)
     QSize sizeHint() const override { return QSize(220, 220); }
     int heightForWidth(int w) const override { return w; }
     bool hasHeightForWidth() const override { return true; }
@@ -38,6 +40,7 @@ private:
     int m_mode = 0;  // 1 ring, 2 square
     QImage m_ring, m_sq;
     float m_sqHue = -1;
+    QList<float> m_harmony;
 };
 
 // Horizontal slider with a painted gradient track
@@ -117,6 +120,9 @@ private:
     QLineEdit* m_hex;
     SwatchGrid* m_history;
     SwatchGrid* m_palette;
+    QComboBox* m_harmonyBox = nullptr;
+    SwatchGrid* m_harmonySw = nullptr;
+    void updateHarmony();
     bool m_updating = false;
 };
 

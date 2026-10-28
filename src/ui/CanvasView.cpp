@@ -83,6 +83,7 @@ CanvasView::CanvasView(std::shared_ptr<Document> doc, QWidget* parent, bool scra
     connect(app()->tools(), &ToolManager::overlayChanged, this, [this] { update(); });
     connect(app()->tools(), &ToolManager::activeChanged, this, [this] { refreshCursor(); update(); });
     connect(app(), &App::prefsChanged, this, [this] { invalidateAll(); refreshCursor(); });
+    connect(app(), &App::viewOptionsChanged, this, [this] { invalidateAll(); });
     connect(app()->brushes(), &BrushLibrary::brushChanged, this, [this] { if (m_inside) update(); });
     connect(app()->brushes(), &BrushLibrary::currentChanged, this, [this] { refreshCursor(); if (m_inside) update(); });
 
@@ -298,6 +299,7 @@ bool CanvasView::renderRect(const QRect& pr, int L) {
     const double lvScale = scale * double(1 << L);  // screen px per level px
     const bool rotated = std::fabs(m_cacheXf.m12()) > 1e-9 || std::fabs(m_cacheXf.m21()) > 1e-9;
     const bool nearest = (lvScale >= 1.999 && prefs.pixelatedZoomIn) || (!rotated && std::fabs(lvScale - 1.0) < 1e-6);
+    const bool gray = app()->grayscaleView() && !m_scratch;
     const int CW = m_doc->size().width(), CH = m_doc->size().height();
     const int LW = (CW + (1 << L) - 1) >> L, LH = (CH + (1 << L) - 1) >> L;
     const double inv2L = 1.0 / double(1 << L);
@@ -338,6 +340,11 @@ bool CanvasView::renderRect(const QRect& pr, int L) {
                     src = lerpPx(lerpPx(a, b, wx), lerpPx(c, d, wx), wy);
                 }
                 row[x] = overOpaque(src, bg);
+                if (gray) {
+                    const quint32 c = row[x];
+                    const quint32 l = (((c >> 16) & 255u) * 77u + ((c >> 8) & 255u) * 150u + (c & 255u) * 29u) >> 8;
+                    row[x] = 0xff000000u | (l << 16) | (l << 8) | l;
+                }
             }
         }
     };

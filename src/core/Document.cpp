@@ -162,7 +162,7 @@ QString Document::uniqueLayerName(const QString& base) const {
     QSet<QString> names;
     forEachLayer(root(), [&](Layer* l) { names.insert(l->name); return true; });
     for (int i = 1;; ++i) {
-        QString n = QStringLiteral("%1 %2").arg(base).arg(i);
+        QString n = QStringLiteral("%1 %2").arg(T(base)).arg(i);  // "Layer 3" / "Слой 3"
         if (!names.contains(n)) return n;
     }
 }

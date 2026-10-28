@@ -18,6 +18,10 @@
 #include "core/LayerOps.h"
 #include "ui/CanvasView.h"
 #include "ui/LayerPanel.h"
+#include "ui/ColorRangeDialog.h"
+#include "ui/LineartDialog.h"
+#include "ui/PreferencesDialog.h"
+#include <QToolButton>
 #include "ui/MainWindow.h"
 #include "ui/Theme.h"
 
@@ -277,6 +281,66 @@ int main(int argc, char** argv) {
         pump(50);
         CHECK(std::abs(px(d, (ids[0])).left() - (b0.left() + 10)) <= 1);
         CHECK(std::abs(px(d, (ids[1])).left() - (b1.left() + 10)) <= 1);
+    }, w);
+
+    scenario("make line art from a painting", [](MainWindow& w) {
+        Document* d = view()->doc();
+        paintSomething(d);
+        const int before = int(d->root()->children.size());
+        {
+            LineartDialog dlg(d, &w);
+            pump(400);  // the preview runs in the background
+            dlg.accept();
+        }
+        pump(50);
+        CHECK(int(d->root()->children.size()) == before + 1);
+        Layer* la = d->currentLayer();
+        CHECK(la && la->reference);
+        CHECK(opaquePixels(la) > 100);
+        d->undo();
+        CHECK(int(d->root()->children.size()) == before);
+    }, w);
+
+    scenario("color range selects the painted color", [](MainWindow& w) {
+        Document* d = view()->doc();
+        app()->setForeground(QColor(20, 40, 160));
+        paintSomething(d);
+        {
+            ColorRangeDialog dlg(d, &w);
+            pump(50);
+            dlg.accept();
+        }
+        CHECK(d->hasSelection());
+        CHECK(d->selection().pixel(400, 296) > 128);
+        CHECK(d->selection().pixel(10, 10) == 0);
+        app()->setForeground(Qt::black);
+    }, w);
+
+    scenario("settings window applies right away", [](MainWindow& w) {
+        const int oldIcon = app()->prefs().iconSize;
+        {
+            PreferencesDialog dlg(&w);
+            pump(30);
+            // the settings window edits a copy; change it the way the controls do
+            app()->prefs().iconSize = 28;
+            app()->preferencesChanged();
+        }
+        pump(50);
+        bool found = false;
+        for (QToolButton* b : w.findChildren<QToolButton*>())
+            if (b->iconSize() == QSize(28, 28)) found = true;
+        CHECK(found);
+        app()->prefs().iconSize = oldIcon;
+        app()->preferencesChanged();
+        // grid / guides toggle draws without problems
+        app()->prefs().showGrid = app()->prefs().showThirds = true;
+        app()->preferencesChanged();
+        view()->repaint();
+        app()->prefs().showGrid = app()->prefs().showThirds = false;
+        app()->preferencesChanged();
+        app()->setGrayscaleView(true);
+        view()->repaint();
+        app()->setGrayscaleView(false);
     }, w);
 
     std::fprintf(stderr, "%d passed, %d failed\n", g_pass, g_fail);

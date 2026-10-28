@@ -27,6 +27,10 @@ if(TARGET Qt6::GuiPrivate)
   target_link_libraries(gxcore PUBLIC Qt6::GuiPrivate)
 endif()
 
+if(WIN32)
+  target_link_libraries(gxcore PUBLIC mfplat mfreadwrite mfuuid ole32)  # timelapse video export
+endif()
+
 if(MSVC)
   target_compile_options(gxcore PUBLIC /W3 /MP /utf-8 /permissive- /Zc:__cplusplus)
   target_compile_definitions(gxcore PUBLIC NOMINMAX _USE_MATH_DEFINES)

@@ -112,10 +112,10 @@ LineartDialog::LineartDialog(Document* doc, QWidget* parent) : QDialog(parent), 
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    scroll->setFixedWidth(330);
+    scroll->setFixedWidth(370);
     auto* body = new QWidget;
     auto* v = new QVBoxLayout(body);
-    v->setContentsMargins(0, 0, 6, 0);
+    v->setContentsMargins(0, 0, 14, 0);
     scroll->setWidget(body);
     auto* right = new QVBoxLayout;
     right->addWidget(scroll, 1);
@@ -269,7 +269,7 @@ LineartDialog::LineartDialog(Document* doc, QWidget* parent) : QDialog(parent), 
 
     auto* res = group(T("Result"));
     m_hideSource = new QCheckBox(T("Hide the original layer"), body);
-    m_vector = new QCheckBox(T("Make editable linework (every line can be changed)"), body);
+    m_vector = new QCheckBox(T("Editable linework layer"), body);
     m_vector->setToolTip(T("Creates a linework layer: change points, thickness, pressure and color of each line with the linework tools."));
     res->addWidget(m_hideSource);
     res->addWidget(m_vector);
@@ -277,6 +277,10 @@ LineartDialog::LineartDialog(Document* doc, QWidget* parent) : QDialog(parent), 
     static_cast<QLabel*>(res->itemAt(res->count() - 1)->widget())->setWordWrap(true);
     static_cast<QLabel*>(res->itemAt(res->count() - 1)->widget())->setObjectName("sectionTitle");
     v->addStretch();
+    for (QComboBox* cb : body->findChildren<QComboBox*>()) {
+        cb->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        cb->setMinimumContentsLength(8);
+    }
 
     auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     bb->button(QDialogButtonBox::Ok)->setText(T("Make line art"));

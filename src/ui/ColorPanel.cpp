@@ -4,6 +4,7 @@
 #include <QFileDialog>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QComboBox>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
@@ -97,6 +98,17 @@ void ColorWheel::paintEvent(QPaintEvent*) {
     p.drawEllipse(hm, (R - r) / 2 - 1, (R - r) / 2 - 1);
     p.setPen(QPen(Qt::white, 1));
     p.drawEllipse(hm, (R - r) / 2 - 1, (R - r) / 2 - 1);
+    // color harmony marks
+    for (float hh : m_harmony) {
+        const double ha = hh * 2 * M_PI;
+        QPointF pm = c + QPointF(std::cos(ha), -std::sin(ha)) * ((R + r) / 2);
+        p.setPen(QPen(Qt::black, 1.5));
+        p.setBrush(QColor::fromHsvF(hh, 1, 1));
+        p.drawEllipse(pm, (R - r) / 2 - 3, (R - r) / 2 - 3);
+        p.setPen(QPen(Qt::white, 1));
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(pm, (R - r) / 2 - 3, (R - r) / 2 - 3);
+    }
     QPointF sm(sq.left() + m_s * sq.width(), sq.top() + (1 - m_v) * sq.height());
     p.setPen(QPen(m_v > 0.5 && m_s < 0.5 ? Qt::black : Qt::white, 1.6));
     p.drawEllipse(sm, 5, 5);
@@ -347,6 +359,29 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent) {
         connect(m_sl[i], &GradientSlider::released, this, [] { app()->pushColorHistory(app()->foreground()); });
     }
 
+    auto* hrow = new QHBoxLayout;
+    auto* hlab = new QLabel(T("Harmony"), this);
+    hlab->setObjectName("sectionTitle");
+    hrow->addWidget(hlab);
+    m_harmonyBox = new QComboBox(this);
+    m_harmonyBox->addItems({T("Off"), T("Complementary"), T("Split complementary"), T("Triad"), T("Analogous"), T("Square"),
+                            T("Light and dark")});
+    m_harmonyBox->setToolTip(T("Shows colors that go well with the main color"));
+    m_harmonyBox->setCurrentIndex(app()->settings().value("colors/harmony", 0).toInt());
+    hrow->addWidget(m_harmonyBox, 1);
+    v->addLayout(hrow);
+    m_harmonySw = new SwatchGrid(this, 18);
+    m_harmonySw->setToolTip(T("Click a color to use it"));
+    v->addWidget(m_harmonySw);
+    connect(m_harmonyBox, &QComboBox::currentIndexChanged, this, [this](int i) {
+        app()->settings().setValue("colors/harmony", i);
+        updateHarmony();
+    });
+    connect(m_harmonySw, &SwatchGrid::picked, this, [](const QColor& c) {
+        app()->setForeground(c);
+        app()->pushColorHistory(c);
+    });
+
     auto* hl = new QLabel(T("Recent colors"), this);
     hl->setObjectName("sectionTitle");
     v->addWidget(hl);
@@ -381,6 +416,46 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent) {
     syncFromApp();
 }
 
+void ColorPanel::updateHarmony() {
+    if (!m_harmonyBox) return;
+    const int kind = m_harmonyBox->currentIndex();
+    m_harmonySw->setVisible(kind > 0);
+    QColor c = app()->foreground();
+    float h, s, v;
+    c.getHsvF(&h, &s, &v);
+    if (h < 0) h = m_wheel->color().hsvHueF() >= 0 ? m_wheel->color().hsvHueF() : 0.f;
+    QList<float> offsets;
+    switch (kind) {
+    case 1: offsets = {0.5f}; break;
+    case 2: offsets = {150.f / 360.f, 210.f / 360.f}; break;
+    case 3: offsets = {1.f / 3.f, 2.f / 3.f}; break;
+    case 4: offsets = {-30.f / 360.f, 30.f / 360.f, -60.f / 360.f, 60.f / 360.f}; break;
+    case 5: offsets = {0.25f, 0.5f, 0.75f}; break;
+    default: break;
+    }
+    QList<float> hues;
+    for (float o : offsets) hues << float(std::fmod(h + o + 1.f, 1.f));
+    m_wheel->setHarmony(hues);
+    QList<QColor> sw;
+    if (kind == 6) {
+        // the same color in light and dark steps (for shading)
+        for (int i = 0; i < 8; ++i) {
+            const float t = i / 7.f;
+            sw << QColor::fromHsvF(std::fmod(h + (t - 0.5f) * 0.06f + 1.f, 1.f), std::clamp(s * (0.55f + 0.7f * t), 0.f, 1.f),
+                                   std::clamp(1.f - t * 0.82f, 0.f, 1.f));
+        }
+    } else if (kind > 0) {
+        QList<float> all = {h};
+        all << hues;
+        for (float hh : all) {
+            sw << QColor::fromHsvF(hh, s, v);
+            sw << QColor::fromHsvF(hh, s * 0.55f, std::min(1.f, v + 0.2f));  // lighter
+            sw << QColor::fromHsvF(hh, std::min(1.f, s * 1.1f), v * 0.62f);   // darker
+        }
+    }
+    m_harmonySw->setColors(sw);
+}
+
 void ColorPanel::setColor(const QColor& c, QObject* source) {
     m_updating = true;
     app()->setForeground(c);
@@ -412,6 +487,7 @@ void ColorPanel::syncFromApp() {
     m_sl[5]->setGradient([c](double t) { return QColor(c.red(), c.green(), int(t * 255)); });
     if (!m_hex->hasFocus()) m_hex->setText(c.name());
     m_updating = false;
+    updateHarmony();
 }
 
 void ColorPanel::loadPalette() {

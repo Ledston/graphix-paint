@@ -11,7 +11,8 @@ namespace gx {
 
 QList<QPair<QString, QString>> filterList() {
     return {{"gaussian", "Gaussian blur"}, {"motion", "Motion blur"}, {"unsharp", "Unsharp mask"}, {"sharpen", "Sharpen"},
-            {"glow", "Glow"},           {"noise", "Noise"},     {"pixelate", "Pixelate"}};
+            {"glow", "Glow"},           {"noise", "Noise"},     {"pixelate", "Pixelate"},
+            {"screentone", "Screentone"}};
 }
 
 QJsonObject filterDefaults(const QString& id) {
@@ -22,6 +23,7 @@ QJsonObject filterDefaults(const QString& id) {
     if (id == "glow") return {{"radius", 20.0}, {"strength", 80.0}, {"threshold", 150.0}};
     if (id == "noise") return {{"amount", 10.0}, {"mono", true}, {"seed", 1}, {"size", 1.0}, {"blend", -1}, {"fill", false}};
     if (id == "pixelate") return {{"cell", 8}};
+    if (id == "screentone") return {{"cell", 8.0}, {"angle", 45.0}, {"shape", 0}, {"transparent", true}, {"contrast", 0.0}};
     return {};
 }
 
@@ -135,6 +137,30 @@ void applyFilter(const QString& id, const QJsonObject& p, std::vector<float>& bu
                     for (int k = 0; k < 3; ++k) g[k] = clamp01(0.5f + n[k] * amt * 2.f);
                     g[3] = 1.f;
                     blendRowAtop(BlendMode(blend), o, g, 1);
+                }
+            }
+        });
+    } else if (id == "screentone") {
+        // shades become printed dots / lines in black ink, like manga screentone
+        const double cell = std::max(2.0, p.value("cell").toDouble(8));
+        const double angle = p.value("angle").toDouble(45);
+        const int shape = p.value("shape").toInt(0);
+        const bool transparent = p.value("transparent").toBool(true);
+        const float contrast = float(p.value("contrast").toDouble(0)) / 100.f;  // -1..1
+        parallelFor(h, [&](int y) {
+            for (int x = 0; x < w; ++x) {
+                float* o = &buf[(size_t(y) * w + x) * 4];
+                const float a = o[3];
+                if (a <= 0) continue;
+                float dark = 1.f - luminance(o[0], o[1], o[2]) / a;
+                if (contrast != 0) dark = clamp01((dark - 0.5f) * (1.f + contrast * 2.f) + 0.5f);
+                const float cov = halftoneCoverage(x + ox + 0.5, y + oy + 0.5, cell, angle, shape, dark);
+                if (transparent) {
+                    o[0] = o[1] = o[2] = 0.f;
+                    o[3] = cov * a;
+                } else {
+                    const float v = (1.f - cov) * a;
+                    o[0] = o[1] = o[2] = v;
                 }
             }
         });

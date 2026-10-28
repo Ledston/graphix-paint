@@ -1,5 +1,7 @@
 #include "core/LayerOps.h"
 
+#include "app/I18n.h"
+
 #include <QSet>
 
 #include <QImage>
@@ -178,7 +180,7 @@ Layer* duplicateLayer(Document& doc, quint32 id) {
     if (!l || !l->parent) return nullptr;
     auto c = l->clone();
     assignNewIds(doc, c.get());
-    c->name = l->name + " copy";
+    c->name = l->name + T(" copy");
     return insertLayer(doc, c, l, true, "Duplicate layer");
 }
 
@@ -500,7 +502,7 @@ GroupLayer* splitChannels(Document& doc, quint32 id) {
     for (int ch = 0; ch < 3; ++ch) {
         auto c = std::make_shared<RasterLayer>();
         c->id = doc.newLayerId();
-        c->name = QString::fromLatin1(names[ch]);
+        c->name = T(names[ch]);
         c->blend = ch == 0 ? BlendMode::Normal : BlendMode::LinearDodge;  // added together they give the picture back
         if (!b.isEmpty()) {
             std::vector<float> buf(size_t(b.width()) * b.height() * 4);
@@ -527,7 +529,7 @@ Layer* alphaAsLayer(Document& doc, quint32 id) {
     if (!rl) return nullptr;
     auto c = std::make_shared<RasterLayer>();
     c->id = doc.newLayerId();
-    c->name = rl->name + " alpha";
+    c->name = rl->name + T(" alpha");
     c->pixels.fillRect(doc.bounds(), 0xff000000u);
     QRect b = rl->pixels.tileBounds() & doc.bounds();
     if (!b.isEmpty()) {
@@ -878,7 +880,7 @@ void duplicateLayers(Document& doc, const QList<quint32>& ids) {
         if (!l || !l->parent) continue;
         auto c = l->clone();
         assignNewIds(doc, c.get());
-        c->name = l->name + " copy";
+        c->name = l->name + T(" copy");
         GroupLayer* p = l->parent;
         p->insert(p->indexOf(l) + 1, c);
         copies << c->id;

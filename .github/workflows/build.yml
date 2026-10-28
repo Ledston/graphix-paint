@@ -42,6 +42,11 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: build\gx_tests.exe
 
+      - name: UI scenario tests (warp, layers, line art, settings)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: build\gx_uiscenarios.exe
+
       - name: UI smoke test (every tool and menu command)
         env:
           QT_QPA_PLATFORM: offscreen
@@ -62,6 +67,7 @@ jobs:
           if (-not (Test-Path "$dist\vcruntime140.dll")) { throw "vcruntime140.dll missing" }
           if (-not (Test-Path "$dist\platforms\qwindows.dll")) { throw "Qt platform plugin missing" }
           if (-not (Test-Path "$dist\imageformats\qwebp.dll")) { throw "WebP plugin missing" }
+          if (-not (Test-Path "$dist\translations\qtbase_ru.qm")) { Write-Warning "Qt Russian translation missing (OK / Cancel stay in English)" }
           Get-ChildItem -Recurse $dist | Select-Object -ExpandProperty FullName
           Copy-Item README.md "$dist\README.md"
           Compress-Archive -Path "dist\GraphiX Paint" -DestinationPath GraphiX-Paint-win64.zip -Force

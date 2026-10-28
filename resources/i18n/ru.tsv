@@ -1,5 +1,8 @@
 # GraphiX Paint - Russian translation. Format: English<TAB>Russian, \n = new line.
+ alpha	 альфа
+ copy	 копия
  min	 мин
+%1 frames recorded. Video length in seconds:	Записано кадров: %1. Длина видео в секундах:
 %1 is already used by "%2". Move it here?	Сочетание %1 уже занято командой «%2». Перенести сюда?
 %1 x %2 px · %3 MP · %4 x %5 cm	%1 x %2 пикс · %3 Мп · %4 x %5 см
 &Canvas	&Холст
@@ -8,6 +11,7 @@
 &Help	Сп&равка
 &Layer	С&лой
 &Select	&Выделение
+&Settings	&Настройки
 &View	&Вид
 &Window	&Окно
 (empty)	(пусто)
@@ -28,12 +32,14 @@ Actual pixels	Реальный размер
 Actual pixels (100%)	Реальный размер (100%)
 Add (Shift)	Добавить (Shift)
 Add (reveal all)	Добавить (всё видно)
+Add alpha to selection	Добавить непрозрачное к выделению
 Add from selection	Добавить из выделения
 Add layer mask	Добавить маску слоя
 Add layer mask (from the selection if there is one)	Добавить маску слоя (из выделения, если оно есть)
 Add main color	Добавить основной цвет
 Add noise	Добавить шум
 Add point	Добавить точку
+Add to the colors	Добавить к цветам
 Add your own textures: Help > Open textures folder.	Свои текстуры: Справка > Открыть папку текстур.
 Adjustment	Коррекция
 Adjustment layer "%1" was not exported (PSD export keeps pixel layers only).	Корректирующий слой «%1» не экспортирован (в PSD сохраняются только пиксельные слои).
@@ -46,22 +52,34 @@ AirBrush	Аэрограф
 Align center	По центру
 Align left	По левому краю
 Align right	По правому краю
+All cores (%1)	Все ядра (%1)
 All files (*)	Все файлы (*)
 All supported (%1)	Все поддерживаемые (%1)
 All visible layers	Все видимые слои
 Alpha	Альфа
+Alpha channel as a gray layer	Альфа-канал как серый слой
+Alpha to selection	Альфа → выделение
+Also fill empty areas (for a noise layer)	Заполнять и пустые места (для слоя шума)
 Amount	Сила
+Analogous	Аналоговая
 Anchor	Привязка
 Angle	Угол
 Angle follows the stroke	Угол по направлению штриха
 Angle from pen tilt	Угол по наклону пера
 Angle jitter	Разброс угла
+Anime / render	Аниме / рендер
+Anime / render: sharp edges	Аниме / рендер: чёткие края
 Anti-aliased edges	Сглаженные края
 Anti-aliasing	Сглаживание
 Apply	Применить
 Apply layer mask	Применить маску слоя
+Around the canvas	Вокруг холста
 Assign	Назначить
+Auto-fill colors	Автозаливка цветами
+Auto-fill colors (flats)	Автозаливка цветами
+Auto-fill colors (flats)...	Автозаливка цветами...
 Automatic	Автоматически
+Automatic (as Windows)	Автоматически (как в Windows)
 Average	Среднее
 B5 comic page, 600 dpi	Страница комикса B5, 600 dpi
 BMP (*.bmp)	BMP (*.bmp)
@@ -80,6 +98,9 @@ Blur	Размытие
 Bold	Жирный
 Border selection	Рамка выделения
 Border selection...	Рамка выделения...
+Borders from all visible layers	Границы: все видимые слои
+Borders from reference layers (line art)	Границы: опорные слои (лайнарт)
+Borders from the current layer	Границы: текущий слой
 Brightness	Яркость
 Brightness / Contrast	Яркость / контраст
 Brightness/Contrast	Яркость/контраст
@@ -88,64 +109,94 @@ Bristle tip	Кончик-щетина
 Bristles	Щетинки
 Brush	Кисть
 Brush blending mode	Режим наложения кисти
+Brush cursor	Курсор кисти
 Brush pressure curve	Кривая нажима кисти
 Brush size	Размер кисти
 Brush slot %1	Ячейка кисти %1
 Brush slots. Double-click to rename, right-click for more.	Ячейки кистей. Двойной щелчок — переименовать, правый щелчок — ещё.
 Brush stroke	Мазок кистью
+Brushes and stabilizer	Кисти и стабилизатор
 Build up (airbrush style)	Накопление (как аэрограф)
+Buttons	Кнопки
 Cancel	Отмена
 Canvas	Холст
 Canvas (hold)	Холст (удерживать)
+Canvas and view	Холст и вид
 Canvas size	Размер холста
 Canvas size...	Размер холста...
 Cell size	Размер ячейки
+Center lines	Центральные линии
 Center on canvas	По центру холста
 Chalk	Мел
 Chalk tip	Кончик-мел
 Change brush size by dragging	Менять размер кисти перетаскиванием
+Change...	Изменить...
+Channels	Каналы
+Charcoal	Уголь
+Check values (grays)	Проверка в ч/б
 Checker colors	Цвета шахматки
 Checker size	Размер клетки
+Choose a preset...	Выберите шаблон...
 Choose color	Выбрать цвет
+Chromatic aberration	Хроматическая аберрация
+Chromatic aberration settings...	Настроить хроматическую аберрацию...
+Clean ink	Чистая тушь
 Clear	Очистить
 Clear layer	Очистить слой
 Clear list	Очистить список
 Clear palette	Очистить палитру
+Click a color to use it	Щёлкните по цвету, чтобы выбрать его
 Click a stroke to give it the main color.	Щёлкните по линии, чтобы перекрасить её в основной цвет.
 Click the canvas to add text, then type here.	Щёлкните по холсту, чтобы добавить текст, и печатайте здесь.
 Click to add points, drag to move, right-click removes, double-click resets.	Щелчок — добавить точку, перетаскивание — сдвинуть, правый щелчок — удалить, двойной щелчок — сброс.
 Click to pick a color. Drag with the right or middle button to pan, wheel to zoom.	Щелчок — взять цвет. Правая или средняя кнопка — двигать, колесо — масштаб.
+Click to pick the color to select	Щёлкните, чтобы взять цвет для выделения
 Click to place points, double-click or Enter to finish, Backspace removes the last point.	Щелчками ставьте точки, двойной щелчок или Enter — завершить, Backspace — убрать последнюю точку.
 Click under the bar to add a stop, drag stops to move them, double-click a stop to pick its color.	Щелчок под полосой — добавить точку, перетаскивание — сдвинуть, двойной щелчок — выбрать цвет точки.
 Clipping	Обтравка
 Clipping: use the layer (or folder) below as a mask	Обтравка: слой (или папка) ниже служит маской
 Close	Закрыть
+Close gaps	Закрывать щели
 Color	Цвет
 Color Balance	Цветовой баланс
 Color Burn	Затемнение основы
 Color Dodge	Осветление основы
 Color overlay	Наложение цвета
+Color range	Цветовой диапазон
+Color range...	Цветовой диапазон...
+Colored lines	Цветные линии
+Coloring line art: mark the line art as reference layer, choose "Borders from reference layers" and fill on a layer under the lines.	Покраска лайнарта: отметьте слой с линиями как опорный, выберите «Границы: опорные слои» и заливайте на слое под линиями.
 Colorize	Тонирование
 Colors	Цвета
+Colors from the picture	Цвета из картинки
+Comic / manga	Комикс / манга
 Command	Команда
+Complementary	Комплементарная
 Contiguous	Смежные пиксели
 Contract selection	Сжать выделение
 Contract selection...	Сжать выделение...
 Contrast	Контраст
 Copied to the clipboard.	Скопировано в буфер обмена.
 Copies	Копии
+Copies are made in the background and never replace your files. After a crash the program offers to restore them.	Копии делаются в фоне и никогда не заменяют ваши файлы. После сбоя программа предложит их восстановить.
 Copy	Копировать
 Copy merged	Копировать сведённое
+Could not create the video file.	Не удалось создать видеофайл.
 Could not export:\n%1	Не удалось экспортировать:\n%1
+Could not finish the video file.	Не удалось завершить видеофайл.
 Could not open %1:\n%2	Не удалось открыть %1:\n%2
 Could not read some pixels of "%1".	Не удалось прочитать часть пикселей «%1».
 Could not read the image:\n%1	Не удалось прочитать изображение:\n%1
 Could not save %1:\n%2	Не удалось сохранить %1:\n%2
 Could not write the file.	Не удалось записать файл.
+Could not write the video.	Не удалось записать видео.
+Creates a linework layer: change points, thickness, pressure and color of each line with the linework tools.	Создаёт слой линий: точки, толщину, нажим и цвет каждой линии можно менять инструментами линий.
 Crop to selection	Обрезать по выделению
 Crosshair in the brush outline	Перекрестие в контуре кисти
+Ctrl + mouse wheel changes the brush size	Ctrl + колесо мыши меняет размер кисти
 Current layer	Текущий слой
 Current: %1 x %2 px	Сейчас: %1 x %2 пикс
+Cursor	Курсор
 Curve	Кривая
 Curve presets...	Готовые кривые...
 Curves	Кривые
@@ -164,24 +215,31 @@ Darker Color	Темнее
 Decide later	Решить позже
 Default	По умолчанию
 Delete	Удалить
+Delete all recorded frames of this picture?	Удалить все записанные кадры этого рисунка?
 Delete brush	Удалить кисть
 Delete layer	Удалить слой
 Delete layer mask	Удалить маску слоя
+Delete layers	Удалить слои
 Delete point	Удалить точку
+Delete selected	Удалить выбранные
 Delete stop	Удалить точку
 Delete the brush "%1"?	Удалить кисть «%1»?
 Delete the recovery copies? This cannot be undone.	Удалить копии для восстановления? Это нельзя отменить.
+Delete the timelapse recording	Удалить запись таймлапса
 Density	Плотность
 Desaturate	Обесцветить
 Deselect	Снять выделение
+Detail	Детализация
 Diamond	Ромб
 Difference	Разница
 Dilution	Разбавление
 Disable	Выключить
 Discard	Не сохранять
 Display cache	Кэш отображения
+Dissolve (noise)	Затухание (шум)
 Distance	Расстояние
 Divide	Разделить
+Dots	Точки
 Drag a point up or down to change the pressure (thickness) there.	Тяните точку вверх или вниз, чтобы изменить нажим (толщину) в этом месте.
 Drag a stroke left or right to make it thinner or thicker.	Тяните линию влево или вправо, чтобы сделать её тоньше или толще.
 Drag inside to move, outside to rotate (Shift: 15° steps). Corners scale (Shift keeps proportions). Ctrl + corner distorts freely (perspective), Ctrl + edge skews. Click the canvas to start again.	Внутри — двигать, снаружи — вращать (Shift: шаг 15°). Углы масштабируют (Shift сохраняет пропорции). Ctrl + угол — свободное искажение (перспектива), Ctrl + край — наклон. Щелчок по холсту — начать заново.
@@ -190,6 +248,7 @@ Drag over strokes to delete them.	Проведите по линиям, чтоб
 Drag points to move them. Ctrl + drag a stroke moves it. Alt + click deletes a point, double-click adds one.	Перетаскивайте точки. Ctrl + перетаскивание линии — сдвинуть её. Alt + щелчок — удалить точку, двойной щелчок — добавить.
 Drag the numbered points to place vanishing points. Drag the pink dot to move the symmetry center, the white dot to rotate the axis (Shift: 15° steps).	Перетаскивайте пронумерованные точки схода. Розовая точка — центр симметрии, белая — поворот оси (Shift: шаг 15°).
 Drag the points to bend the image smoothly. Drag elsewhere to move the whole mesh. Works on the selection, or on the whole layer.	Тяните точки, чтобы плавно изогнуть изображение. В другом месте — сдвинуть всю сетку. Работает с выделением или со всем слоем.
+Drag to move the panel. Double-click to put it back into the window.	Тяните, чтобы переместить панель. Двойной щелчок — вернуть её в окно.
 Draw a closed shape: it is filled with the main color. Hold Alt to erase. Click points for straight edges, double-click to finish.	Нарисуйте замкнутую фигуру — она зальётся основным цветом. Alt — стирать. Щелчки дают прямые края, двойной щелчок — завершить.
 Draw here with the pen to test the pressure curve	Порисуйте здесь пером, чтобы проверить кривую нажима
 Drop images here, or use Open / Paste.	Перетащите сюда картинки или используйте «Открыть» / «Вставить».
@@ -197,6 +256,8 @@ Drop shadow	Тень
 Dropped image	Перетащенное изображение
 Duplicate	Дублировать
 Duplicate layer	Дублировать слой
+Duplicate layers	Дублировать слои
+Duplicate selected	Дублировать выбранные
 Dynamics	Динамика
 Edit	Правка
 Edit adjustment	Изменить коррекцию
@@ -206,6 +267,8 @@ Edit gradient	Изменить градиент
 Edit gradient...	Изменить градиент...
 Edit linework	Правка линий
 Edit text	Изменить текст
+Editable linework layer	Редактируемый слой линий
+Effects	Эффекты
 Effects of "%1" were merged into its pixels.	Эффекты слоя «%1» вписаны в его пиксели.
 Effects such as outline and shadow: Layer > Layer effects.	Эффекты вроде обводки и тени: Слой > Эффекты слоя.
 Effects work on pixel, linework and text layers.	Эффекты работают на пиксельных, линейных и текстовых слоях.
@@ -218,6 +281,7 @@ Erase linework	Стереть линии
 Erase selection	Стереть выделенное
 Eraser	Ластик
 Eraser (toggle)	Ластик (переключить)
+Every closed area of the line art gets its own flat color on a new layer under the lines. Then recolor the areas with the Fill tool ("Borders from the current layer").	Каждая замкнутая область лайнарта получит свой цвет на новом слое под линиями. Потом перекрасьте области заливкой («Границы: текущий слой»).
 Exclusion	Исключение
 Exit	Выход
 Expand	Расширить
@@ -230,6 +294,7 @@ Export brush...	Экспорт кисти...
 Export brushes	Экспорт кистей
 Export palette	Экспорт палитры
 Export palette (.gpl)...	Экспорт палитры (.gpl)...
+Export timelapse video...	Экспорт видео таймлапса...
 Export...	Экспорт...
 Exported %1	Экспортировано: %1
 Exposure	Экспозиция
@@ -239,15 +304,18 @@ Feather selection	Растушевать выделение
 Feather selection...	Растушевать выделение...
 Fi&lter	Ф&ильтр
 File	Файл
+Files and autosave	Файлы и автосохранение
 Fill	Заливка
 Fill flat colors under line art: keep "all visible layers" and paint on a layer below the lines.	Заливка под лайн: оставьте «все видимые слои» и заливайте на слое под линиями.
 Fill with main color	Залить основным цветом
+Fills can now take their borders from this layer.	Теперь заливка может брать границы с этого слоя.
 Filters	Фильтры
 Filters work on pixel layers.	Фильтры работают на пиксельных слоях.
 Fine paper	Тонкая бумага
 Fit	Вписать
 Fit to window	Вписать в окно
 Flat	Плоская
+Flats	Плоские цвета
 Flatten image	Свести изображение
 Flip H	Отразить по гор.
 Flip V	Отразить по верт.
@@ -258,46 +326,67 @@ Flip layer horizontally	Отразить слой по горизонтали
 Flip layer vertically	Отразить слой по вертикали
 Flip view horizontally	Отразить вид по горизонтали
 Folder	Папка
+Folders	Папки
 Foreground to Background	Основной — фоновый
 Foreground to Transparent	Основной — прозрачный
 Free transform	Свободная трансформация
 Fringe	Кайма
+From	От
 Full HD 1920 x 1080	Full HD 1920 x 1080
 Full screen	Полный экран
+Fuzziness	Разброс
 GIMP palette (*.gpl)	Палитра GIMP (*.gpl)
 Game texture 2048 x 2048	Игровая текстура 2048 x 2048
 Gamma	Гамма
 Gaussian blur	Размытие по Гауссу
 General	Общие
 Glow	Свечение
+Go under the lines	Заходить под линии
+Golden ratio	Золотое сечение
 Gradient	Градиент
 Gradient Map	Карта градиента
+Gradient overlay	Наложение градиента
+Grain (noise)	Зерно (шум)
+Grain size	Размер зерна
+GraphiX (.gxp) - keeps everything	GraphiX (.gxp) — сохраняет всё
 GraphiX - all layers and features (*.gxp)	GraphiX — все слои и возможности (*.gxp)
 GraphiX brush (*.gxbrush)	Кисть GraphiX (*.gxbrush)
 GraphiX brushes (*.gxbrush)	Кисти GraphiX (*.gxbrush)
 GraphiX did not close normally last time. These pictures can be restored:	В прошлый раз GraphiX закрылась некорректно. Эти рисунки можно восстановить:
 Gray	Серая
 Gray theme	Серая тема
+Grays	Оттенки серого
 Grayscale (check values)	Оттенки серого (проверка тона)
 Green	Зелёный
 Grid	Сетка
+Grid and guides	Сетка и направляющие
+Grid and guides are only shown on screen. They are never painted or saved into the picture.	Сетка и направляющие видны только на экране. Они не рисуются и не сохраняются в картинку.
+Grid color	Цвет сетки
+Grid settings...	Настройки сетки...
+Grid size	Шаг сетки
 Group into folder	Сгруппировать в папку
 Hand	Рука
+Hand-drawn look	Как от руки
 Hard (strong touch)	Жёсткая (сильный нажим)
 Hard Light	Жёсткий свет
 Hard Mix	Жёсткое смешение
 Hardness	Жёсткость
+Harmony	Гармония
 Height	Высота
 Help	Справка
 Hide / show panels	Скрыть / показать панели
+Hide the original layer	Скрыть исходный слой
+Hide the outline while painting	Прятать контур во время рисования
 Highlights	Света
 History	История
 How the brush puts paint on the canvas	Как кисть кладёт краску на холст
+How to apply	Как накладывать
 Hue	Тон
 Hue / Saturation	Цветовой тон / насыщенность
 Hue jitter	Разброс тона
 Hue/Saturation	Тон/насыщенность
 Icon	Значок
+Ignore light touches below	Не учитывать нажим слабее
 Image size	Размер изображения
 Image size...	Размер изображения...
 Import	Импорт
@@ -308,23 +397,34 @@ Import brushes...	Импорт кистей...
 Import layer	Импорт слоя
 Import palette	Импорт палитры
 Import palette (.gpl)...	Импорт палитры (.gpl)...
+In grays: check light and dark values	В оттенках серого: проверка светлых и тёмных мест
 Ink	Тушь
+Ink bleed	Растекание туши
+Inner glow	Внутреннее свечение
+Inner shadow	Внутренняя тень
 Input black	Вход: чёрный
 Input white	Вход: белый
+Inside are three folders: paper, brush and shapes. Put PNG or JPG pictures there and use Help > Reload textures.	Внутри три папки: paper, brush и shapes. Положите туда картинки PNG или JPG и выберите Справка > Перезагрузить текстуры.
 Instagram 1080 x 1350	Instagram 1080 x 1350
+Interface	Интерфейс
 Interface font size	Размер шрифта интерфейса
 Intersect (Shift+Alt)	Пересечь (Shift+Alt)
 Invalid canvas size.	Недопустимый размер холста.
 Invert	Инвертировать
+Invert alpha	Инвертировать альфу
 Invert selection	Инвертировать выделение
 Italic	Курсив
 JPEG (*.jpg *.jpeg)	JPEG (*.jpg *.jpeg)
+JPEG / WebP quality	Качество JPEG / WebP
+Keep big dark areas as solid ink	Большие тёмные области — сплошной тушью
 Keep opacity	Сохранять непрозрачность
 Keep proportions	Сохранять пропорции
 Keep the change editable as an adjustment layer instead of changing pixels	Оставить изменение редактируемым (корректирующий слой) вместо изменения пикселей
 Keyboard shortcuts	Горячие клавиши
 Keyboard shortcuts...	Горячие клавиши...
+Kind of picture	Что за картинка
 Label color	Цвет метки
+Language	Язык
 Language (restart needed)	Язык (нужен перезапуск)
 Lasso erase	Стирание лассо
 Lasso fill	Заливка лассо
@@ -335,22 +435,34 @@ Layer effects	Эффекты слоя
 Layer effects...	Эффекты слоя...
 Layer mask	Маска слоя
 Layer opacity	Непрозрачность слоя
+Layer properties	Свойства слоя
+Layer properties...	Свойства слоя...
 Layer visibility	Видимость слоя
 Layers	Слои
 Layers can only be merged into a pixel layer.	Слои можно объединять только в пиксельный слой.
+Leave the background empty	Не заливать фон
 Letter spacing	Межбуквенный интервал
 Levels	Уровни
 Light	Светлая
+Light and dark	Светлее и темнее
+Light areas become transparent	Светлые места становятся прозрачными
 Light pressure mixes more	Слабый нажим смешивает сильнее
 Light theme	Светлая тема
 Lighten	Замена светлым
 Lighter Color	Светлее
 Lightness	Яркость
+Line art	Лайнарт
+Line art is ready on its own layer. Paint colors on a layer under it.	Лайнарт готов на отдельном слое. Раскрашивайте на слое под ним.
+Line art: the current layer (no reference layer is marked).	Лайнарт: текущий слой (опорный слой не отмечен).
+Line art: the reference layers.	Лайнарт: опорные слои.
+Line color	Цвет линий
 Line spacing	Межстрочный интервал
 Linear	Линейный
 Linear Burn	Линейный затемнитель
 Linear Dodge (Add)	Линейный осветлитель (добавить)
 Linear Light	Линейный свет
+Lines	Линии
+Lines drift a little, like drawn by hand	Линии слегка гуляют, как нарисованные рукой
 Linework	Линии
 Linework color	Цвет линий
 Linework eraser	Ластик линий
@@ -362,6 +474,7 @@ Linework width	Толщина линий
 Liquify	Пластика
 Liquify works on pixel layers.	Пластика работает на пиксельных слоях.
 Lock layer	Закрепить слой
+Look	Внешний вид
 Luminosity	Яркость
 Magenta - Green	Пурпурный — зелёный
 Magic wand	Волшебная палочка
@@ -369,8 +482,16 @@ Main	Основной
 Main and sub color. Click the small arrow to swap (X), the corner to reset (D), the checker for the transparent color.	Основной и дополнительный цвет. Стрелка — поменять местами (X), уголок — сброс (D), шахматка — прозрачный цвет.
 Main color	Основной цвет
 Make adjustment layer	Сделать корректирующим слоем
+Make line art	Сделать лайнарт
+Make line art...	Сделать лайнарт...
+Mark the line art as reference, then fill on the layers under it with 'Borders from: reference layer'.	Отметьте лайнарт как опорный слой и заливайте на слоях под ним с «Границы: опорные слои».
 Marker	Маркер
+Memory	Память
 Merge down	Объединить с нижним
+Merge down (or merge the selected layers)	Объединить с нижним (или выбранные слои)
+Merge folder into one layer	Свести папку в один слой
+Merge layers	Объединить слои
+Merge selected layers	Объединить выбранные слои
 Merge visible	Объединить видимые
 Merged	Объединённый
 Mesh warp	Деформация сеткой
@@ -384,12 +505,15 @@ Mirror both	Зеркало по обеим осям
 Mirror left/right	Зеркало лево/право
 Mirror radial copies	Радиальные копии с зеркалом
 Mirror top/bottom	Зеркало верх/низ
+Mirrored: mistakes in proportions jump out	Отражение: ошибки в пропорциях сразу видны
 Mix (brush / watercolor)	Смешивание (кисть / акварель)
 Mix and test colors here with any brush. Right-click picks a color.	Смешивайте и пробуйте цвета любой кистью. Правый щелчок берёт цвет.
 Mixing	Смешивание
 Mode	Режим
 Monochrome	Монохромный
+More detail finds fainter lines	Больше детализации — больше слабых линий
 Motion blur	Размытие в движении
+Mouse	Мышь
 Mouse pressure	Нажим мыши
 Mouse wheel zooms (otherwise scrolls)	Колесо мыши масштабирует (иначе прокручивает)
 Move	Перемещение
@@ -401,14 +525,19 @@ Move right	Сдвинуть вправо
 Move selection	Переместить выделение
 Move text	Переместить текст
 Multiply	Умножение
+Name	Имя
 Name:	Имя:
 Navigator	Навигатор
 Nearest neighbour (pixel art)	По соседним пикселям (пиксель-арт)
+New	Создать
 New adjustment layer	Новый корректирующий слой
 New brush from	Новая кисть на основе
 New canvas	Новый холст
+New canvas size	Размер нового холста
 New folder	Новая папка
 New layer	Новый слой
+New layer from selection (copy)	Новый слой из выделения (копия)
+New layer from selection (cut)	Новый слой из выделения (вырезать)
 New linework layer	Новый слой линий
 New random pattern	Новый случайный узор
 New selection	Новое выделение
@@ -417,33 +546,46 @@ New text layer	Новый текстовый слой
 New view window	Новое окно вида
 New...	Создать...
 No brushes found in the file.	В файле нет кистей.
+No closed areas were found in the line art.	В лайнарте не нашлось замкнутых областей.
+No reference layer yet: right-click the line art layer and choose "Reference layer".	Опорного слоя пока нет: щёлкните правой кнопкой по слою с лайнартом и выберите «Опорный слой».
 No repeat	Без повтора
 No settings.	Нет настроек.
 No symmetry	Без симметрии
+No texture	Без текстуры
+Noise	Шум
 None	Нет
 Normal	Обычный
+Not a reference layer any more.	Слой больше не опорный.
 Not enough memory for this operation. Try a smaller brush, canvas or selection.	Не хватает памяти. Попробуйте кисть, холст или выделение поменьше.
 Not enough memory to build the merged image.	Не хватает памяти, чтобы собрать сведённое изображение.
 Not enough memory to flatten the image.	Не хватает памяти, чтобы свести изображение.
 Not enough memory to open this file.	Не хватает памяти, чтобы открыть этот файл.
 Not enough memory to save.	Не хватает памяти для сохранения.
 Not enough memory.	Не хватает памяти.
+Nothing was recorded yet. Turn on File > Timelapse > Record first.	Пока ничего не записано. Сначала включите Файл > Таймлапс > Записывать.
+Now in use: Windows Ink	Сейчас используется: Windows Ink
+Now in use: Windows Ink (no Wintab driver found)	Сейчас используется: Windows Ink (драйвер Wintab не найден)
+Now in use: Wintab	Сейчас используется: Wintab
 Nudge layer	Сдвиг слоя
 Off	Выкл.
 Offset	Смещение
 Offset X	Смещение X
 Offset Y	Смещение Y
+One color	Один цвет
 Only RGB and Grayscale PSD files are supported.	Поддерживаются только PSD в RGB и оттенках серого.
 Opacity	Непрозрачность
 Opacity jitter	Разброс непрозрачности
 Open	Открыть
+Open a new canvas when the program starts	Открывать новый холст при запуске
 Open recent	Недавние файлы
 Open reference	Открыть референс
 Open reference images	Открыть референсы
 Open settings folder	Открыть папку настроек
 Open textures folder	Открыть папку текстур
+Open timelapse frames folder	Открыть папку с кадрами таймлапса
 Open...	Открыть...
 Orange	Оранжевый
+Outer glow	Внешнее свечение
 Outline	Обводка
 Output black	Выход: чёрный
 Output white	Выход: белый
@@ -468,18 +610,28 @@ Paste as new layer	Вставить как новый слой
 Paste from the clipboard	Вставить из буфера обмена
 Pasted	Вставлено
 Pen	Ручка
+Pen and tablet	Перо и планшет
+Pen and tablet...	Перо и планшет...
+Pen input	Ввод с пера
 Pencil	Карандаш
+Pencil sketch	Карандашный набросок
+Performance	Производительность
 Persistence	Удержание цвета
 Perspective	Перспектива
 Perspective ruler: show and snap strokes (edit with the Ruler tool)	Линейка перспективы: показ и привязка штрихов (правка инструментом «Линейка»)
 Phone wallpaper 1080 x 2400	Обои для телефона 1080 x 2400
+Photo	Фото
+Photo: find contours	Фото: найти контуры
 Photoshop (*.psd *.psb)	Photoshop (*.psd *.psb)
 Photoshop (*.psd)	Photoshop (*.psd)
+Photoshop (.psd)	Photoshop (.psd)
+Picture	Картинка
 Pin Light	Точечный свет
 Pinch	Сжать
 Pixel grid	Пиксельная сетка
 Pixel grid at high zoom	Пиксельная сетка при большом увеличении
 Pixelate	Пикселизация
+Pixels	Пиксели
 Pixels:	Пиксели:
 Point	Точка
 Posterize	Постеризация
@@ -489,10 +641,15 @@ Preserve luminosity	Сохранять яркость
 Preserve opacity	Сохранять прозрачность
 Preserve opacity: paint only where the layer already has paint	Сохранять прозрачность: рисовать только там, где уже есть краска
 Preset	Шаблон
+Pressure	Нажим
 Pressure curve (all brushes without their own curve)	Кривая нажима (для всех кистей без своей кривой)
 Pressure smoothing	Сглаживание нажима
 Pressure:	Нажим:
+Pressure: %1	Нажим: %1
 Preview	Просмотр
+Preview on	Фон просмотра
+Processor	Процессор
+Program settings...	Настройки программы...
 Push	Сдвиг
 Put into a new folder	Поместить в новую папку
 Quality (1-100):	Качество (1-100):
@@ -505,6 +662,12 @@ Rasterize	Растрировать
 Rasterize layer	Растрировать слой
 Rasterize text layer	Растрировать текстовый слой
 Recent colors	Недавние цвета
+Recent files in the menu	Недавних файлов в меню
+Recognized as: %1	Распознано как: %1
+Recolor with the main color	Перекрасить в основной цвет
+Record timelapse	Записывать таймлапс
+Record timelapse (%1 frames)	Записывать таймлапс (кадров: %1)
+Recording the timelapse: every change is saved as a frame.	Идёт запись таймлапса: каждое изменение сохраняется кадром.
 Recover work	Восстановление работы
 Recovery copy every	Копия для восстановления каждые
 Recovery copy saved: %1	Копия для восстановления сохранена: %1
@@ -513,10 +676,16 @@ Red	Красный
 Redo	Повторить
 Redo (alternative)	Повторить (вариант)
 Reference	Референс
+Reference layer	Опорный слой
+Reference layer (fills take borders from it)	Опорный слой (заливка берёт с него границы)
+Reference layers: right-click the line art layer and choose "Reference layer".	Опорные слои: щёлкните правой кнопкой по слою с лайнартом и выберите «Опорный слой».
 Reflected	Зеркальный
 Reload textures	Перезагрузить текстуры
 Remove	Убрать
 Remove color	Убрать цвет
+Remove specks	Убрать соринки
+Remove white background	Убрать белый фон
+Rename	Переименовать
 Rename brush	Переименовать кисть
 Rename layer	Переименовать слой
 Rename...	Переименовать...
@@ -527,17 +696,23 @@ Resampling	Интерполяция
 Reselect	Вернуть выделение
 Reset	Сброс
 Reset all	Сбросить всё
+Reset all settings	Сбросить все настройки
+Reset all shortcuts	Сбросить все сочетания
 Reset colors (black / white)	Сбросить цвета (чёрный / белый)
 Reset points	Сбросить точки
 Reset rotation	Сбросить поворот
 Reset to default	Вернуть по умолчанию
 Reset view	Сбросить вид
 Resolution (dpi)	Разрешение (dpi)
+Restart GraphiX Paint now to switch the language?	Перезапустить GraphiX Paint сейчас, чтобы сменить язык?
 Restart GraphiX Paint to use the new language or tablet driver.	Перезапустите GraphiX Paint, чтобы применить новый язык или драйвер планшета.
 Restore	Восстановить
 Restore default brushes	Вернуть стандартные кисти
 Restore every shortcut to its default?	Вернуть все горячие клавиши по умолчанию?
+Result	Результат
+Return every setting to its default? Brushes and shortcuts are kept.	Вернуть все настройки по умолчанию? Кисти и горячие клавиши останутся.
 Reverse	Обратный
+Reverse the mouse wheel	Обратное направление колеса
 Right click / pen side button picks colors	Правый щелчок / боковая кнопка пера берёт цвет
 Right-click to add colors	Правый щелчок — добавить цвет
 Rope	Верёвка
@@ -549,9 +724,11 @@ Rotate the canvas by dragging	Вращать холст перетаскиван
 Rotate view	Поворот вида
 Rotate view left	Повернуть вид влево
 Rotate view right	Повернуть вид вправо
+Rotation step	Шаг поворота
 Rough grain	Грубое зерно
 Round	Круглая
 Roundness	Округлость
+Rule of thirds	Правило третей
 Rulers	Линейки
 S-curve	S-кривая
 Sample	Источник
@@ -563,11 +740,15 @@ Save	Сохранить
 Save as	Сохранить как
 Save as...	Сохранить как...
 Save changes to %1?	Сохранить изменения в %1?
+Save new pictures as	Сохранять новые рисунки как
 Saved %1	Сохранено: %1
+Saving	Сохранение
 Scale	Масштаб
+Scan cleanup	Чистка скана
 Scatter	Рассеивание
 Scratchpad	Черновик
 Screen	Экран
+Screentone	Скринтон
 Search...	Поиск...
 Select	Выделение
 Select a command, press the keys in the box and click Assign. Held keys (pan, zoom, rotate, eyedropper) work while the key is held down.	Выберите команду, нажмите клавиши в поле и нажмите «Назначить». Удерживаемые клавиши (движение, масштаб, поворот, пипетка) работают, пока клавиша зажата.
@@ -576,13 +757,18 @@ Select a pixel layer to fill.	Выберите пиксельный слой д�
 Select all	Выделить всё
 Select layer opacity	Выделить по непрозрачности слоя
 Select opacity (Ctrl+click thumbnail)	Выделить непрозрачное (Ctrl+щелчок по миниатюре)
+Select the line art layer first.	Сначала выберите слой с лайнартом.
+Select two or more layers to merge.	Выберите два или больше слоёв для объединения.
 Selection pen	Кисть выделения
+Settings	Настройки
+Settings and brushes	Настройки и кисти
 Shade	Тень (SAI)
 Shadows	Тени
 Shape	Форма
 Shape is the whole tip	Форма — весь кончик
 Shape strength	Сила формы
 Sharpen	Резкость
+Shift	Shift
 Shift + click picks the background color.	Shift + щелчок берёт фоновый цвет.
 Shift adds, Alt subtracts, Shift+Alt intersects.	Shift добавляет, Alt вычитает, Shift+Alt пересекает.
 Shine & Shade	Свет и тень (SAI)
@@ -591,29 +777,44 @@ Shortcut	Сочетание
 Shortcut in use	Сочетание занято
 Show / hide layer	Показать / скрыть слой
 Show brush outline	Показывать контур кисти
+Show grid	Показать сетку
 Show perspective ruler	Показать линейку перспективы
 Show selection edges	Показывать границы выделения
 Show sharp pixels when zoomed in (like SAI)	Чёткие пиксели при увеличении (как в SAI)
+Show the picture instead of the selection	Показать картинку вместо выделения
 Show transparency as a checkerboard	Показывать прозрачность шахматкой
+Showing the canvas in grays. The picture is not changed.	Холст показан в оттенках серого. Сама картинка не меняется.
+Shows colors that go well with the main color	Показывает цвета, которые сочетаются с основным
 Simplify	Упростить
 Size	Размер
 Size jitter	Разброс размера
+Sketch or scan	Набросок или скан
+Sketch or scan: clean up	Набросок или скан: почистить
+Sketchy second line	Вторая скетчевая линия
 Skin shading	Тени кожи
 Sky	Небо
+Small breaks in the lines up to this size count as closed	Разрывы в линиях до этого размера считаются закрытыми
+Small dots and dirt up to this size disappear	Точки и грязь до этого размера исчезают
 Smaller brush	Кисть меньше
 Smooth	Плавная
 Smooth (best for photos and paintings)	Плавная (лучше для фото и живописи)
 Smooth resampling	Плавная интерполяция
+Smoothness	Плавность
 Smudge	Палец
 Snap strokes to it	Привязывать штрихи
 Soft (light touch)	Мягкая (лёгкий нажим)
 Soft Eraser	Мягкий ластик
 Soft Light	Мягкий свет
+Soft charcoal	Мягкий уголь
+Soft different colors	Мягкие разные цвета
 Soft edges	Мягкие края
 Spacing	Интервал
 Spatter	Брызги
 Spectrum	Спектр
 Speed (S)	Скорость (S)
+Split channels	Разложить на каналы
+Split complementary	Расщеплённая комплементарная
+Split into red, green and blue layers	Разложить на красный, зелёный и синий слои
 Sponge	Губка
 Spray rate	Частота распыления
 Spray while pen is still	Распылять, пока перо стоит
@@ -621,6 +822,7 @@ Sprite sheet 1024 x 1024	Спрайт-лист 1024 x 1024
 Square	Квадрат
 Square 2000 x 2000	Квадрат 2000 x 2000
 Square 4000 x 4000	Квадрат 4000 x 4000
+Squares	Квадраты
 Stabilizer	Стабилизатор
 Stabilizer strength	Сила стабилизатора
 Stabilizer: Average = SAI 1-15 levels, Speed = SAI S-levels, Rope = pulled string	Стабилизатор: Среднее = уровни SAI 1-15, Скорость = S-уровни SAI, Верёвка = тянущаяся нить
@@ -628,6 +830,7 @@ Start	Начало
 Stop color	Цвет точки
 Strength	Сила
 Strokes stay editable: change points, pressure, width and color with the other linework tools. Uses the stabilizer from the top bar.	Линии остаются редактируемыми: точки, нажим, толщину и цвет меняют другие инструменты линий. Использует стабилизатор с верхней панели.
+Subdivisions	Деления
 Subtract	Вычитание
 Subtract (Alt)	Вычесть (Alt)
 Sunset	Закат
@@ -637,46 +840,70 @@ Symmetry	Симметрия
 Symmetry painting (move the center with the Ruler tool)	Симметричное рисование (центр двигается инструментом «Линейка»)
 System default	Как в системе
 TIFF (*.tif *.tiff)	TIFF (*.tif *.tiff)
+Tablet connection	Подключение планшета
 Tablet driver (restart needed)	Драйвер планшета (нужен перезапуск)
+Take from	Брать из
 Taper end	Сужение в конце
 Taper start	Сужение в начале
 Text	Текст
 Text layers can't be painted. Use Layer > Rasterize first.	На текстовом слое рисовать нельзя. Сначала Слой > Растрировать.
 Texture	Текстура
 Texture every dab	Текстура на каждый отпечаток
+Texture strength	Сила текстуры
 Textures folder:	Папка текстур:
 Textures reloaded.	Текстуры перезагружены.
 The area is too large to fill at once. Select a smaller area first.	Область слишком большая для заливки. Сначала выделите участок поменьше.
+The back of the pen erases	Обратный конец пера стирает
 The canvas size in the file is invalid.	Размер холста в файле неверный.
 The clipboard has no image.	В буфере обмена нет изображения.
 The file header is damaged.	Заголовок файла повреждён.
 The file is damaged.	Файл повреждён.
 The file is truncated.	Файл обрезан.
 The file was made by a newer version of GraphiX.	Файл создан более новой версией GraphiX.
+The frames are in: %1	Кадры лежат здесь: %1
 The layer data is damaged.	Данные слоя повреждены.
 The layer is empty.	Слой пуст.
 The layer is locked.	Слой закреплён.
+The line art goes on a new transparent layer above, so you can color under it.	Лайнарт ляжет на новый прозрачный слой сверху, под ним можно раскрашивать.
+The main color	Основной цвет
 The merged image could not be read.	Не удалось прочитать сведённое изображение.
+The middle mouse button always moves the canvas.	Средняя кнопка мыши всегда двигает холст.
+The original, faded	Оригинал, приглушённо
+The program restarts to switch the language. Open pictures are asked to be saved first.	Для смены языка программа перезапустится. Перед этим она предложит сохранить открытые рисунки.
 The selection is empty.	Выделение пустое.
 Theme	Тема
 There is no layer below to merge into.	Нет слоя ниже для объединения.
+Thickness	Толщина
+Thickness changes along the lines, like pen pressure	Толщина меняется вдоль линий, как от нажима пера
 This canvas has %1 megapixels. Empty areas cost no memory, but painting all of it needs a lot of RAM. Continue?	В холсте %1 мегапикселей. Пустые области не занимают память, но закрашивание всего холста потребует много ОЗУ. Продолжить?
+This computer could not start the H.264 video encoder.	На этом компьютере не запустился видеокодировщик H.264.
 This format keeps only the flattened image. Save as .gxp or .psd to keep the layers.	Этот формат хранит только сведённое изображение. Чтобы сохранить слои, используйте .gxp или .psd.
 This is not a GraphiX file.	Это не файл GraphiX.
 This is not a PSD file.	Это не файл PSD.
+Threads for filters and drawing	Потоков для фильтров и рисования
 Threshold	Порог
+Timelapse	Таймлапс
+Timelapse recording paused.	Запись таймлапса приостановлена.
 Tip shape	Форма кончика
+To	До
 Toggle clipping	Обтравка вкл/выкл
 Toggle mask	Маска вкл/выкл
 Toggle preserve opacity	Сохранение прозрачности вкл/выкл
 Tolerance	Допуск
 Too many layers.	Слишком много слоёв.
+Tool icon size	Размер значков инструментов
 Tools	Инструменты
 Transform	Трансформация
+Transparency	Прозрачность
+Transparency to layer mask	Прозрачность → маска слоя
+Transparency to mask	Прозрачность в маску
 Transparent	Прозрачный
+Transparent (checkerboard)	Прозрачный (шахматка)
 Transparent background (checkerboard)	Прозрачный фон (шахматка)
 Transparent color	Прозрачный цвет
+Triad	Триада
 Trim transparent edges	Обрезать прозрачные края
+Turn all off	Выключить все
 Twirl clockwise	Закрутить по часовой
 Twirl counter-clockwise	Закрутить против часовой
 Twitter / X post 1600 x 900	Пост Twitter / X 1600 x 900
@@ -685,38 +912,55 @@ Underline	Подчёркнутый
 Undo	Отменить
 Undo on the scratchpad	Отменить на черновике
 Undo steps	Шагов отмены
+Undo steps share unchanged parts of the picture, so even many steps use little memory.	Шаги отмены делят между собой неизменённые части рисунка, поэтому даже много шагов занимают мало памяти.
 Unexpected error.	Непредвиденная ошибка.
 Unsaved changes	Несохранённые изменения
 Unsharp mask	Контурная резкость
 Unsupported PSD version.	Неподдерживаемая версия PSD.
 Untitled	Без имени
+Updating...	Обновление...
 Use main and sub color	Основной и доп. цвет
 Use the main color	Основной цвет
 Uses the stabilizer from the top bar.	Использует стабилизатор с верхней панели.
 Value jitter	Разброс яркости
 Vertical text	Вертикальный текст
 Very large canvas	Очень большой холст
+Very small brushes always show a crosshair so the cursor never disappears.	У очень маленьких кистей всегда видно перекрестие, курсор не пропадает.
 Vibrance	Сочность
+Video export works on Windows.	Экспорт видео работает в Windows.
+Video export works on Windows. The frames are in: %1	Экспорт видео работает в Windows. Кадры лежат здесь: %1
 View	Вид
 Violet	Фиолетовый
+Visible	Видимый
 Vivid Light	Яркий свет
 Water Color	Акварель
 Watercolor paper	Акварельная бумага
 WebP (*.webp)	WebP (*.webp)
+White	Белый
 White paper	Белая бумага
 Width	Ширина
 Width in pixels:	Ширина в пикселях:
+Windows Ink	Windows Ink
 Windows Ink (recommended)	Windows Ink (рекомендуется)
+Windows video encoding (Media Foundation) is not available.	Кодирование видео Windows (Media Foundation) недоступно.
+Wintab (like SAI, recommended)	Wintab (как в SAI, рекомендуется)
 Wintab (older drivers)	Wintab (старые драйверы)
+Wintab works with Windows Ink switched off in the tablet driver. If the pen has no pressure, try the other option: the change works immediately.	Wintab работает и при выключенном Windows Ink в драйвере планшета. Если нажима нет, попробуйте другой вариант — переключение срабатывает сразу.
+Wobble	Дрожание
+Wobble length	Длина дрожания
 Works on the selection, or on the whole layer.	Работает с выделением или со всем слоем.
+Workspace	Рабочая область
 Workspace (dark / gray / light)	Рабочая область (тёмная / серая / светлая)
 Yellow	Жёлтый
 Yellow - Blue	Жёлтый — синий
 Zoom	Масштаб
+Zoom and rotation	Масштаб и поворот
 Zoom by dragging	Масштаб перетаскиванием
 Zoom in	Приблизить
 Zoom in (=)	Приблизить (=)
 Zoom out	Отдалить
+Zoom step	Шаг масштаба
+[ and ] change the size by	[ и ] меняют размер на
 cm	см
 inches	дюймы
 mm	мм

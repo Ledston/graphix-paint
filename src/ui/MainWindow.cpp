@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QDir>
 #include <QDialogButtonBox>
 #include <QCheckBox>
 #include <QFormLayout>
@@ -32,6 +33,8 @@
 
 #include "app/App.h"
 #include "app/TabletInput.h"
+#include "app/Timelapse.h"
+#include "io/VideoWriter.h"
 #include "app/BrushLibrary.h"
 #include "app/I18n.h"
 #include "app/Shortcuts.h"
@@ -61,6 +64,8 @@
 #include "ui/HistoryPanel.h"
 #include "ui/LayerPanel.h"
 #include "ui/LineartDialog.h"
+#include "ui/PreviewPanel.h"
+#include "ui/ColorRangeDialog.h"
 #include "ui/NavigatorPanel.h"
 #include "ui/PreferencesDialog.h"
 #include "ui/ReferencePanel.h"
@@ -214,7 +219,9 @@ void MainWindow::createTools() {
 
 QAction* MainWindow::act(const QString& id, const QString& text, const QString& category, const QKeySequence& key,
                          std::function<void()> fn, const QString& icon, bool needsDoc) {
-    auto* a = new QAction(T(text), this);
+    QString label = T(text);
+    if (label == text && text.endsWith("...")) label = T(text.chopped(3)) + "...";  // "Curves..." from "Curves"
+    auto* a = new QAction(label, this);
     if (!icon.isEmpty()) a->setIcon(Theme::icon(icon));
     connect(a, &QAction::triggered, this, [fn] { fn(); });
     Shortcuts::instance().registerAction(a, id, category, key);
@@ -237,6 +244,36 @@ void MainWindow::createActions() {
     act("file.saveas", "Save as...", "File", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S), [this, commit] { commit(); save(activeDocument(), true); });
     act("file.export", "Export...", "File", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S), [this, commit] { commit(); exportDialog(); });
     act("file.import", "Import as layer...", "File", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O), [this] { importAsLayer(); });
+    {
+        QAction* rec = act("timelapse.record", "Record timelapse", "File", {}, [doc] {
+            Timelapse& t = Timelapse::instance();
+            t.setRecording(doc(), !t.isRecording(doc()));
+            app()->showStatus(t.isRecording(doc()) ? T("Recording the timelapse: every change is saved as a frame.") : T("Timelapse recording paused."));
+        }, "timelapse");
+        rec->setCheckable(true);
+        auto sync = [this, rec] {
+            Document* d = activeDocument();
+            rec->setChecked(d && Timelapse::instance().isRecording(d));
+            const int n = d ? Timelapse::instance().frameCount(d) : 0;
+            rec->setText(n ? T("Record timelapse (%1 frames)").arg(n) : T("Record timelapse"));
+        };
+        connect(&Timelapse::instance(), &Timelapse::changed, rec, sync);
+        connect(app(), &App::activeViewChanged, rec, sync);
+    }
+    act("timelapse.export", "Export timelapse video...", "File", {}, [this] { exportTimelapse(); });
+    act("timelapse.folder", "Open timelapse frames folder", "File", {}, [this] {
+        if (Document* d = activeDocument()) {
+            QString f = Timelapse::instance().folder(d);
+            QDir().mkpath(f);
+            QDesktopServices::openUrl(QUrl::fromLocalFile(f));
+        }
+    });
+    act("timelapse.delete", "Delete the timelapse recording", "File", {}, [this] {
+        Document* d = activeDocument();
+        if (!d) return;
+        if (QMessageBox::question(this, T("Timelapse"), T("Delete all recorded frames of this picture?")) == QMessageBox::Yes)
+            Timelapse::instance().deleteFrames(d);
+    });
     act("file.close", "Close", "File", QKeySequence(Qt::CTRL | Qt::Key_W), [this] { if (m_mdi->activeSubWindow()) m_mdi->activeSubWindow()->close(); });
     act("file.quit", "Exit", "File", QKeySequence(Qt::CTRL | Qt::Key_Q), [this] { close(); }, {}, false);
 
@@ -349,6 +386,11 @@ void MainWindow::createActions() {
 
     // Select
     act("select.all", "Select all", "Select", QKeySequence::SelectAll, [doc] { ops::selectAll(*doc()); });
+    act("select.colorrange", "Color range...", "Select", {}, [this, doc] {
+        app()->tools()->commitPending();
+        ColorRangeDialog dlg(doc(), this);
+        dlg.exec();
+    }, "magic-wand");
     act("select.none", "Deselect", "Select", QKeySequence(Qt::CTRL | Qt::Key_D), [doc, commit] { commit(); ops::deselect(*doc()); }, "deselect");
     act("select.reselect", "Reselect", "Select", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D), [doc] { ops::reselect(*doc()); });
     act("select.invert", "Invert selection", "Select", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I), [doc] { ops::invertSelection(*doc()); }, "invert");
@@ -445,6 +487,14 @@ void MainWindow::createActions() {
     toggle("view.thirds", "Rule of thirds", {}, &Preferences::showThirds, {});
     toggle("view.golden", "Golden ratio", {}, &Preferences::showGoldenRatio, {});
     toggle("view.center", "Center lines", {}, &Preferences::showCenterLines, {});
+    {
+        QAction* g = act("view.gray", "Check values (grays)", "View", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Y), [] {
+            app()->setGrayscaleView(!app()->grayscaleView());
+            app()->showStatus(app()->grayscaleView() ? T("Showing the canvas in grays. The picture is not changed.") : QString(), 3000);
+        }, "gray", false);
+        g->setCheckable(true);
+        connect(app(), &App::viewOptionsChanged, g, [g] { g->setChecked(app()->grayscaleView()); });
+    }
     act("view.gridsettings", "Grid settings...", "View", {}, [this] { preferences(int(PreferencesDialog::Canvas)); }, {}, false);
     act("view.panels", "Hide / show panels", "View", QKeySequence(Qt::Key_Tab), [this] { togglePanels(); }, {}, false);
     act("view.fullscreen", "Full screen", "View", QKeySequence(Qt::Key_F11), [this] { isFullScreen() ? showNormal() : showFullScreen(); }, {}, false);
@@ -530,6 +580,12 @@ void MainWindow::createMenus() {
     add(file, "file.export");
     add(file, "file.import");
     file->addSeparator();
+    QMenu* tl = file->addMenu(Theme::icon("timelapse"), T("Timelapse"));
+    for (const char* id : {"timelapse.record", "timelapse.export", "", "timelapse.folder", "timelapse.delete"}) {
+        if (!*id) tl->addSeparator();
+        else add(tl, id);
+    }
+    file->addSeparator();
     add(file, "file.close");
     add(file, "file.quit");
 
@@ -572,7 +628,7 @@ void MainWindow::createMenus() {
     }
 
     QMenu* sel = mb->addMenu(T("&Select"));
-    for (const char* id : {"select.all", "select.none", "select.reselect", "select.invert", "", "select.alpha", "", "select.grow",
+    for (const char* id : {"select.all", "select.none", "select.reselect", "select.invert", "", "select.alpha", "select.colorrange", "", "select.grow",
                            "select.shrink", "select.feather", "select.border", "", "select.show"}) {
         if (!*id) sel->addSeparator();
         else add(sel, id);
@@ -585,14 +641,14 @@ void MainWindow::createMenus() {
     for (int t = 0; t < int(AdjustmentType::Count); ++t) add(adjM, QStringLiteral("adjust.%1").arg(t));
     filt->addSeparator();
     for (const char* id : {"filter.gaussian", "filter.motion", "", "filter.unsharp", "filter.sharpen", "", "filter.noise",
-                           "filter.pixelate", "filter.glow"}) {
+                           "filter.pixelate", "filter.screentone", "", "filter.glow"}) {
         if (!*id) filt->addSeparator();
         else add(filt, id);
     }
 
     QMenu* viewM = mb->addMenu(T("&View"));
     for (const char* id : {"view.newview", "", "view.zoomin", "view.zoomout", "view.fit", "view.actual", "", "view.rotl", "view.rotr",
-                           "view.rotreset", "view.flip", "view.reset", "", "view.checker", "view.pixelgrid"}) {
+                           "view.rotreset", "view.flip", "view.reset", "", "view.gray", "view.checker", "view.pixelgrid"}) {
         if (!*id) viewM->addSeparator();
         else add(viewM, id);
     }
@@ -768,8 +824,10 @@ void MainWindow::createDocks() {
     auto* histDock = dock("historyDock", "History", new HistoryPanel, Qt::RightDockWidgetArea);
     auto* refDock = dock("referenceDock", "Reference", new ReferencePanel, Qt::RightDockWidgetArea);
     auto* scratchDock = dock("scratchDock", "Scratchpad", new ScratchpadPanel, Qt::RightDockWidgetArea);
+    auto* previewDock = dock("previewDock", "Preview", new PreviewPanel, Qt::RightDockWidgetArea);
     tabifyDockWidget(histDock, refDock);
     tabifyDockWidget(refDock, scratchDock);
+    tabifyDockWidget(scratchDock, previewDock);
     histDock->raise();
     resizeDocks({colorDock, toolDock}, {320, 560}, Qt::Vertical);
     resizeDocks({colorDock}, {270}, Qt::Horizontal);
@@ -795,6 +853,7 @@ void MainWindow::createStatusBar() {
 // ============================================================================ documents
 
 CanvasView* MainWindow::addDocument(std::shared_ptr<Document> doc) {
+    Timelapse::instance().watch(doc.get());
     doc->setUndoLimit(app()->prefs().undoLimit);
     auto* v = new CanvasView(doc);
     auto* w = new CanvasWindow(this, v);
@@ -1202,6 +1261,36 @@ void MainWindow::preferences(int page) {
         QTimer::singleShot(0, this, &MainWindow::restartApp);
     });
     dlg.exec();
+}
+
+void MainWindow::exportTimelapse() {
+    Document* d = activeDocument();
+    if (!d) return;
+    const int frames = Timelapse::instance().frameCount(d);
+    if (frames == 0) {
+        QMessageBox::information(this, T("Timelapse"), T("Nothing was recorded yet. Turn on File > Timelapse > Record first."));
+        return;
+    }
+    if (!VideoWriter::available()) {
+        QMessageBox::information(this, T("Timelapse"), T("Video export works on Windows. The frames are in: %1").arg(Timelapse::instance().folder(d)));
+        return;
+    }
+    int seconds = Dialogs::askInt(this, T("Timelapse"), T("%1 frames recorded. Video length in seconds:").arg(frames),
+                                  app()->settings().value("timelapse/seconds", 30).toInt(), 3, 600);
+    if (seconds <= 0) return;
+    app()->settings().setValue("timelapse/seconds", seconds);
+    QString base = d->filePath().isEmpty() ? T("Untitled") : QFileInfo(d->filePath()).completeBaseName();
+    QString dir = app()->settings().value("paths/lastDir").toString();
+    QString path = QFileDialog::getSaveFileName(this, T("Export timelapse video..."), (dir.isEmpty() ? QString() : dir + "/") + base + " timelapse.mp4",
+                                                "MP4 video (*.mp4)");
+    if (path.isEmpty()) return;
+    if (QFileInfo(path).suffix().isEmpty()) path += ".mp4";
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    QString err;
+    bool ok = Timelapse::instance().exportVideo(d, path, seconds, &err);
+    QApplication::restoreOverrideCursor();
+    if (!ok) QMessageBox::warning(this, T("Timelapse"), T(err) + "\n\n" + T("The frames are in: %1").arg(Timelapse::instance().folder(d)));
+    else app()->showStatus(T("Exported %1").arg(QFileInfo(path).fileName()), 5000);
 }
 
 void MainWindow::autoFlatsDialog() {

@@ -375,6 +375,23 @@ void AdjustmentDialog::buildFilter() {
         });
         m_body->addWidget(seed);
     } else if (f == "pixelate") m_body->addWidget(slider(T("Cell size"), "cell", 2, 200, 0, " px"));
+    else if (f == "screentone") {
+        auto* row = new QHBoxLayout;
+        row->addWidget(new QLabel(T("Shape"), this));
+        auto* sh = new QComboBox(this);
+        sh->addItems({T("Dots"), T("Lines"), T("Squares")});
+        sh->setCurrentIndex(m_params.value("shape").toInt());
+        connect(sh, &QComboBox::currentIndexChanged, this, [this](int i) {
+            m_params["shape"] = i;
+            schedulePreview();
+        });
+        row->addWidget(sh, 1);
+        m_body->addLayout(row);
+        m_body->addWidget(slider(T("Cell size"), "cell", 2, 64, 1, " px"));
+        m_body->addWidget(slider(T("Angle"), "angle", -90, 90, 0, QString(QChar(0xB0))));
+        m_body->addWidget(slider(T("Contrast"), "contrast", -100, 100, 0, "%"));
+        m_body->addWidget(checkbox(T("Light areas become transparent"), "transparent"));
+    }
     auto* row = new QHBoxLayout;
     m_preview = new QCheckBox(T("Preview"), this);
     m_preview->setChecked(true);

@@ -74,6 +74,7 @@ private:
     void preferences(int page = 0);
     void switchLanguage(const QString& code);
     void autoFlatsDialog();
+    void exportTimelapse();
     void restartApp();
     void shortcutsDialog();
     void togglePanels();

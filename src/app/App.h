@@ -68,6 +68,14 @@ public:
 
     void showStatus(const QString& text, int ms = 4000);
 
+    // View > Check values: the canvas is shown in grays (the picture is not changed)
+    bool grayscaleView() const { return m_grayView; }
+    void setGrayscaleView(bool on) {
+        if (m_grayView == on) return;
+        m_grayView = on;
+        Q_EMIT viewOptionsChanged();
+    }
+
 Q_SIGNALS:
     void colorsChanged();
     void colorHistoryChanged();
@@ -76,6 +84,7 @@ Q_SIGNALS:
     void prefsChanged();
     void activeViewChanged(CanvasView* view);
     void statusMessage(const QString& text, int ms);
+    void viewOptionsChanged();
 
 private:
     void applyTexturesDir();
@@ -90,6 +99,7 @@ private:
     ToolManager* m_tools = nullptr;
     PressureCurve m_curve;
     QPointer<CanvasView> m_view;
+    bool m_grayView = false;
 };
 
 inline App* app() { return App::instance(); }
