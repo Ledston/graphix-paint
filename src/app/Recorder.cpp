@@ -630,6 +630,7 @@ bool Recorder::exportVideo(const Job& job, const QString& path, const ExportOpti
     if (opt.holdEnd && !last.isNull()) w.addFrame(last, 2 * kVideoSecond, bars);
     const qint64 frames = w.frames();
     const bool ok = w.close();
+    if (progress) progress(1.0);  // the read lengths can differ a little from the recorded ones
     if (!ok || frames == 0) {
         QFile::remove(path);
         if (error) *error = unreadable ? "The recorded video could not be read." : "Could not finish the video file.";
