@@ -12,7 +12,8 @@ class Document;
 class EffectsDialog : public QDialog {
     Q_OBJECT
 public:
-    EffectsDialog(Document* doc, quint32 layerId, QWidget* parent = nullptr);
+    // focus: an effect to scroll to ("chromatic", "outline", ...)
+    EffectsDialog(Document* doc, quint32 layerId, QWidget* parent = nullptr, const QString& focus = {});
     void accept() override;
     void reject() override;
 

@@ -1,5 +1,7 @@
 #include "io/NativeFormat.h"
 
+#include "core/ImageOps.h"
+
 #include <QBuffer>
 #include <QDataStream>
 #include <QFile>
@@ -43,7 +45,7 @@ SurfaceBlob encodeSurface(const TileGrid<T>& s, quint8 kind) {
     b.tiles.resize(items.size());
     std::vector<int> idx(items.size());
     for (size_t i = 0; i < idx.size(); ++i) idx[i] = int(i);
-    QtConcurrent::blockingMap(idx, [&](int& i) {
+    parallelFor(int(idx.size()), [&](int i) {
         const auto& [k, t] = items[size_t(i)];
         TileBlob& tb = b.tiles[size_t(i)];
         tb.tx = keyTx(k);
@@ -66,7 +68,7 @@ bool decodeSurface(const SurfaceBlob& b, TileGrid<T>& out) {
     std::atomic<bool> ok{true};
     std::vector<int> idx(b.tiles.size());
     for (size_t i = 0; i < idx.size(); ++i) idx[i] = int(i);
-    QtConcurrent::blockingMap(idx, [&](int& i) {
+    parallelFor(int(idx.size()), [&](int i) {
         const TileBlob& tb = b.tiles[size_t(i)];
         auto t = std::make_shared<Tile<T>>();
         if (tb.uniform) t->uniform = T(tb.value);
@@ -101,6 +103,7 @@ QJsonObject layerToJson(const Layer& l, Writer& w) {
     o["locked"] = l.locked;
     o["alphaLock"] = l.alphaLock;
     if (l.labelColor.isValid()) o["label"] = l.labelColor.name();
+    if (l.reference) o["reference"] = true;
     if (l.fx.anyActive() || !(l.fx == LayerEffects())) o["fx"] = l.fx.toJson();
     if (l.hasMask) {
         o["mask"] = w.add(l.mask);
@@ -206,6 +209,7 @@ LayerPtr layerFromJson(const QJsonObject& o, Reader& r, int depth) {
     l->locked = o.value("locked").toBool();
     l->alphaLock = o.value("alphaLock").toBool();
     if (o.contains("label")) l->labelColor = QColor(o.value("label").toString());
+    l->reference = o.value("reference").toBool();
     if (o.contains("fx")) l->fx = LayerEffects::fromJson(o.value("fx").toObject());
     if (o.contains("mask")) {
         l->hasMask = true;

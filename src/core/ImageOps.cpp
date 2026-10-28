@@ -146,6 +146,12 @@ void readMask(const MaskSurface& s, const QRect& r, float* out) {
     for (size_t i = 0; i < tmp.size(); ++i) out[i] = tmp[i] * kInv255;
 }
 
+void writeMask(MaskSurface& s, const QRect& r, const float* in) {
+    std::vector<quint8> tmp(size_t(r.width()) * size_t(r.height()));
+    for (size_t i = 0; i < tmp.size(); ++i) tmp[i] = quint8(std::lround(std::clamp(in[i], 0.f, 1.f) * 255.f));
+    s.writeRect(r, tmp.data(), r.width());
+}
+
 QImage surfaceToImage(const RasterSurface& s, const QRect& r) {
     QImage img(r.size(), QImage::Format_ARGB32_Premultiplied);
     if (img.isNull()) return img;
@@ -199,24 +205,94 @@ void sampleBilinear(const QImage& img, float x, float y, float* out) {
     }
 }
 
+namespace {
+// Set while a thread runs a piece of a parallel loop. A loop started from inside another
+// one runs on that thread: waiting for the shared pool from a pool thread can deadlock.
+thread_local bool tl_inParallel = false;
+struct ParallelScope {
+    bool old;
+    ParallelScope() : old(tl_inParallel) { tl_inParallel = true; }
+    ~ParallelScope() { tl_inParallel = old; }
+};
+}  // namespace
+
 void parallelForTiles(const QVector<qint64>& keys, const std::function<void(qint64)>& fn) {
-    if (keys.size() <= 1) {
+    if (keys.size() <= 1 || tl_inParallel) {
         for (qint64 k : keys) fn(k);
         return;
     }
     QVector<qint64> copy = keys;
-    QtConcurrent::blockingMap(copy, [&fn](qint64& k) { fn(k); });
+    QtConcurrent::blockingMap(copy, [&fn](qint64& k) {
+        ParallelScope scope;
+        fn(k);
+    });
 }
 
 void parallelFor(int n, const std::function<void(int)>& fn) {
     if (n <= 0) return;
-    if (n < 4) {
+    if (n < 4 || tl_inParallel) {
         for (int i = 0; i < n; ++i) fn(i);
         return;
     }
     std::vector<int> idx(static_cast<size_t>(n));
     std::iota(idx.begin(), idx.end(), 0);
-    QtConcurrent::blockingMap(idx, [&fn](int& i) { fn(i); });
+    QtConcurrent::blockingMap(idx, [&fn](int& i) {
+        ParallelScope scope;
+        fn(i);
+    });
+}
+
+}  // namespace gx
+
+namespace gx {
+
+namespace {
+inline float hashNoise(qint64 x, qint64 y, unsigned c, unsigned seed) {
+    quint32 h = quint32(x) * 374761393u + quint32(y) * 668265263u + c * 2246822519u + seed * 3266489917u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    h ^= h >> 16;
+    return float(h & 0xffff) / 65535.f - 0.5f;
+}
+}  // namespace
+
+float grainNoise(double x, double y, unsigned channel, unsigned seed, double size) {
+    if (size <= 1.0) return hashNoise(qint64(std::floor(x)), qint64(std::floor(y)), channel, seed);
+    // value noise: smooth blend of random values on a grid of 'size' pixels
+    const double gx = x / size, gy = y / size;
+    const qint64 x0 = qint64(std::floor(gx)), y0 = qint64(std::floor(gy));
+    double fx = gx - double(x0), fy = gy - double(y0);
+    fx = fx * fx * (3 - 2 * fx);
+    fy = fy * fy * (3 - 2 * fy);
+    const float a = hashNoise(x0, y0, channel, seed), b = hashNoise(x0 + 1, y0, channel, seed);
+    const float c = hashNoise(x0, y0 + 1, channel, seed), d = hashNoise(x0 + 1, y0 + 1, channel, seed);
+    const double top = a + (b - a) * fx, bot = c + (d - c) * fx;
+    return float((top + (bot - top) * fy) * 1.6);  // keep the contrast of fine grain
+}
+
+float halftoneCoverage(double x, double y, double cell, double angleDeg, int shape, float darkness) {
+    darkness = std::clamp(darkness, 0.f, 1.f);
+    if (darkness <= 0.002f) return 0.f;
+    if (darkness >= 0.998f) return 1.f;
+    cell = std::max(2.0, cell);
+    const double a = angleDeg * M_PI / 180.0, ca = std::cos(a), sa = std::sin(a);
+    const double u = (x * ca + y * sa) / cell, v = (-x * sa + y * ca) / cell;
+    const double fu = (u - std::floor(u) - 0.5) * cell, fv = (v - std::floor(v) - 0.5) * cell;  // px from the cell center
+    if (shape == 1) {  // lines
+        const double half = darkness * cell * 0.5;
+        return float(std::clamp(half - std::fabs(fv) + 0.5, 0.0, 1.0));
+    }
+    if (shape == 2) {  // squares
+        const double half = std::sqrt(darkness) * cell * 0.5;
+        const double d = std::max(std::fabs(fu), std::fabs(fv));
+        return float(std::clamp(half - d + 0.5, 0.0, 1.0));
+    }
+    // round dots that grow smoothly into a checker and then into white holes
+    // ("euclidean dot" used for printed screentone)
+    const double k = 2.0 * M_PI / cell;
+    const double f = 0.5 * (std::cos(k * fu) + std::cos(k * fv));  // 1 at the dot center, -1 between dots
+    const double thr = 1.0 - 2.0 * darkness;
+    const double grad = 0.5 * k * std::sqrt(std::pow(std::sin(k * fu), 2) + std::pow(std::sin(k * fv), 2));
+    return float(std::clamp((f - thr) / std::max(grad, 0.25 * k) + 0.5, 0.0, 1.0));
 }
 
 }  // namespace gx

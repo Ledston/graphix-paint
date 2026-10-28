@@ -44,8 +44,52 @@ struct LayerEffects {
     float textureStrength = 0.5f;
     float textureScale = 1.f;
 
-    bool anyActive() const { return outline || shadow || blur || overlay || texture; }
-    bool needsNeighborhood() const { return outline || shadow || blur; }
+    bool innerShadow = false;
+    QColor innerShadowColor = Qt::black;
+    float innerShadowOpacity = 0.5f;
+    QPointF innerShadowOffset{4, 4};
+    float innerShadowBlur = 6.f;
+
+    bool outerGlow = false;
+    QColor outerGlowColor = QColor(255, 230, 140);
+    float outerGlowOpacity = 0.8f;
+    float outerGlowSize = 12.f;
+
+    bool innerGlow = false;
+    QColor innerGlowColor = QColor(255, 255, 220);
+    float innerGlowOpacity = 0.7f;
+    float innerGlowSize = 10.f;
+
+    bool gradientOverlay = false;
+    QColor gradientStart = QColor(255, 120, 60);
+    QColor gradientEnd = QColor(90, 60, 200);
+    float gradientAngle = 90.f;      // degrees, 90 = top to bottom
+    float gradientOpacity = 1.f;
+    int gradientBlend = 0;           // BlendMode
+
+    bool grain = false;
+    float grainAmount = 0.25f;
+    float grainSize = 1.f;           // px
+    bool grainMono = true;
+    int grainBlend = 3;              // BlendMode::Overlay
+    int grainSeed = 1;
+
+    bool screentone = false;
+    float toneCell = 8.f;            // px between dots
+    float toneAngle = 45.f;
+    int toneShape = 0;               // 0 dots, 1 lines, 2 squares
+    QColor toneColor = Qt::black;
+    bool toneKeepWhite = true;       // light areas become transparent
+
+    bool chromatic = false;          // chromatic aberration: red and blue drift apart
+    float chromaShift = 4.f;         // px
+    float chromaAngle = 0.f;         // degrees
+
+    bool anyActive() const {
+        return outline || shadow || blur || overlay || texture || innerShadow || outerGlow || innerGlow || gradientOverlay || grain ||
+               screentone || chromatic;
+    }
+    bool needsNeighborhood() const { return outline || shadow || blur || innerShadow || outerGlow || innerGlow || chromatic; }
     int margin() const;
     QJsonObject toJson() const;
     static LayerEffects fromJson(const QJsonObject& o);
@@ -94,6 +138,7 @@ class GroupLayer;
 // Effects cache: rendered result of a layer with its effects, filled lazily per tile.
 struct FxCache {
     RasterSurface tiles;
+    QRect content;       // where the layer has pixels (for gradients spanning the layer)
     QSet<qint64> valid;  // tiles that are up to date
     LayerEffects params;
 };
@@ -127,6 +172,7 @@ public:
     bool locked = false;
     bool alphaLock = false;  // "Preserve opacity"
     QColor labelColor;       // invalid = none
+    bool reference = false;  // fill tools can take their borders from this layer (line art)
     LayerEffects fx;
 
     // Layer mask (white reveals). Default value 255 so an empty mask shows everything.

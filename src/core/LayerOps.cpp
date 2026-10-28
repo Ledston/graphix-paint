@@ -52,6 +52,7 @@ std::shared_ptr<RasterLayer> toRaster(const Layer* l) {
     r->locked = l->locked;
     r->alphaLock = l->alphaLock;
     r->labelColor = l->labelColor;
+    r->reference = l->reference;
     r->fx = l->fx;
     r->hasMask = l->hasMask;
     r->maskEnabled = l->maskEnabled;
@@ -451,6 +452,236 @@ void flipLayer(Document& doc, quint32 id, bool horizontal) {
 }
 
 // ============================================================================ masks
+
+// ---------------------------------------------------------------------------- channels
+
+bool mapLayerPixels(Document& doc, quint32 id, const QString& undoName, const std::function<void(float*, int)>& fn, bool wholeCanvas) {
+    auto* rl = dynamic_cast<RasterLayer*>(doc.layer(id));
+    if (!rl || rl->isEffectivelyLocked()) return false;
+    QRect area = wholeCanvas ? doc.bounds() : rl->pixels.tileBounds();
+    if (doc.hasSelection()) area &= doc.selectionBounds();
+    if (area.isEmpty()) return false;
+    doc.pushUndo(undoName);
+    rl = static_cast<RasterLayer*>(doc.layer(id));
+    const RasterSurface original = rl->pixels;
+    TileRange tr = tileRangeFor(area);
+    QVector<qint64> keys;
+    for (int ty = tr.y0; ty <= tr.y1; ++ty)
+        for (int tx = tr.x0; tx <= tr.x1; ++tx) keys << tileKey(tx, ty);
+    QMutex mx;
+    QHash<qint64, std::vector<float>> results;
+    parallelForTiles(keys, [&](qint64 k) {
+        QRect r = tileRectForKey(k) & area;
+        std::vector<float> buf(size_t(r.width()) * r.height() * 4);
+        readFloat(original, r, buf.data());
+        fn(buf.data(), r.width() * r.height());
+        QMutexLocker lock(&mx);
+        results.insert(k, std::move(buf));
+    });
+    for (auto it = results.begin(); it != results.end(); ++it) writeFloat(rl->pixels, tileRectForKey(it.key()) & area, it.value().data());
+    applyToSelection(doc, rl->pixels, original, area);
+    rl->pixels.optimizeRect(area);
+    doc.pixelsChanged(area, rl);
+    return true;
+}
+
+GroupLayer* splitChannels(Document& doc, quint32 id) {
+    auto* rl = dynamic_cast<RasterLayer*>(doc.layer(id));
+    if (!rl) return nullptr;
+    doc.pushUndo("Split channels");
+    rl = static_cast<RasterLayer*>(doc.layer(id));
+    auto g = std::make_shared<GroupLayer>();
+    g->id = doc.newLayerId();
+    g->name = rl->name + " RGB";
+    g->expanded = true;
+    const char* names[3] = {"Red", "Green", "Blue"};
+    QRect b = rl->pixels.tileBounds();
+    for (int ch = 0; ch < 3; ++ch) {
+        auto c = std::make_shared<RasterLayer>();
+        c->id = doc.newLayerId();
+        c->name = QString::fromLatin1(names[ch]);
+        c->blend = ch == 0 ? BlendMode::Normal : BlendMode::LinearDodge;  // added together they give the picture back
+        if (!b.isEmpty()) {
+            std::vector<float> buf(size_t(b.width()) * b.height() * 4);
+            readFloat(rl->pixels, b, buf.data());
+            for (size_t i = 0; i < buf.size() / 4; ++i)
+                for (int k = 0; k < 3; ++k)
+                    if (k != ch) buf[i * 4 + size_t(k)] = 0.f;
+            writeFloat(c->pixels, b, buf.data());
+            c->pixels.optimize();
+        }
+        g->insert(ch, c);
+    }
+    GroupLayer* p = rl->parent;
+    int at = p->indexOf(rl);
+    rl->visible = false;  // keep the original, hidden, under the channels
+    p->insert(at + 1, g);
+    doc.setCurrentLayer(g->id);
+    doc.structureChanged();
+    return g.get();
+}
+
+Layer* alphaAsLayer(Document& doc, quint32 id) {
+    auto* rl = dynamic_cast<RasterLayer*>(doc.layer(id));
+    if (!rl) return nullptr;
+    auto c = std::make_shared<RasterLayer>();
+    c->id = doc.newLayerId();
+    c->name = rl->name + " alpha";
+    c->pixels.fillRect(doc.bounds(), 0xff000000u);
+    QRect b = rl->pixels.tileBounds() & doc.bounds();
+    if (!b.isEmpty()) {
+        std::vector<float> buf(size_t(b.width()) * b.height() * 4);
+        readFloat(rl->pixels, b, buf.data());
+        for (size_t i = 0; i < buf.size() / 4; ++i) {
+            float a = buf[i * 4 + 3];
+            buf[i * 4] = buf[i * 4 + 1] = buf[i * 4 + 2] = a;
+            buf[i * 4 + 3] = 1.f;
+        }
+        writeFloat(c->pixels, b, buf.data());
+    }
+    return insertLayer(doc, c, rl, true, "Alpha as layer");
+}
+
+void transparencyToMask(Document& doc, quint32 id) {
+    auto* rl = dynamic_cast<RasterLayer*>(doc.layer(id));
+    if (!rl || rl->isEffectivelyLocked()) return;
+    doc.pushUndo("Transparency to mask");
+    rl = static_cast<RasterLayer*>(doc.layer(id));
+    QRect b = rl->pixels.tileBounds() & doc.bounds();
+    MaskSurface mask(0);
+    if (!b.isEmpty()) {
+        const size_t n = size_t(b.width()) * b.height();
+        std::vector<float> buf(n * 4), m(n);
+        readFloat(rl->pixels, b, buf.data());
+        for (size_t i = 0; i < n; ++i) {
+            float a = buf[i * 4 + 3];
+            m[i] = a;
+            if (a > 0) {
+                for (int k = 0; k < 3; ++k) buf[i * 4 + size_t(k)] /= a;
+                buf[i * 4 + 3] = 1.f;
+            }
+        }
+        writeFloat(rl->pixels, b, buf.data());
+        writeMask(mask, b, m.data());
+        mask.optimize();
+    }
+    if (rl->hasMask) {
+        // combine with the existing mask
+        QRect mb = b;
+        const size_t n = size_t(mb.width()) * mb.height();
+        std::vector<float> a(n), c(n);
+        readMask(rl->mask, mb, a.data());
+        readMask(mask, mb, c.data());
+        for (size_t i = 0; i < n; ++i) c[i] *= a[i];
+        writeMask(mask, mb, c.data());
+    }
+    rl->mask = std::move(mask);
+    rl->hasMask = true;
+    rl->maskEnabled = true;
+    doc.pixelsChanged(b, rl);
+    doc.layersChanged();
+}
+
+void invertAlpha(Document& doc, quint32 id) {
+    mapLayerPixels(doc, id, "Invert alpha", [](float* px, int n) {
+        for (int i = 0; i < n; ++i) {
+            float* p = px + size_t(i) * 4;
+            const float a = p[3], na = 1.f - a;
+            if (a > 0) for (int k = 0; k < 3; ++k) p[k] = p[k] / a * na;
+            else p[0] = p[1] = p[2] = 0.f;  // transparent had no color: black
+            p[3] = na;
+        }
+    }, true);
+}
+
+void removeWhite(Document& doc, quint32 id) {
+    // "color to alpha" with white: keeps every shade of gray as partly transparent black,
+    // so scanned line art can be painted under
+    mapLayerPixels(doc, id, "Remove white", [](float* px, int n) {
+        for (int i = 0; i < n; ++i) {
+            float* p = px + size_t(i) * 4;
+            const float a = p[3];
+            if (a <= 0) continue;
+            float c[3] = {p[0] / a, p[1] / a, p[2] / a};
+            const float na = std::max({1.f - c[0], 1.f - c[1], 1.f - c[2]});
+            if (na <= 1e-4f) {
+                p[0] = p[1] = p[2] = p[3] = 0.f;
+                continue;
+            }
+            for (int k = 0; k < 3; ++k) c[k] = clamp01((c[k] - 1.f) / na + 1.f);
+            const float fa = na * a;
+            for (int k = 0; k < 3; ++k) p[k] = c[k] * fa;
+            p[3] = fa;
+        }
+    });
+}
+
+void recolorLayer(Document& doc, quint32 id, const QColor& col) {
+    const float c[3] = {float(col.redF()), float(col.greenF()), float(col.blueF())};
+    mapLayerPixels(doc, id, "Recolor", [c](float* px, int n) {
+        for (int i = 0; i < n; ++i) {
+            float* p = px + size_t(i) * 4;
+            for (int k = 0; k < 3; ++k) p[k] = c[k] * p[3];
+        }
+    });
+}
+
+Layer* layerFromSelection(Document& doc, bool cut) {
+    auto* rl = dynamic_cast<RasterLayer*>(doc.currentLayer());
+    if (!rl || !doc.hasSelection()) return nullptr;
+    QRect r = doc.selectionBounds() & rl->pixels.tileBounds();
+    if (r.isEmpty()) return nullptr;
+    doc.pushUndo(cut ? "Cut to new layer" : "Copy to new layer");
+    rl = static_cast<RasterLayer*>(doc.currentLayer());
+    const size_t n = size_t(r.width()) * r.height();
+    std::vector<float> px(n * 4), m(n), keep(n * 4);
+    readFloat(rl->pixels, r, px.data());
+    readMask(doc.selection(), r, m.data());
+    for (size_t i = 0; i < n; ++i)
+        for (int k = 0; k < 4; ++k) {
+            keep[i * 4 + size_t(k)] = px[i * 4 + size_t(k)] * (1.f - m[i]);
+            px[i * 4 + size_t(k)] *= m[i];
+        }
+    auto c = std::make_shared<RasterLayer>();
+    c->id = doc.newLayerId();
+    c->name = doc.uniqueLayerName("Layer");
+    writeFloat(c->pixels, r, px.data());
+    c->pixels.optimize();
+    if (cut && !rl->isEffectivelyLocked()) {
+        writeFloat(rl->pixels, r, keep.data());
+        rl->pixels.optimizeRect(r);
+        doc.pixelsChanged(r, rl);
+    }
+    GroupLayer* p = rl->parent;
+    p->insert(p->indexOf(rl) + 1, c);
+    doc.setCurrentLayer(c->id);
+    doc.structureChanged();
+    return c.get();
+}
+
+void centerLayer(Document& doc, quint32 id) {
+    Layer* l = doc.layer(id);
+    if (!l || l->isEffectivelyLocked()) return;
+    const RasterSurface* s = l->displaySurface();
+    QRect b = s ? s->exactBounds() : QRect();
+    if (b.isEmpty()) return;
+    QPoint d = doc.bounds().center() - b.center();
+    if (d.isNull()) return;
+    doc.pushUndo("Center on canvas");
+    l = doc.layer(id);
+    if (l->hasMask) l->mask = l->mask.translated(d.x(), d.y());
+    if (auto* r = dynamic_cast<RasterLayer*>(l)) r->pixels = r->pixels.translated(d.x(), d.y());
+    else if (auto* v = dynamic_cast<VectorLayer*>(l)) {
+        for (auto& st : v->strokes)
+            for (auto& p : st.points) p.pos += d;
+        v->cache = v->cache.translated(d.x(), d.y());
+    } else if (auto* t = dynamic_cast<TextLayer*>(l)) {
+        t->text.origin += d;
+        t->cache = t->cache.translated(d.x(), d.y());
+    }
+    l->version++;
+    doc.pixelsChanged(b | b.translated(d), l);
+}
 
 // ---------------------------------------------------------------------------- several layers
 

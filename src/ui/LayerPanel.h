@@ -75,9 +75,12 @@ public:
     QTreeView* tree() const { return m_tree; }
 
 Q_SIGNALS:
-    void requestEffects(quint32 layerId);
+    void requestEffects(quint32 layerId, const QString& focus);
     void requestAdjustmentEdit(quint32 layerId);
     void requestNewAdjustment(int type);
+
+public Q_SLOTS:
+    void openPropertiesSlot(quint32 id) { openProperties(id); }
 
 protected:
     bool eventFilter(QObject* o, QEvent* e) override;
@@ -88,6 +91,7 @@ private:
     void syncControls();
     void selectCurrent();
     void contextMenu(const QPoint& pos);
+    void openProperties(quint32 id);
     Layer* current() const;
 
     QPointer<Document> m_doc;

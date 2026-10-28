@@ -18,6 +18,7 @@
 #include "core/LayerOps.h"
 #include "core/Pixel.h"
 #include "tools/BrushTool.h"
+#include "ui/LayerPropertiesDialog.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
@@ -288,6 +289,7 @@ void LayerDelegate::paint(QPainter* p, const QStyleOptionViewItem& opt, const QM
         ix -= 16;
     };
     if (l->locked) badge("lock");
+    if (l->reference) badge("reference");
     if (l->alphaLock) badge("alpha-lock");
     if (l->fx.anyActive()) badge("fx");
     p->restore();
@@ -400,7 +402,7 @@ LayerPanel::LayerPanel(QWidget* parent) : QWidget(parent) {
     m_tree->setDragDropMode(QAbstractItemView::DragDrop);
     m_tree->setDefaultDropAction(Qt::MoveAction);
     m_tree->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_tree->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+    m_tree->setEditTriggers(QAbstractItemView::EditKeyPressed);  // F2 renames, double-click opens the properties
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     m_tree->setMinimumHeight(160);
     v->addWidget(m_tree, 1);
@@ -438,7 +440,7 @@ LayerPanel::LayerPanel(QWidget* parent) : QWidget(parent) {
         }
     });
     btn("fx", T("Layer effects"), [this] {
-        if (Layer* l = current()) Q_EMIT requestEffects(l->id);
+        if (Layer* l = current()) Q_EMIT requestEffects(l->id, QString());
     });
     btn("clear", T("Clear layer"), [this] {
         if (Layer* l = current()) ops::clearLayer(*m_doc, l->id);
@@ -462,8 +464,7 @@ LayerPanel::LayerPanel(QWidget* parent) : QWidget(parent) {
         if (Layer* l = m_model->layerAt(i); l && l->isGroup()) static_cast<GroupLayer*>(l)->expanded = false;
     });
     connect(m_tree, &QTreeView::doubleClicked, this, [this](const QModelIndex& i) {
-        Layer* l = m_model->layerAt(i);
-        if (l && l->type() == LayerType::Adjustment) Q_EMIT requestAdjustmentEdit(l->id);
+        if (Layer* l = m_model->layerAt(i)) openProperties(l->id);
     });
     connect(m_tree, &QTreeView::customContextMenuRequested, this, &LayerPanel::contextMenu);
     m_tree->viewport()->installEventFilter(this);
@@ -640,55 +641,185 @@ void LayerPanel::contextMenu(const QPoint& pos) {
     if (!m_doc) return;
     QModelIndex i = m_tree->indexAt(pos);
     Layer* l = m_model->layerAt(i);
-    if (l) m_doc->setCurrentLayer(l->id);
+    // right-click on a layer outside the selection selects just that one
+    if (l && !m_doc->isLayerSelected(l->id)) m_doc->setCurrentLayer(l->id);
+    else if (l) m_doc->setLayerSelection(m_doc->selectedLayerIds(), l->id);
     QMenu m(this);
+    QPointer<Document> dp = m_doc;
     Document& d = *m_doc;
-    m.addAction(Theme::icon("layer-new"), T("New layer"), this, [&d] { ops::addRasterLayer(d); });
-    m.addAction(Theme::icon("linework-new"), T("New linework layer"), this, [&d] { ops::addVectorLayer(d); });
-    m.addAction(Theme::icon("folder-new"), T("New folder"), this, [&d] { ops::addGroup(d); });
-    if (l) {
-        quint32 id = l->id;
-        m.addSeparator();
-        m.addAction(Theme::icon("duplicate"), T("Duplicate"), this, [&d, id] { ops::duplicateLayer(d, id); });
+
+    // ---- new
+    QMenu* add = m.addMenu(Theme::icon("layer-new"), T("New"));
+    add->addAction(Theme::icon("layer-new"), T("New layer"), this, [&d] { ops::addRasterLayer(d); });
+    add->addAction(Theme::icon("linework-new"), T("New linework layer"), this, [&d] { ops::addVectorLayer(d); });
+    add->addAction(Theme::icon("folder-new"), T("New folder"), this, [&d] { ops::addGroup(d); });
+    QMenu* adjM = add->addMenu(Theme::icon("adjustment"), T("New adjustment layer"));
+    for (int t = 0; t < int(AdjustmentType::Count); ++t)
+        adjM->addAction(T(adjustmentTypeName(AdjustmentType(t))), this, [this, t] { Q_EMIT requestNewAdjustment(t); });
+    if (!l) {
+        m.exec(m_tree->viewport()->mapToGlobal(pos));
+        return;
+    }
+    const quint32 id = l->id;
+    const QList<quint32> sel = m_doc->selectedLayerIds();
+    const bool many = sel.size() > 1;
+    const bool raster = l->isRaster();
+
+    m.addSeparator();
+    m.addAction(Theme::icon("settings"), T("Layer properties..."), this, [this, id] { openProperties(id); });
+    m.addAction(T("Rename"), this, [this, i] { m_tree->edit(i); })->setShortcut(QKeySequence(Qt::Key_F2));
+
+    // ---- layer list
+    m.addSeparator();
+    m.addAction(Theme::icon("duplicate"), many ? T("Duplicate selected") : T("Duplicate"), this, [&d, sel] { ops::duplicateLayers(d, sel); });
+    if (many) {
+        m.addAction(Theme::icon("merge"), T("Merge selected layers"), this, [&d, sel] {
+            QString err;
+            if (!ops::mergeLayers(d, sel, &err) && !err.isEmpty()) app()->showStatus(T(err));
+        });
+    } else {
         m.addAction(Theme::icon("merge"), T("Merge down"), this, [&d, id] {
             QString err;
             if (!ops::mergeDown(d, id, &err) && !err.isEmpty()) app()->showStatus(T(err));
         });
-        m.addAction(T("Put into a new folder"), this, [&d, id] { ops::groupLayer(d, id); });
-        if (!l->isRaster() && l->type() != LayerType::Adjustment)
-            m.addAction(T("Rasterize"), this, [&d, id] { ops::rasterize(d, id); });
-        m.addSeparator();
-        m.addAction(T("Select opacity (Ctrl+click thumbnail)"), this, [&d, id] { ops::selectLayerAlpha(d, id); });
-        m.addAction(Theme::icon("fx"), T("Layer effects..."), this, [this, id] { Q_EMIT requestEffects(id); });
-        if (l->type() == LayerType::Adjustment)
-            m.addAction(Theme::icon("adjustment"), T("Edit adjustment..."), this, [this, id] { Q_EMIT requestAdjustmentEdit(id); });
-        QMenu* mask = m.addMenu(Theme::icon("mask"), T("Layer mask"));
-        if (!l->hasMask) {
-            mask->addAction(T("Add (reveal all)"), this, [&d, id] { ops::addMask(d, id, false); });
-            mask->addAction(T("Add from selection"), this, [&d, id] { ops::addMask(d, id, true); })->setEnabled(d.hasSelection());
-        } else {
-            mask->addAction(l->maskEnabled ? T("Disable") : T("Enable"), this, [&d, id] {
-                d.pushUndo(T("Toggle mask"));
-                if (Layer* x = d.layer(id)) { x->maskEnabled = !x->maskEnabled; d.layerChanged(x); d.layersChanged(); }
-            });
-            mask->addAction(T("Apply"), this, [&d, id] { ops::applyMask(d, id); })->setEnabled(l->isRaster());
-            mask->addAction(T("Delete"), this, [&d, id] { ops::deleteMask(d, id); });
-        }
-        QMenu* label = m.addMenu(T("Label color"));
-        const QList<QPair<QString, QColor>> labels = {{T("None"), QColor()}, {T("Red"), QColor("#e5534b")}, {T("Orange"), QColor("#f0883e")},
-                                                      {T("Yellow"), QColor("#e3c34c")}, {T("Green"), QColor("#57ab5a")},
-                                                      {T("Blue"), QColor("#539bf5")}, {T("Violet"), QColor("#b083f0")}};
-        for (const auto& lc : labels) {
-            QColor col = lc.second;
-            label->addAction(lc.first, this, [&d, id, col] {
-                if (Layer* x = d.layer(id)) { x->labelColor = col; d.layersChanged(); }
-            });
-        }
-        m.addSeparator();
-        m.addAction(Theme::icon("clear"), T("Clear"), this, [&d, id] { ops::clearLayer(d, id); });
-        m.addAction(Theme::icon("trash"), T("Delete"), this, [&d, id] { ops::deleteLayer(d, id); });
     }
+    m.addAction(Theme::icon("folder-new"), T("Put into a new folder"), this, [&d, sel] { ops::groupLayers(d, sel); });
+    if (!raster && !l->isGroup() && l->type() != LayerType::Adjustment)
+        m.addAction(T("Rasterize"), this, [&d, id] { ops::rasterize(d, id); });
+    if (l->isGroup()) m.addAction(T("Merge folder into one layer"), this, [&d, id] { ops::rasterize(d, id); });
+
+    // ---- switches
+    m.addSeparator();
+    auto flag = [&](const QString& icon, const QString& text, bool Layer::*field) {
+        QAction* a = m.addAction(icon.isEmpty() ? QIcon() : Theme::icon(icon), text);
+        a->setCheckable(true);
+        a->setChecked(l->*field);
+        connect(a, &QAction::toggled, this, [dp, sel, field, text](bool on) {
+            if (!dp) return;
+            dp->pushUndo(text);
+            for (quint32 x : sel)
+                if (Layer* y = dp->layer(x)) {
+                    y->*field = on;
+                    dp->layerChanged(y);
+                }
+            dp->layersChanged();
+        });
+    };
+    flag("reference", T("Reference layer (fills take borders from it)"), &Layer::reference);
+    flag("clip", T("Clipping"), &Layer::clipping);
+    flag("alpha-lock", T("Preserve opacity"), &Layer::alphaLock);
+    flag("lock", T("Lock layer"), &Layer::locked);
+    QMenu* label = m.addMenu(T("Label color"));
+    const QList<QPair<QString, QColor>> labels = {{T("None"), QColor()}, {T("Red"), QColor("#e5534b")}, {T("Orange"), QColor("#f0883e")},
+                                                  {T("Yellow"), QColor("#e3c34c")}, {T("Green"), QColor("#57ab5a")},
+                                                  {T("Blue"), QColor("#539bf5")}, {T("Violet"), QColor("#b083f0")}};
+    for (const auto& lc : labels) {
+        QColor col = lc.second;
+        QPixmap sw(12, 12);
+        sw.fill(col.isValid() ? col : Qt::transparent);
+        label->addAction(QIcon(sw), lc.first, this, [dp, sel, col] {
+            if (!dp) return;
+            for (quint32 x : sel)
+                if (Layer* y = dp->layer(x)) y->labelColor = col;
+            dp->layersChanged();
+        });
+    }
+
+    // ---- effects: quick switches with good defaults, everything else in the window
+    const bool fxOk = !l->isGroup() && l->type() != LayerType::Adjustment;
+    QMenu* fxM = m.addMenu(Theme::icon("fx"), T("Effects"));
+    fxM->setEnabled(fxOk);
+    fxM->addAction(Theme::icon("fx"), T("Layer effects..."), this, [this, id] { Q_EMIT requestEffects(id, QString()); });
+    fxM->addSeparator();
+    auto fxToggle = [&](QMenu* menu, const QString& text, bool LayerEffects::*field, const QString& key) {
+        QAction* a = menu->addAction(text);
+        a->setCheckable(true);
+        a->setChecked(l->fx.*field);
+        connect(a, &QAction::toggled, this, [dp, sel, field, text](bool on) {
+            if (!dp) return;
+            dp->pushUndo(text);
+            for (quint32 x : sel)
+                if (Layer* y = dp->layer(x); y && !y->isGroup() && y->type() != LayerType::Adjustment) {
+                    y->fx.*field = on;
+                    dp->layerChanged(y);
+                }
+            dp->layersChanged();
+        });
+        Q_UNUSED(key);
+        return a;
+    };
+    fxToggle(fxM, T("Outline"), &LayerEffects::outline, "outline");
+    fxToggle(fxM, T("Drop shadow"), &LayerEffects::shadow, "shadow");
+    fxToggle(fxM, T("Outer glow"), &LayerEffects::outerGlow, "outerGlow");
+    fxToggle(fxM, T("Inner shadow"), &LayerEffects::innerShadow, "innerShadow");
+    fxToggle(fxM, T("Inner glow"), &LayerEffects::innerGlow, "innerGlow");
+    fxToggle(fxM, T("Color overlay"), &LayerEffects::overlay, "overlay");
+    fxToggle(fxM, T("Gradient overlay"), &LayerEffects::gradientOverlay, "gradient");
+    fxToggle(fxM, T("Blur"), &LayerEffects::blur, "blur");
+    fxToggle(fxM, T("Paper texture"), &LayerEffects::texture, "texture");
+    fxToggle(fxM, T("Grain (noise)"), &LayerEffects::grain, "grain");
+    fxToggle(fxM, T("Screentone"), &LayerEffects::screentone, "screentone");
+
+    // ---- channels (alpha and color channels)
+    QMenu* ch = m.addMenu(Theme::icon("channels"), T("Channels"));
+    QAction* ca = fxToggle(ch, T("Chromatic aberration"), &LayerEffects::chromatic, "chromatic");
+    ca->setIcon(Theme::icon("channels"));
+    ca->setEnabled(fxOk);
+    ch->addAction(T("Chromatic aberration settings..."), this, [this, id] { Q_EMIT requestEffects(id, QStringLiteral("chromatic")); })
+        ->setEnabled(fxOk);
+    ch->addSeparator();
+    ch->addAction(T("Alpha to selection"), this, [&d, id] { ops::selectLayerAlpha(d, id); });
+    ch->addAction(T("Add alpha to selection"), this, [&d, id] { ops::selectLayerAlpha(d, id, ops::SelectMode::Add); });
+    ch->addAction(T("Transparency to layer mask"), this, [&d, id] { ops::transparencyToMask(d, id); })->setEnabled(raster);
+    ch->addAction(T("Alpha channel as a gray layer"), this, [&d, id] { ops::alphaAsLayer(d, id); })->setEnabled(raster);
+    ch->addAction(T("Invert alpha"), this, [&d, id] { ops::invertAlpha(d, id); })->setEnabled(raster);
+    ch->addSeparator();
+    ch->addAction(T("Split into red, green and blue layers"), this, [&d, id] { ops::splitChannels(d, id); })->setEnabled(raster);
+    ch->addSeparator();
+    ch->addAction(T("Remove white background"), this, [&d, id] { ops::removeWhite(d, id); })->setEnabled(raster);
+    ch->addAction(T("Recolor with the main color"), this, [&d, id] { ops::recolorLayer(d, id, app()->foreground()); })->setEnabled(raster);
+
+    // ---- mask
+    QMenu* mask = m.addMenu(Theme::icon("mask"), T("Layer mask"));
+    if (!l->hasMask) {
+        mask->addAction(T("Add (reveal all)"), this, [&d, id] { ops::addMask(d, id, false); });
+        mask->addAction(T("Add from selection"), this, [&d, id] { ops::addMask(d, id, true); })->setEnabled(d.hasSelection());
+    } else {
+        mask->addAction(l->maskEnabled ? T("Disable") : T("Enable"), this, [&d, id] {
+            d.pushUndo(T("Toggle mask"));
+            if (Layer* x = d.layer(id)) { x->maskEnabled = !x->maskEnabled; d.layerChanged(x); d.layersChanged(); }
+        });
+        mask->addAction(T("Apply"), this, [&d, id] { ops::applyMask(d, id); })->setEnabled(raster);
+        mask->addAction(T("Delete"), this, [&d, id] { ops::deleteMask(d, id); });
+    }
+
+    // ---- pixels
+    m.addSeparator();
+    QMenu* px = m.addMenu(Theme::icon("image"), T("Pixels"));
+    px->addAction(T("New layer from selection (copy)"), this, [&d] { ops::layerFromSelection(d, false); })->setEnabled(raster && d.hasSelection());
+    px->addAction(T("New layer from selection (cut)"), this, [&d] { ops::layerFromSelection(d, true); })->setEnabled(raster && d.hasSelection());
+    px->addSeparator();
+    px->addAction(T("Center on canvas"), this, [&d, id] { ops::centerLayer(d, id); });
+    px->addAction(Theme::icon("flip"), T("Flip layer horizontally"), this, [&d, id] { ops::flipLayer(d, id, true); });
+    px->addAction(T("Flip layer vertically"), this, [&d, id] { ops::flipLayer(d, id, false); });
+    px->addAction(Theme::icon("fill"), T("Fill with main color"), this, [&d, id] { ops::fillLayer(d, id, app()->foreground()); })->setEnabled(raster);
+    px->addAction(Theme::icon("clear"), T("Clear"), this, [&d, id] { ops::clearLayer(d, id); });
+
+    m.addSeparator();
+    m.addAction(Theme::icon("trash"), many ? T("Delete selected") : T("Delete"), this, [&d, sel] { ops::deleteLayers(d, sel); });
     m.exec(m_tree->viewport()->mapToGlobal(pos));
+}
+
+void LayerPanel::openProperties(quint32 id) {
+    if (!m_doc || !m_doc->layer(id)) return;
+    Layer* l = m_doc->layer(id);
+    if (l->type() == LayerType::Adjustment) {
+        Q_EMIT requestAdjustmentEdit(id);
+        return;
+    }
+    LayerPropertiesDialog dlg(m_doc, id, this);
+    connect(&dlg, &LayerPropertiesDialog::requestEffects, this, [this](quint32 x) { Q_EMIT requestEffects(x, QString()); });
+    dlg.exec();
 }
 
 }  // namespace gx

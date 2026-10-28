@@ -15,6 +15,7 @@
 #include "app/App.h"
 #include "app/BrushLibrary.h"
 #include "core/Document.h"
+#include "core/ImageOps.h"
 #include "core/Pixel.h"
 #include "tools/ToolManager.h"
 
@@ -343,7 +344,7 @@ bool CanvasView::renderRect(const QRect& pr, int L) {
     if (bands.size() <= 1) {
         for (int& b : bands) work(b);
     } else {
-        QtConcurrent::blockingMap(bands, work);
+        parallelFor(int(bands.size()), [&](int i) { work(bands[size_t(i)]); });
     }
     return true;
 }

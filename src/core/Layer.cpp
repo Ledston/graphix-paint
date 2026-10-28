@@ -19,6 +19,11 @@ int LayerEffects::margin() const {
     if (shadow)
         m = std::max(m, int(std::ceil(shadowBlur * 3 + std::max(std::fabs(shadowOffset.x()), std::fabs(shadowOffset.y())))) + 2);
     if (blur) m = std::max(m, int(std::ceil(blurRadius * 3)) + 2);
+    if (innerShadow)
+        m = std::max(m, int(std::ceil(innerShadowBlur * 3 + std::max(std::fabs(innerShadowOffset.x()), std::fabs(innerShadowOffset.y())))) + 2);
+    if (outerGlow) m = std::max(m, int(std::ceil(outerGlowSize * 3)) + 2);
+    if (innerGlow) m = std::max(m, int(std::ceil(innerGlowSize * 3)) + 2);
+    if (chromatic) m = std::max(m, int(std::ceil(std::fabs(chromaShift))) + 2);
     return m;
 }
 
@@ -29,7 +34,18 @@ QJsonObject LayerEffects::toJson() const {
         {"shadowOpacity", shadowOpacity}, {"shadowDx", shadowOffset.x()}, {"shadowDy", shadowOffset.y()},
         {"shadowBlur", shadowBlur}, {"blur", blur}, {"blurRadius", blurRadius}, {"overlay", overlay},
         {"overlayColor", colorJson(overlayColor)}, {"overlayOpacity", overlayOpacity}, {"texture", texture},
-        {"textureName", textureName}, {"textureStrength", textureStrength}, {"textureScale", textureScale}};
+        {"textureName", textureName}, {"textureStrength", textureStrength}, {"textureScale", textureScale},
+        {"innerShadow", innerShadow}, {"innerShadowColor", colorJson(innerShadowColor)}, {"innerShadowOpacity", innerShadowOpacity},
+        {"innerShadowDx", innerShadowOffset.x()}, {"innerShadowDy", innerShadowOffset.y()}, {"innerShadowBlur", innerShadowBlur},
+        {"outerGlow", outerGlow}, {"outerGlowColor", colorJson(outerGlowColor)}, {"outerGlowOpacity", outerGlowOpacity},
+        {"outerGlowSize", outerGlowSize}, {"innerGlow", innerGlow}, {"innerGlowColor", colorJson(innerGlowColor)},
+        {"innerGlowOpacity", innerGlowOpacity}, {"innerGlowSize", innerGlowSize}, {"gradientOverlay", gradientOverlay},
+        {"gradientStart", colorJson(gradientStart)}, {"gradientEnd", colorJson(gradientEnd)}, {"gradientAngle", gradientAngle},
+        {"gradientOpacity", gradientOpacity}, {"gradientBlend", gradientBlend}, {"grain", grain}, {"grainAmount", grainAmount},
+        {"grainSize", grainSize}, {"grainMono", grainMono}, {"grainBlend", grainBlend}, {"grainSeed", grainSeed},
+        {"screentone", screentone}, {"toneCell", toneCell}, {"toneAngle", toneAngle}, {"toneShape", toneShape},
+        {"toneColor", colorJson(toneColor)}, {"toneKeepWhite", toneKeepWhite}, {"chromatic", chromatic},
+        {"chromaShift", chromaShift}, {"chromaAngle", chromaAngle}};
 }
 
 LayerEffects LayerEffects::fromJson(const QJsonObject& o) {
@@ -52,6 +68,41 @@ LayerEffects LayerEffects::fromJson(const QJsonObject& o) {
     e.textureName = o.value("textureName").toString();
     e.textureStrength = float(o.value("textureStrength").toDouble(e.textureStrength));
     e.textureScale = float(o.value("textureScale").toDouble(e.textureScale));
+    auto f = [&o](const char* k, float def) { return float(o.value(k).toDouble(def)); };
+    e.innerShadow = o.value("innerShadow").toBool();
+    e.innerShadowColor = colorFrom(o.value("innerShadowColor"), e.innerShadowColor);
+    e.innerShadowOpacity = f("innerShadowOpacity", e.innerShadowOpacity);
+    e.innerShadowOffset = QPointF(o.value("innerShadowDx").toDouble(4), o.value("innerShadowDy").toDouble(4));
+    e.innerShadowBlur = f("innerShadowBlur", e.innerShadowBlur);
+    e.outerGlow = o.value("outerGlow").toBool();
+    e.outerGlowColor = colorFrom(o.value("outerGlowColor"), e.outerGlowColor);
+    e.outerGlowOpacity = f("outerGlowOpacity", e.outerGlowOpacity);
+    e.outerGlowSize = f("outerGlowSize", e.outerGlowSize);
+    e.innerGlow = o.value("innerGlow").toBool();
+    e.innerGlowColor = colorFrom(o.value("innerGlowColor"), e.innerGlowColor);
+    e.innerGlowOpacity = f("innerGlowOpacity", e.innerGlowOpacity);
+    e.innerGlowSize = f("innerGlowSize", e.innerGlowSize);
+    e.gradientOverlay = o.value("gradientOverlay").toBool();
+    e.gradientStart = colorFrom(o.value("gradientStart"), e.gradientStart);
+    e.gradientEnd = colorFrom(o.value("gradientEnd"), e.gradientEnd);
+    e.gradientAngle = f("gradientAngle", e.gradientAngle);
+    e.gradientOpacity = f("gradientOpacity", e.gradientOpacity);
+    e.gradientBlend = o.value("gradientBlend").toInt(e.gradientBlend);
+    e.grain = o.value("grain").toBool();
+    e.grainAmount = f("grainAmount", e.grainAmount);
+    e.grainSize = f("grainSize", e.grainSize);
+    e.grainMono = o.value("grainMono").toBool(e.grainMono);
+    e.grainBlend = o.value("grainBlend").toInt(e.grainBlend);
+    e.grainSeed = o.value("grainSeed").toInt(e.grainSeed);
+    e.screentone = o.value("screentone").toBool();
+    e.toneCell = f("toneCell", e.toneCell);
+    e.toneAngle = f("toneAngle", e.toneAngle);
+    e.toneShape = o.value("toneShape").toInt(e.toneShape);
+    e.toneColor = colorFrom(o.value("toneColor"), e.toneColor);
+    e.toneKeepWhite = o.value("toneKeepWhite").toBool(e.toneKeepWhite);
+    e.chromatic = o.value("chromatic").toBool();
+    e.chromaShift = f("chromaShift", e.chromaShift);
+    e.chromaAngle = f("chromaAngle", e.chromaAngle);
     return e;
 }
 
@@ -155,6 +206,7 @@ void Layer::copyBaseTo(Layer& o) const {
     o.locked = locked;
     o.alphaLock = alphaLock;
     o.labelColor = labelColor;
+    o.reference = reference;
     o.fx = fx;
     o.hasMask = hasMask;
     o.maskEnabled = maskEnabled;

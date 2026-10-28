@@ -309,7 +309,38 @@ void MainWindow::createActions() {
     act("layer.mask", "Add layer mask", "Layer", {}, [doc, cur] { if (auto* l = cur()) ops::addMask(*doc(), l->id, doc()->hasSelection()); }, "mask");
     act("layer.applymask", "Apply layer mask", "Layer", {}, [doc, cur] { if (auto* l = cur()) ops::applyMask(*doc(), l->id); });
     act("layer.deletemask", "Delete layer mask", "Layer", {}, [doc, cur] { if (auto* l = cur()) ops::deleteMask(*doc(), l->id); });
-    act("layer.effects", "Layer effects...", "Layer", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F), [this, cur] { if (auto* l = cur()) layerEffects(l->id); }, "fx");
+    auto curRaster = [cur] { return dynamic_cast<RasterLayer*>(cur()); };
+    act("layer.properties", "Layer properties...", "Layer", {}, [this, cur] {
+        if (auto* l = cur()) QMetaObject::invokeMethod(m_layers, "openPropertiesSlot", Q_ARG(quint32, l->id));
+    }, "settings");
+    act("layer.reference", "Reference layer (fills take borders from it)", "Layer", {}, [doc, cur] {
+        if (auto* l = cur()) {
+            const bool on = !l->reference;
+            doc()->pushUndo(T("Reference layer"));
+            for (quint32 id : doc()->selectedLayerIds())
+                if (Layer* x = doc()->layer(id)) x->reference = on;
+            doc()->layersChanged();
+            app()->showStatus(on ? T("Fills can now take their borders from this layer.") : T("Not a reference layer any more."));
+        }
+    }, "reference");
+    act("layer.chromatic", "Chromatic aberration", "Layer", {}, [doc, cur] {
+        if (auto* l = cur(); l && !l->isGroup() && l->type() != LayerType::Adjustment) {
+            doc()->pushUndo(T("Chromatic aberration"));
+            l->fx.chromatic = !l->fx.chromatic;
+            doc()->layerChanged(l);
+            doc()->layersChanged();
+        }
+    }, "channels");
+    act("layer.alphamask", "Transparency to layer mask", "Layer", {}, [doc, curRaster] { if (auto* l = curRaster()) ops::transparencyToMask(*doc(), l->id); });
+    act("layer.alphalayer", "Alpha channel as a gray layer", "Layer", {}, [doc, curRaster] { if (auto* l = curRaster()) ops::alphaAsLayer(*doc(), l->id); });
+    act("layer.invertalpha", "Invert alpha", "Layer", {}, [doc, curRaster] { if (auto* l = curRaster()) ops::invertAlpha(*doc(), l->id); });
+    act("layer.split", "Split into red, green and blue layers", "Layer", {}, [doc, curRaster] { if (auto* l = curRaster()) ops::splitChannels(*doc(), l->id); });
+    act("layer.removewhite", "Remove white background", "Layer", {}, [doc, curRaster] { if (auto* l = curRaster()) ops::removeWhite(*doc(), l->id); });
+    act("layer.recolor", "Recolor with the main color", "Layer", {}, [doc, curRaster] { if (auto* l = curRaster()) ops::recolorLayer(*doc(), l->id, app()->foreground()); });
+    act("layer.copysel", "New layer from selection (copy)", "Layer", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_J), [doc] { ops::layerFromSelection(*doc(), false); });
+    act("layer.cutsel", "New layer from selection (cut)", "Layer", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_J), [doc] { ops::layerFromSelection(*doc(), true); });
+    act("layer.center", "Center on canvas", "Layer", {}, [doc, cur] { if (auto* l = cur()) ops::centerLayer(*doc(), l->id); });
+    act("layer.effects", "Layer effects...", "Layer", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F), [this, cur] { if (auto* l = cur()) layerEffects(l->id, {}); }, "fx");
 
     // Select
     act("select.all", "Select all", "Select", QKeySequence::SelectAll, [doc] { ops::selectAll(*doc()); });
@@ -510,10 +541,22 @@ void MainWindow::createMenus() {
     for (int t = 0; t < int(AdjustmentType::Count); ++t) add(adjLayer, QStringLiteral("adjustlayer.%1").arg(t));
     for (const char* id : {"", "layer.duplicate", "layer.delete", "", "layer.mergedown", "layer.mergeselected", "layer.mergevisible", "layer.flatten",
                            "layer.group", "layer.rasterize", "", "layer.up", "layer.down", "", "layer.clip", "layer.alphalock",
-                           "layer.hide", "", "layer.fliph", "layer.flipv", "", "layer.mask", "layer.applymask",
-                           "layer.deletemask", "", "layer.effects"}) {
+                           "layer.hide", "layer.reference", "", "layer.properties", "layer.effects"}) {
         if (!*id) layer->addSeparator();
         else add(layer, id);
+    }
+    QMenu* chM = layer->addMenu(Theme::icon("channels"), T("Channels"));
+    for (const char* id : {"layer.chromatic", "", "select.alpha", "layer.alphamask", "layer.alphalayer", "layer.invertalpha", "",
+                           "layer.split", "", "layer.removewhite", "layer.recolor"}) {
+        if (!*id) chM->addSeparator();
+        else add(chM, id);
+    }
+    QMenu* maskM = layer->addMenu(Theme::icon("mask"), T("Layer mask"));
+    for (const char* id : {"layer.mask", "layer.applymask", "layer.deletemask"}) add(maskM, id);
+    QMenu* pxM = layer->addMenu(Theme::icon("image"), T("Pixels"));
+    for (const char* id : {"layer.copysel", "layer.cutsel", "", "layer.center", "layer.fliph", "layer.flipv"}) {
+        if (!*id) pxM->addSeparator();
+        else add(pxM, id);
     }
 
     QMenu* sel = mb->addMenu(T("&Select"));
@@ -1103,7 +1146,7 @@ void MainWindow::filter(const QString& id) {
     dlg.exec();
 }
 
-void MainWindow::layerEffects(quint32 id) {
+void MainWindow::layerEffects(quint32 id, const QString& focus) {
     Document* d = activeDocument();
     if (!d || !d->layer(id)) return;
     Layer* l = d->layer(id);
@@ -1111,7 +1154,7 @@ void MainWindow::layerEffects(quint32 id) {
         app()->showStatus(T("Effects work on pixel, linework and text layers."));
         return;
     }
-    EffectsDialog dlg(d, id, this);
+    EffectsDialog dlg(d, id, this, focus);
     dlg.exec();
 }
 

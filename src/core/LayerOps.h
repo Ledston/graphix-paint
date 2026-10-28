@@ -40,6 +40,19 @@ Layer* mergeLayers(Document& doc, const QList<quint32>& ids, QString* error = nu
 void moveLayers(Document& doc, const QList<quint32>& ids, GroupLayer* newParent, int index);
 void setLayersVisible(Document& doc, const QList<quint32>& ids, bool visible);
 
+// ---- channels and pixels of one pixel layer (inside the selection if there is one) ----
+// fn changes n premultiplied RGBA pixels in place.
+bool mapLayerPixels(Document& doc, quint32 id, const QString& undoName, const std::function<void(float* px, int n)>& fn,
+                    bool wholeCanvas = false);
+GroupLayer* splitChannels(Document& doc, quint32 id);     // red, green and blue as layers in a folder
+Layer* alphaAsLayer(Document& doc, quint32 id);           // the alpha channel as a gray layer
+void transparencyToMask(Document& doc, quint32 id);       // alpha moves into a layer mask
+void invertAlpha(Document& doc, quint32 id);
+void removeWhite(Document& doc, quint32 id);              // white becomes transparent (scans, line art)
+void recolorLayer(Document& doc, quint32 id, const QColor& c);  // keeps the shape, one color
+Layer* layerFromSelection(Document& doc, bool cut);
+void centerLayer(Document& doc, quint32 id);
+
 // ---- masks ----
 void addMask(Document& doc, quint32 id, bool fromSelection);
 void deleteMask(Document& doc, quint32 id);

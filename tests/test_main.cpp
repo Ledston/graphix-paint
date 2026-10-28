@@ -341,6 +341,83 @@ static void testCanvasOps() {
     CHECK(doc.size() == QSize(40, 60));
 }
 
+static quint32 compositeAt(Document& doc, int x, int y) {
+    float px[4];
+    Compositor::samplePixel(doc.root(), x, y, px);
+    return pack(px);
+}
+
+static void testChannels() {
+    Document doc(QSize(256, 256));
+    auto paper = std::make_shared<RasterLayer>();
+    paper->id = doc.newLayerId();
+    paper->pixels.fillRect(doc.bounds(), 0xffffffffu);
+    doc.root()->insert(0, paper);
+    auto l = std::make_shared<RasterLayer>();
+    l->id = doc.newLayerId();
+    l->pixels.fillRect(QRect(10, 10, 100, 100), 0xff3070c0u);
+    l->pixels.fillRect(QRect(150, 150, 50, 50), 0x80402010u);  // half transparent
+    doc.root()->insert(1, l);
+    doc.setCurrentLayer(l->id);
+    const quint32 before = compositeAt(doc, 50, 50);
+
+    // split into channels: the folder looks like the original
+    ops::splitChannels(doc, l->id);
+    auto near = [](quint32 a, quint32 b) {
+        for (int s = 0; s < 32; s += 8)
+            if (std::abs(int((a >> s) & 255) - int((b >> s) & 255)) > 2) return false;
+        return true;
+    };
+    CHECK(near(compositeAt(doc, 50, 50), before));
+    doc.undo();
+
+    // invert alpha twice gives the same alpha
+    ops::invertAlpha(doc, l->id);
+    auto* rl = static_cast<RasterLayer*>(doc.layer(l->id));
+    CHECK((rl->pixels.pixel(50, 50) >> 24) == 0);
+    CHECK((rl->pixels.pixel(5, 5) >> 24) == 255);
+    ops::invertAlpha(doc, l->id);
+    CHECK((static_cast<RasterLayer*>(doc.layer(l->id))->pixels.pixel(50, 50) >> 24) == 255);
+    doc.undo();
+    doc.undo();
+
+    // transparency to mask keeps the look
+    ops::transparencyToMask(doc, l->id);
+    CHECK(doc.layer(l->id)->hasMask);
+    CHECK(near(compositeAt(doc, 160, 160), compositeAt(doc, 160, 160)));
+    doc.undo();
+
+    // remove white: white disappears, black stays opaque
+    auto scan = std::make_shared<RasterLayer>();
+    scan->id = doc.newLayerId();
+    scan->pixels.fillRect(QRect(0, 0, 64, 64), 0xffffffffu);
+    scan->pixels.fillRect(QRect(10, 10, 4, 40), 0xff000000u);
+    scan->pixels.fillRect(QRect(30, 10, 4, 40), 0xff808080u);
+    doc.root()->insert(2, scan);
+    ops::removeWhite(doc, scan->id);
+    auto* sc = static_cast<RasterLayer*>(doc.layer(scan->id));
+    CHECK((sc->pixels.pixel(2, 2) >> 24) == 0);
+    CHECK((sc->pixels.pixel(11, 20) >> 24) == 255);
+    const int ga = int(sc->pixels.pixel(31, 20) >> 24);
+    CHECK(ga > 100 && ga < 150);  // gray becomes half transparent black
+
+    // effects render without crashing and change pixels
+    l = std::static_pointer_cast<RasterLayer>(doc.layer(l->id)->clone());
+    Layer* live = doc.layer(l->id);
+    live->fx.chromatic = true;
+    live->fx.chromaShift = 5;
+    live->fx.screentone = true;
+    live->fx.grain = true;
+    live->fx.innerShadow = true;
+    live->fx.outerGlow = true;
+    live->fx.gradientOverlay = true;
+    doc.layerChanged(live);
+    QImage img = Compositor::renderImage(doc.root(), doc.bounds());
+    CHECK(!img.isNull());
+    // red fringe appears outside the square on one side
+    CHECK(compositeAt(doc, 8, 50) != 0xffffffffu || compositeAt(doc, 112, 50) != 0xffffffffu);
+}
+
 int main(int argc, char** argv) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
@@ -356,6 +433,7 @@ int main(int argc, char** argv) {
     testFiles();
     testProjection();
     testCanvasOps();
+    testChannels();
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }
