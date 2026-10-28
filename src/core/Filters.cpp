@@ -11,7 +11,7 @@ namespace gx {
 
 QList<QPair<QString, QString>> filterList() {
     return {{"gaussian", "Gaussian blur"}, {"motion", "Motion blur"}, {"unsharp", "Unsharp mask"}, {"sharpen", "Sharpen"},
-            {"glow", "Glow"},           {"noise", "Add noise"},     {"pixelate", "Pixelate"}};
+            {"glow", "Glow"},           {"noise", "Noise"},     {"pixelate", "Pixelate"}};
 }
 
 QJsonObject filterDefaults(const QString& id) {

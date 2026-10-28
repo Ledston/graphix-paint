@@ -57,6 +57,7 @@
 #include "ui/EffectsDialog.h"
 #include "ui/HistoryPanel.h"
 #include "ui/LayerPanel.h"
+#include "ui/LineartDialog.h"
 #include "ui/NavigatorPanel.h"
 #include "ui/PreferencesDialog.h"
 #include "ui/ReferencePanel.h"
@@ -394,6 +395,13 @@ void MainWindow::createActions() {
         QString id = f.first;
         act("filter." + id, f.second + "...", "Filters", {}, [this, id] { filter(id); });
     }
+    act("filter.lineart", "Make line art...", "Filters", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L), [this] {
+        Document* d = activeDocument();
+        if (!d) return;
+        app()->tools()->commitPending();
+        LineartDialog dlg(d, this);
+        dlg.exec();
+    }, "lineart");
 
     // View
     act("view.newview", "New view window", "View", {}, [this] { newView(); });
@@ -567,10 +575,16 @@ void MainWindow::createMenus() {
     }
 
     QMenu* filt = mb->addMenu(T("Fi&lter"));
-    QMenu* adjM = filt->addMenu(T("Adjustments"));
+    add(filt, "filter.lineart");
+    filt->addSeparator();
+    QMenu* adjM = filt->addMenu(Theme::icon("adjustment"), T("Adjustments"));
     for (int t = 0; t < int(AdjustmentType::Count); ++t) add(adjM, QStringLiteral("adjust.%1").arg(t));
     filt->addSeparator();
-    for (const auto& f : AdjustmentDialog::filterIds()) add(filt, "filter." + f.first);
+    for (const char* id : {"filter.gaussian", "filter.motion", "", "filter.unsharp", "filter.sharpen", "", "filter.noise",
+                           "filter.pixelate", "filter.glow"}) {
+        if (!*id) filt->addSeparator();
+        else add(filt, id);
+    }
 
     QMenu* viewM = mb->addMenu(T("&View"));
     for (const char* id : {"view.newview", "", "view.zoomin", "view.zoomout", "view.fit", "view.actual", "", "view.rotl", "view.rotr",
