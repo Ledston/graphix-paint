@@ -454,7 +454,7 @@ int main(int argc, char** argv) {
         };
         int frames = 0;
         const qint64 realLen = lengthOf(out1, &frames);
-        std::fprintf(stderr, "NOTE-INFO real-speed video %lld (recorded %lld), %d frames\n", (long long)realLen, (long long)job.length, frames);
+        std::fprintf(stderr, "INFO real-speed video %lld (recorded %lld), %d frames\n", (long long)realLen, (long long)job.length, frames);
         CHECK(std::abs(realLen - (job.length + 2 * kVideoSecond)) < kVideoSecond / 10);
         opt.targetLength = job.length / 3;  // three times faster
         opt.holdEnd = false;
@@ -464,7 +464,7 @@ int main(int argc, char** argv) {
         CHECK(ex2);
         CHECK(lastProgress > 0.99);
         const qint64 fastLen = lengthOf(out2, &frames);
-        std::fprintf(stderr, "NOTE-INFO fast video %lld (target %lld), %d frames\n", (long long)fastLen, (long long)opt.targetLength, frames);
+        std::fprintf(stderr, "INFO fast video %lld (target %lld), %d frames\n", (long long)fastLen, (long long)opt.targetLength, frames);
         CHECK(fastLen > 0 && std::abs(fastLen - opt.targetLength) < kVideoSecond / 10 + job.length / 30);
         // cancel
         CHECK(!Recorder::exportVideo(job, out2 + ".x", opt, [](double) { return false; }, &err) && err.isEmpty());
