@@ -601,7 +601,7 @@ Palette	Палитра
 Pan the canvas	Двигать холст
 Paper	Бумага
 Paper texture	Текстура бумаги
-Pass	Пропуск
+Pass	Сквозной
 Pass through	Пропускать
 Pass through: the folder's blending modes affect the layers below it	Пропускать: режимы наложения внутри папки действуют на слои под ней
 Paste	Вставить
@@ -762,7 +762,7 @@ Select two or more layers to merge.	Выберите два или больше 
 Selection pen	Кисть выделения
 Settings	Настройки
 Settings and brushes	Настройки и кисти
-Shade	Тень (SAI)
+Shade	Затенение (SAI)
 Shadows	Тени
 Shape	Форма
 Shape is the whole tip	Форма — весь кончик
@@ -771,8 +771,8 @@ Sharpen	Резкость
 Shift	Shift
 Shift + click picks the background color.	Shift + щелчок берёт фоновый цвет.
 Shift adds, Alt subtracts, Shift+Alt intersects.	Shift добавляет, Alt вычитает, Shift+Alt пересекает.
-Shine & Shade	Свет и тень (SAI)
-Shine (SAI Luminosity)	Свет (Luminosity из SAI)
+Shine & Shade	Свечение и затенение (SAI)
+Shine (SAI Luminosity)	Свечение (SAI)
 Shortcut	Сочетание
 Shortcut in use	Сочетание занято
 Show / hide layer	Показать / скрыть слой
