@@ -99,14 +99,18 @@ bool VideoWriter::open(const QString& path, int width, int height, int fps, QStr
     m_time = 0;
     if (!d->mf.start(error)) return false;
     IMFAttributes* attrs = nullptr;
-    MFCreateAttributes(&attrs, 1);
-    if (attrs) attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
+    MFCreateAttributes(&attrs, 2);
+    if (attrs) {
+        attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
+        attrs->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_MPEG4);  // MP4 whatever the file is called
+    }
     std::wstring wpath = path.toStdWString();
     HRESULT hr = MFCreateSinkWriterFromURL(wpath.c_str(), nullptr, attrs, &d->writer);
     release(attrs);
     if (FAILED(hr)) {
         if (error) *error = "Could not create the video file.";
         d->mf.stop();
+        QFile::remove(path);
         return false;
     }
     IMFMediaType* out = nullptr;
@@ -136,6 +140,7 @@ bool VideoWriter::open(const QString& path, int width, int height, int fps, QStr
         if (error) *error = "This computer could not start the H.264 video encoder.";
         release(d->writer);
         d->mf.stop();
+        QFile::remove(path);
         return false;
     }
     return true;

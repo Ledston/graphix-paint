@@ -1461,7 +1461,7 @@ bool MainWindow::stopRecording(Document* d) {
         app()->showStatus(T("The recording is kept. Press Record to continue it."), 4000);
         return false;
     }
-    if (QFileInfo(path).suffix().isEmpty()) path += ".mp4";
+    if (QFileInfo(path).suffix().compare("mp4", Qt::CaseInsensitive) != 0) path += ".mp4";
     app()->settings().setValue("recording/lastDir", QFileInfo(path).absolutePath());
 
     const Recorder::Job job = r.job(d);
