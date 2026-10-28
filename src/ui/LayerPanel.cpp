@@ -726,8 +726,12 @@ void LayerPanel::contextMenu(const QPoint& pos) {
         sw.fill(col.isValid() ? col : Qt::transparent);
         label->addAction(QIcon(sw), lc.first, this, [dp, sel, col] {
             if (!dp) return;
+            dp->pushUndo(T("Label color"));
             for (quint32 x : sel)
-                if (Layer* y = dp->layer(x)) y->labelColor = col;
+                if (Layer* y = dp->layer(x)) {
+                    y->labelColor = col;
+                    dp->layerChanged(y);  // marks the picture as changed (the label is saved)
+                }
             dp->layersChanged();
         });
     }

@@ -8,6 +8,8 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QListWidget>
+#include <QMainWindow>
+#include <QMenu>
 #include <QMimeData>
 #include <QPainter>
 #include <QToolButton>
@@ -17,6 +19,7 @@
 #include "app/App.h"
 #include "app/I18n.h"
 #include "io/ImageIO.h"
+#include "ui/ReferenceOverlay.h"
 #include "ui/Theme.h"
 
 namespace gx {
@@ -149,6 +152,32 @@ ReferencePanel::ReferencePanel(QWidget* parent) : QWidget(parent) {
     QToolButton* flip = btn("flip", T("Flip horizontally"), {}, true);
     connect(flip, &QToolButton::toggled, m_view, &ReferenceView::setFlip);
     btn("zoom", T("Fit"), [this] { m_view->fit(); });
+    // The picture over everything, like tracing paper on the screen.
+    m_overlayBtn = btn("overlay", T("Reference over everything: the picture floats over the canvas (and any other program)"), {}, true);
+    connect(m_overlayBtn, &QToolButton::toggled, this, &ReferencePanel::setOverlayVisible);
+    auto* om = new QMenu(m_overlayBtn);
+    QAction* throughAct = om->addAction(Theme::icon("cursor"), T("Draw through the picture"));
+    throughAct->setCheckable(true);
+    connect(throughAct, &QAction::toggled, this, &ReferencePanel::setClickThrough);
+    m_captureAct = om->addAction(Theme::icon("timelapse-off"), T("Hide from screen recording and screen sharing"));
+    m_captureAct->setCheckable(true);
+    m_captureAct->setChecked(app()->settings().value("overlay/hideFromCapture", true).toBool());
+    connect(m_captureAct, &QAction::toggled, this, [this](bool on) { overlay()->setHideFromCapture(on); });
+    om->addSeparator();
+    m_captureInfo = om->addAction(QString());
+    m_captureInfo->setEnabled(false);
+    connect(om, &QMenu::aboutToShow, this, [this, throughAct] {
+        const QSignalBlocker b(throughAct);
+        throughAct->setChecked(clickThrough());
+        m_captureInfo->setText(ReferenceOverlay::describe(m_overlay && m_overlay->isVisible() ? m_overlay->captureState()
+                                                                                                 : ReferenceOverlay::CaptureState::NotSupported));
+        m_captureInfo->setVisible(m_overlay && m_overlay->isVisible());
+    });
+    m_overlayBtn->setMenu(om);
+    m_overlayBtn->setPopupMode(QToolButton::MenuButtonPopup);
+    m_throughBtn = btn("cursor", T("Draw through the picture: the pen goes to the canvas under it"), {}, true);
+    connect(m_throughBtn, &QToolButton::toggled, this, &ReferencePanel::setClickThrough);
+    m_throughBtn->setEnabled(false);
     row->addStretch();
     btn("trash", T("Remove"), [this] {
         int i = m_list->currentRow();
@@ -188,11 +217,73 @@ void ReferencePanel::addImage(const QImage& img0, const QString& path) {
 }
 
 void ReferencePanel::show(int index) {
-    if (index < 0 || index >= m_images.size()) {
-        m_view->setImage(QImage());
+    const QImage img = index < 0 || index >= m_images.size() ? QImage() : m_images[index];
+    m_view->setImage(img);
+    if (m_overlay) m_overlay->setImage(img);  // an empty list closes the overlay
+}
+
+ReferenceOverlay* ReferencePanel::overlay() {
+    if (!m_overlay) {
+        // owned by the main window (the panel itself may be floating or hidden)
+        QWidget* owner = this;
+        for (QWidget* w = this; w; w = w->parentWidget())
+            if (qobject_cast<QMainWindow*>(w)) owner = w;
+        m_overlay = new ReferenceOverlay(owner == this ? window() : owner);
+        connect(m_overlay, &ReferenceOverlay::stateChanged, this, &ReferencePanel::syncOverlayButtons);
+        connect(this, &QObject::destroyed, m_overlay, &QObject::deleteLater);
+    }
+    return m_overlay;
+}
+
+bool ReferencePanel::overlayVisible() const { return m_overlay && m_overlay->isVisible(); }
+bool ReferencePanel::clickThrough() const { return m_overlay && m_overlay->clickThrough(); }
+
+void ReferencePanel::setOverlayVisible(bool on) {
+    if (on == overlayVisible()) {
+        syncOverlayButtons();
         return;
     }
-    m_view->setImage(m_images[index]);
+    if (on) {
+        const int i = m_list->currentRow();
+        if (i < 0 || i >= m_images.size()) {
+            app()->showStatus(T("Add a reference picture first: Open, Paste or drop it on the Reference panel."), 4000);
+            syncOverlayButtons();
+            return;
+        }
+        ReferenceOverlay* o = overlay();
+        o->setImage(m_images[i]);
+        o->show();
+        o->raise();
+        app()->showStatus(ReferenceOverlay::describe(o->captureState()), 5000);
+    } else if (m_overlay) {
+        m_overlay->setClickThrough(false);
+        m_overlay->hide();
+    }
+    syncOverlayButtons();
+}
+
+void ReferencePanel::setClickThrough(bool on) {
+    if (on && !overlayVisible()) setOverlayVisible(true);
+    if (!m_overlay || !m_overlay->isVisible()) {
+        syncOverlayButtons();
+        return;
+    }
+    m_overlay->setClickThrough(on);
+    app()->showStatus(on ? T("Drawing through the reference. Turn it off with the same shortcut or the button on the Reference panel.")
+                         : T("The reference can be moved and resized again."),
+                      4000);
+    syncOverlayButtons();
+}
+
+void ReferencePanel::syncOverlayButtons() {
+    const bool vis = overlayVisible();
+    {
+        const QSignalBlocker b1(m_overlayBtn), b2(m_throughBtn);
+        m_overlayBtn->setChecked(vis);
+        m_throughBtn->setChecked(vis && clickThrough());
+        m_throughBtn->setEnabled(vis);
+    }
+    Q_EMIT overlayStateChanged();
 }
 
 void ReferencePanel::save() { app()->settings().setValue("references/files", m_paths); }

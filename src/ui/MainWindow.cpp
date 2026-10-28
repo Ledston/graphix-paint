@@ -248,7 +248,11 @@ void MainWindow::createActions() {
         QAction* rec = act("timelapse.record", "Record timelapse", "File", {}, [doc] {
             Timelapse& t = Timelapse::instance();
             t.setRecording(doc(), !t.isRecording(doc()));
-            app()->showStatus(t.isRecording(doc()) ? T("Recording the timelapse: every change is saved as a frame.") : T("Timelapse recording paused."));
+            QString msg = t.isRecording(doc()) ? T("Recording the timelapse: every change is saved as a frame.") : T("Timelapse recording paused.");
+            if (t.isRecording(doc()))
+                if (const int hidden = Timelapse::hiddenLayerCount(doc()))
+                    msg += " " + T("Layers left out of the video: %1.").arg(hidden);
+            app()->showStatus(msg, 5000);
         }, "timelapse");
         rec->setCheckable(true);
         auto sync = [this, rec] {
@@ -495,6 +499,17 @@ void MainWindow::createActions() {
         g->setCheckable(true);
         connect(app(), &App::viewOptionsChanged, g, [g] { g->setChecked(app()->grayscaleView()); });
     }
+    {
+        // the reference picture over everything (hidden from screen recordings)
+        QAction* o = act("view.overlay", "Reference over everything", "View", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_R), [this] {
+            if (m_refPanel) m_refPanel->setOverlayVisible(!m_refPanel->overlayVisible());
+        }, "overlay", false);
+        o->setCheckable(true);
+        QAction* t = act("view.overlaythrough", "Draw through the reference", "View", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_D), [this] {
+            if (m_refPanel) m_refPanel->setClickThrough(!m_refPanel->clickThrough());
+        }, "cursor", false);
+        t->setCheckable(true);
+    }
     act("view.gridsettings", "Grid settings...", "View", {}, [this] { preferences(int(PreferencesDialog::Canvas)); }, {}, false);
     act("view.panels", "Hide / show panels", "View", QKeySequence(Qt::Key_Tab), [this] { togglePanels(); }, {}, false);
     act("view.fullscreen", "Full screen", "View", QKeySequence(Qt::Key_F11), [this] { isFullScreen() ? showNormal() : showFullScreen(); }, {}, false);
@@ -550,7 +565,7 @@ void MainWindow::createActions() {
     act("color.reset", "Reset colors (black / white)", "Tools", QKeySequence(Qt::Key_D), [] { app()->resetColors(); }, {}, false);
     act("color.transparent", "Transparent color", "Tools", {}, [] { app()->setTransparentColor(!app()->transparentColor()); }, {}, false);
     for (int i = 0; i < 9; ++i)
-        act(QStringLiteral("brush.slot%1").arg(i + 1), QStringLiteral("Brush slot %1").arg(i + 1), "Tools", QKeySequence(Qt::Key_1 + i),
+        act(QStringLiteral("brush.slot%1").arg(i + 1), T("Brush slot %1").arg(i + 1), "Tools", QKeySequence(Qt::Key_1 + i),
             [i] { if (i < app()->brushes()->count()) app()->tools()->selectBrushSlot(i); }, {}, false);
 
     // Help
@@ -657,6 +672,9 @@ void MainWindow::createMenus() {
         if (!*id) gridM->addSeparator();
         else add(gridM, id);
     }
+    viewM->addSeparator();
+    add(viewM, "view.overlay");
+    add(viewM, "view.overlaythrough");
     viewM->addSeparator();
     add(viewM, "view.panels");
     add(viewM, "view.fullscreen");
@@ -822,7 +840,14 @@ void MainWindow::createDocks() {
     auto* layerDock = dock("layerDock", "Layers", m_layers, Qt::RightDockWidgetArea);
     splitDockWidget(navDock, layerDock, Qt::Vertical);
     auto* histDock = dock("historyDock", "History", new HistoryPanel, Qt::RightDockWidgetArea);
-    auto* refDock = dock("referenceDock", "Reference", new ReferencePanel, Qt::RightDockWidgetArea);
+    m_refPanel = new ReferencePanel;
+    auto* refDock = dock("referenceDock", "Reference", m_refPanel, Qt::RightDockWidgetArea);
+    if (QAction* o = m_actions.value("view.overlay")) {
+        connect(m_refPanel, &ReferencePanel::overlayStateChanged, o, [this, o] {
+            o->setChecked(m_refPanel->overlayVisible());
+            if (QAction* t = m_actions.value("view.overlaythrough")) t->setChecked(m_refPanel->clickThrough());
+        });
+    }
     auto* scratchDock = dock("scratchDock", "Scratchpad", new ScratchpadPanel, Qt::RightDockWidgetArea);
     auto* previewDock = dock("previewDock", "Preview", new PreviewPanel, Qt::RightDockWidgetArea);
     tabifyDockWidget(histDock, refDock);

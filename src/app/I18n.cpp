@@ -3,6 +3,10 @@
 #include <QFile>
 #include <QHash>
 #include <QLocale>
+#include <QMutex>
+#include <QRegularExpression>
+#include <QSet>
+#include <cstdio>
 #include <QTextStream>
 
 namespace gx {
@@ -47,6 +51,17 @@ QString T(const QString& english) {
     if (english.endsWith(QLatin1String("..."))) {  // "Curves..." from "Curves"
         auto base = table().constFind(english.chopped(3));
         if (base != table().cend()) return base.value() + QStringLiteral("...");
+    }
+    // for checking the translation: GX_I18N_MISSING=1 prints every text that has none
+    static const bool report = qEnvironmentVariableIsSet("GX_I18N_MISSING");
+    if (report) {
+        static QMutex mutex;
+        static QSet<QString> seen;
+        QMutexLocker lock(&mutex);
+        if (!seen.contains(english) && english.contains(QRegularExpression("[A-Za-z]{2}"))) {
+            seen.insert(english);
+            std::fprintf(stderr, "I18N-MISSING\t%s\n", qPrintable(QString(english).replace('\n', "\\n")));
+        }
     }
     return english;
 }

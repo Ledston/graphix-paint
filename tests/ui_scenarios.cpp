@@ -23,6 +23,14 @@
 #include "ui/PreferencesDialog.h"
 #include <QToolButton>
 #include "ui/MainWindow.h"
+#include "ui/ReferenceOverlay.h"
+#include "ui/ReferencePanel.h"
+#include "app/I18n.h"
+#include "app/Timelapse.h"
+#include <QAction>
+#include <QClipboard>
+#include <QDir>
+#include <QThreadPool>
 #include "ui/Theme.h"
 
 using namespace gx;
@@ -341,6 +349,91 @@ int main(int argc, char** argv) {
         app()->setGrayscaleView(true);
         view()->repaint();
         app()->setGrayscaleView(false);
+    }, w);
+
+    scenario("timelapse leaves out hidden layers", [](MainWindow&) {
+        Document* d = view()->doc();
+        Layer* l = d->currentLayer();
+        auto* r = static_cast<RasterLayer*>(l);
+        r->pixels.fillRect(QRect(100, 100, 200, 200), 0xffff0000u);  // the "tracing" layer
+        auto blue = std::make_shared<RasterLayer>();
+        blue->id = d->newLayerId();
+        blue->name = "Blue";
+        blue->pixels.fillRect(QRect(500, 100, 200, 200), 0xff0000ffu);
+        d->root()->insert(2, blue);
+        d->structureChanged();
+        d->pixelsChanged(d->bounds());
+        l->hideInTimelapse = true;
+        pump(50);
+        Timelapse& t = Timelapse::instance();
+        t.watch(d);
+        CHECK(Timelapse::hiddenLayerCount(d) == 1);
+        auto lastFrame = [&] {
+            QThreadPool::globalInstance()->waitForDone(10000);
+            pump(80);
+            QStringList f = QDir(t.folder(d)).entryList({"frame_*.jpg"}, QDir::Files, QDir::Name);
+            return f.isEmpty() ? QImage() : QImage(t.folder(d) + "/" + f.last());
+        };
+        t.setRecording(d, true);
+        QImage f1 = lastFrame();
+        CHECK(!f1.isNull());
+        if (!f1.isNull()) {
+            CHECK(QColor(f1.pixel(200, 200)).red() > 230 && QColor(f1.pixel(200, 200)).green() > 230);  // no red: white paper
+            CHECK(QColor(f1.pixel(600, 200)).blue() > 200 && QColor(f1.pixel(600, 200)).red() < 60);    // the rest is there
+        }
+        // the layer is still shown on the canvas while drawing
+        CHECK(l->visible);
+        l->hideInTimelapse = false;
+        t.setRecording(d, false);
+        t.setRecording(d, true);
+        QImage f2 = lastFrame();
+        CHECK(!f2.isNull() && QColor(f2.pixel(200, 200)).red() > 200 && QColor(f2.pixel(200, 200)).green() < 80);
+        t.setRecording(d, false);
+        t.deleteFrames(d);
+    }, w);
+
+    scenario("reference over everything", [](MainWindow& w) {
+        auto* panel = w.findChild<ReferencePanel*>();
+        CHECK(panel);
+        if (!panel) return;
+        QImage img(300, 200, QImage::Format_RGB32);
+        img.fill(Qt::green);
+        QApplication::clipboard()->setImage(img);
+        QToolButton* paste = nullptr;
+        QToolButton* trash = nullptr;
+        for (QToolButton* b : panel->findChildren<QToolButton*>()) {
+            if (b->toolTip() == T("Paste from the clipboard")) paste = b;
+            if (b->toolTip() == T("Remove")) trash = b;
+        }
+        CHECK(paste && trash);
+        if (!paste || !trash) return;
+        paste->click();
+        pump(50);
+        panel->setOverlayVisible(true);
+        pump(50);
+        auto* ov = w.findChild<ReferenceOverlay*>();
+        CHECK(ov && ov->isVisible() && ov->hasImage());
+        panel->setClickThrough(true);
+        pump(80);
+        CHECK(ov && ov->isVisible() && ov->clickThrough() && (ov->windowFlags() & Qt::WindowTransparentForInput));
+        CHECK(panel->clickThrough());
+        panel->setClickThrough(false);
+        pump(80);
+        CHECK(ov && ov->isVisible() && !(ov->windowFlags() & Qt::WindowTransparentForInput));
+        ov->setOpacityValue(0.3);
+        CHECK(std::abs(ov->opacity() - 0.3) < 1e-6);
+        ov->repaint();
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) {
+            QEnterEvent enter(QPointF(20, 20), QPointF(20, 20), ov->mapToGlobal(QPointF(20, 20)));
+            QCoreApplication::sendEvent(ov, &enter);
+            pump(30);
+            ov->grab().save(qEnvironmentVariable("GX_SHOTS") + "/overlay.png");
+        }
+        panel->setOverlayVisible(false);
+        pump(80);
+        CHECK(!ov->isVisible());
+        trash->click();
+        pump(50);
     }, w);
 
     std::fprintf(stderr, "%d passed, %d failed\n", g_pass, g_fail);

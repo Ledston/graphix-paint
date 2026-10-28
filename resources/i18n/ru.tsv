@@ -965,3 +965,24 @@ cm	см
 inches	дюймы
 mm	мм
 pixels	пиксели
+Hide from the timelapse	Не показывать в таймлапсе
+The layer stays visible while you work, but the timelapse video is recorded without it.	Слой виден, пока вы рисуете, но видео таймлапса записывается без него.
+Layers left out of the video: %1.	Слоёв не попадёт в видео: %1.
+Reference over everything	Референс поверх всего
+Draw through the reference	Рисовать сквозь референс
+Opacity (Ctrl + wheel)	Непрозрачность (Ctrl + колесо)
+Draw through the picture (the pen goes to the canvas below). Turn it off in the Reference panel or with the shortcut in View.	Рисовать сквозь картинку (перо попадает на холст под ней). Выключается на панели «Референс» или клавишей из меню «Вид».
+Not shown in screen recordings, streams or screen sharing.	Не видно в записи экрана, на стримах и при показе экрана.
+This Windows version shows a black box instead of the picture in recordings. Windows 10 (2004) or newer hides it completely.	В этой версии Windows в записи вместо картинки будет чёрный прямоугольник. В Windows 10 (2004) и новее она скрывается полностью.
+Screen recordings and screen sharing show this picture.	В записи и при показе экрана эта картинка видна.
+Could not hide the picture from screen recordings on this computer.	На этом компьютере не получилось скрыть картинку из записи экрана.
+Hiding from screen recordings works on Windows 10 (2004) and newer.	Скрытие из записи экрана работает в Windows 10 (2004) и новее.
+Reference over everything: the picture floats over the canvas (and any other program)	Референс поверх всего: картинка висит над холстом (и над любой программой)
+Draw through the picture	Рисовать сквозь картинку
+Hide from screen recording and screen sharing	Скрывать из записи и показа экрана
+Draw through the picture: the pen goes to the canvas under it	Рисовать сквозь картинку: перо попадает на холст под ней
+Add a reference picture first: Open, Paste or drop it on the Reference panel.	Сначала добавьте референс: «Открыть», «Вставить» или перетащите картинку на панель «Референс».
+Drawing through the reference. Turn it off with the same shortcut or the button on the Reference panel.	Рисование сквозь референс. Выключается той же клавишей или кнопкой на панели «Референс».
+The reference can be moved and resized again.	Референс снова можно двигать и менять размер.
+Alpha as layer	Альфа как слой
+QHD 2560 x 1440	QHD 2560 x 1440

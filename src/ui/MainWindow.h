@@ -18,6 +18,7 @@ namespace gx {
 class CanvasView;
 class Document;
 class LayerPanel;
+class ReferencePanel;
 class ColorPanel;
 
 class MainWindow : public QMainWindow {
@@ -85,6 +86,7 @@ private:
     QList<QAction*> m_docActions;
     QMenu* m_recentMenu = nullptr;
     LayerPanel* m_layers = nullptr;
+    ReferencePanel* m_refPanel = nullptr;
     ColorPanel* m_colors = nullptr;
     QList<QDockWidget*> m_docks;
     QByteArray m_hiddenState;

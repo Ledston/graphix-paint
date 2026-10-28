@@ -161,7 +161,26 @@ void Timelapse::capture(Document* d) {
         it->rendering = true;
         QPointer<Document> guard(d);
         QtConcurrent::run([root, bounds, file] {
-            frameImage(Compositor::renderImage(root.get(), bounds)).save(file, "JPG", 90);
+            // Draw in strips and shrink each one, so a huge canvas never needs one huge image.
+            const QSize outSize = bounds.size().width() > 1600 || bounds.size().height() > 1600
+                                      ? bounds.size().scaled(1600, 1600, Qt::KeepAspectRatio)
+                                      : bounds.size();
+            QImage out(outSize.expandedTo(QSize(1, 1)), QImage::Format_RGB32);
+            out.fill(Qt::white);
+            QPainter p(&out);
+            p.setRenderHint(QPainter::SmoothPixmapTransform);
+            const double sx = double(out.width()) / bounds.width(), sy = double(out.height()) / bounds.height();
+            const int stripH = std::max(128, int(16'000'000 / std::max(1, bounds.width())) / 128 * 128);
+            for (int y = bounds.top(); y <= bounds.bottom(); y += stripH) {
+                QRect strip(bounds.left(), y, bounds.width(), std::min(stripH, bounds.bottom() + 1 - y));
+                QImage part = Compositor::renderImage(root.get(), strip);
+                if (part.isNull()) continue;
+                p.drawImage(QRectF((strip.left() - bounds.left()) * sx, (strip.top() - bounds.top()) * sy,
+                                   strip.width() * sx, strip.height() * sy),
+                            part);
+            }
+            p.end();
+            out.save(file, "JPG", 90);
         }).then(this, [this, guard] {
             if (!guard) return;
             auto it2 = m_docs.find(guard.data());

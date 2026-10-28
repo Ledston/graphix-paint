@@ -4,8 +4,11 @@
 
 class QListWidget;
 class QToolButton;
+class QAction;
 
 namespace gx {
+
+class ReferenceOverlay;
 
 // Shows reference images next to the canvas; click one to pick its colors.
 class ReferenceView : public QWidget {
@@ -41,6 +44,16 @@ class ReferencePanel : public QWidget {
 public:
     explicit ReferencePanel(QWidget* parent = nullptr);
     ~ReferencePanel() override;
+
+    // The picture floating over everything (see ReferenceOverlay).
+    bool overlayVisible() const;
+    void setOverlayVisible(bool on);
+    bool clickThrough() const;
+    void setClickThrough(bool on);
+
+Q_SIGNALS:
+    void overlayStateChanged();
+
 protected:
     void dragEnterEvent(QDragEnterEvent* e) override;
     void dropEvent(QDropEvent* e) override;
@@ -48,7 +61,14 @@ private:
     void addImage(const QImage& img, const QString& path);
     void show(int index);
     void save();
+    ReferenceOverlay* overlay();
+    void syncOverlayButtons();
     QListWidget* m_list;
+    ReferenceOverlay* m_overlay = nullptr;
+    QToolButton* m_overlayBtn = nullptr;
+    QToolButton* m_throughBtn = nullptr;
+    QAction* m_captureAct = nullptr;
+    QAction* m_captureInfo = nullptr;
     ReferenceView* m_view;
     QList<QImage> m_images;
     QStringList m_paths;
