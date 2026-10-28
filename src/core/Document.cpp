@@ -1,6 +1,7 @@
 #include "core/Document.h"
 
 #include <QFileInfo>
+#include "app/I18n.h"
 #include <QRandomGenerator>
 
 #include "core/Effects.h"
@@ -45,7 +46,7 @@ void Document::setFilePath(const QString& p) {
 }
 
 QString Document::displayName() const {
-    if (m_filePath.isEmpty()) return QStringLiteral("Untitled");
+    if (m_filePath.isEmpty()) return T("Untitled");
     return QFileInfo(m_filePath).fileName();
 }
 

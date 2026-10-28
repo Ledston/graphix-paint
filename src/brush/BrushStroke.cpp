@@ -61,6 +61,12 @@ BrushStroke::BrushStroke(const StrokeContext& ctx) : m_ctx(ctx), m_rng(std::rand
     m_useSelection = ctx.doc->hasSelection();
     m_alphaLock = !ctx.targetMask && (ctx.layer->alphaLock || ctx.brush.keepOpacity);
 
+    // The mixing brush picks colors up mostly from the canvas as it was when the stroke
+    // started, otherwise every dab would only see the paint of the previous dab (which
+    // overlaps it by ~95%) and the brush would never mix with what is underneath.
+    if (m_engine == BrushEngine::Mix && !ctx.targetMask && ctx.layer->isRaster())
+        m_origin = std::make_unique<RasterSurface>(static_cast<RasterLayer*>(ctx.layer)->pixels);
+
     const bool buffered = m_engine == BrushEngine::Paint || m_engine == BrushEngine::Erase;
     if (buffered) {
         if (ctx.targetMask) ctx.layer->previewMask = std::make_shared<MaskSurface>(ctx.layer->mask);
@@ -374,6 +380,18 @@ void BrushStroke::directDab(Emitter& e, const DabParams& d, float density, float
         }
         if (wsum < 1e-6) return;
         float s[4] = {float(S[0] / wsum), float(S[1] / wsum), float(S[2] / wsum), float(S[3] / wsum)};
+        if (m_origin) {
+            if (tlAux.size() < n * 4) tlAux.resize(n * 4);
+            readFloat(*m_origin, box, tlAux.data());
+            double O[4] = {0, 0, 0, 0};
+            for (size_t i = 0; i < n; ++i) {
+                float w = tlCov[i];
+                if (w <= 0) continue;
+                for (int k = 0; k < 4; ++k) O[k] += double(tlAux[i * 4 + size_t(k)]) * w;
+            }
+            // 70% what was there before the stroke, 30% the wet paint of this stroke
+            for (int k = 0; k < 4; ++k) s[k] = float(O[k] / wsum) * 0.7f + s[k] * 0.3f;
+        }
         if (m_engine == BrushEngine::Mix) {
             float M[4];
             if (m_ctx.transparentColor) { M[0] = M[1] = M[2] = M[3] = 0; }

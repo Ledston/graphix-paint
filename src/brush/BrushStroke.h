@@ -72,6 +72,7 @@ private:
 
     StrokeContext m_ctx;
     BrushEngine m_engine;
+    std::unique_ptr<RasterSurface> m_origin;  // layer pixels at stroke start (shared tiles, no copy)
     std::vector<Emitter> m_emitters;
     std::deque<PathPoint> m_pending;  // held back for taper out
     double m_pathLen = 0;

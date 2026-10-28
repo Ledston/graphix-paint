@@ -1,4 +1,6 @@
 <RCC>
   <qresource prefix="/">
+    <file>i18n/ru.tsv</file>
+    <file>icons/app.png</file>
   </qresource>
 </RCC>

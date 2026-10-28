@@ -150,13 +150,13 @@ QVector<BrushSettings> BrushSettings::defaults() {
     }
     {
         BrushSettings b; b.name = "Brush"; b.iconKey = "brush"; b.engine = BrushEngine::Mix;
-        b.size = 26; b.minSize = 0.25; b.hardness = 0.7; b.blending = 0.3; b.persistence = 0.75;
-        b.density = 0.85; b.spacing = 0.05;
+        b.size = 26; b.minSize = 0.25; b.hardness = 0.7; b.blending = 0.5; b.persistence = 0.8;
+        b.density = 0.85; b.spacing = 0.05; b.blendingPressure = true;
         v << b;
     }
     {
         BrushSettings b; b.name = "Water Color"; b.iconKey = "watercolor"; b.engine = BrushEngine::Mix;
-        b.size = 45; b.minSize = 0.5; b.hardness = 0.45; b.blending = 0.5; b.dilution = 0.35; b.persistence = 0.6;
+        b.size = 45; b.minSize = 0.5; b.hardness = 0.45; b.blending = 0.6; b.dilution = 0.35; b.persistence = 0.75;
         b.density = 0.75; b.fringe = 0.2; b.texture = "Watercolor paper"; b.textureStrength = 0.25; b.spacing = 0.05;
         b.blendingPressure = true;
         v << b;
@@ -175,7 +175,7 @@ QVector<BrushSettings> BrushSettings::defaults() {
     {
         BrushSettings b; b.name = "Bristle"; b.iconKey = "bristle"; b.engine = BrushEngine::Mix;
         b.size = 34; b.minSize = 0.4; b.shape = "Bristle tip"; b.shapeAsTip = true; b.angleFollowsStroke = true;
-        b.blending = 0.2; b.persistence = 0.85; b.spacing = 0.04; b.hardness = 0.6;
+        b.blending = 0.35; b.persistence = 0.85; b.spacing = 0.04; b.hardness = 0.6; b.blendingPressure = true;
         v << b;
     }
     {
