@@ -50,15 +50,34 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $dist = "dist\GraphiX Paint"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Copy-Item build\GraphiX.exe $dist\
           windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw --no-compiler-runtime "$dist\GraphiX.exe"
           # MSVC runtime next to the program, so it starts on a clean Windows without installers
           $redist = Get-ChildItem "$env:VCToolsRedistDir\x64" -Directory -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
+          if (-not $redist) { throw "MSVC runtime not found in $env:VCToolsRedistDir" }
           Copy-Item "$($redist.FullName)\*.dll" $dist\
+          if (-not (Test-Path "$dist\vcruntime140.dll")) { throw "vcruntime140.dll missing" }
+          if (-not (Test-Path "$dist\platforms\qwindows.dll")) { throw "Qt platform plugin missing" }
+          if (-not (Test-Path "$dist\imageformats\qwebp.dll")) { throw "WebP plugin missing" }
+          Get-ChildItem -Recurse $dist | Select-Object -ExpandProperty FullName
           Copy-Item README.md "$dist\README.md"
           Compress-Archive -Path "dist\GraphiX Paint" -DestinationPath GraphiX-Paint-win64.zip -Force
+
+      - name: Test the packaged program (without the Qt SDK on PATH)
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          Copy-Item -Recurse "dist\GraphiX Paint" dist-test
+          Copy-Item build\gx_uismoke.exe dist-test\
+          Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
+          Remove-Item Env:QML2_IMPORT_PATH -ErrorAction SilentlyContinue
+          $env:PATH = "C:\Windows\system32;C:\Windows;C:\Windows\System32\WindowsPowerShell\v1.0"
+          $p = Start-Process -FilePath "dist-test\gx_uismoke.exe" -ArgumentList "uismoke-packaged" -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "packaged program test failed: $($p.ExitCode)" }
+          if (-not (Test-Path "uismoke-packaged\final.png")) { throw "no screenshot from the packaged program" }
 
       - name: Upload build
         uses: actions/upload-artifact@v4
@@ -71,7 +90,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ui-smoke-screenshots
-          path: uismoke
+          path: |
+            uismoke
+            uismoke-packaged
           if-no-files-found: ignore
 
       - name: Publish release

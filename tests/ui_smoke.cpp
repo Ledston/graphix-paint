@@ -93,6 +93,7 @@ int main(int argc, char** argv) {
     Q_INIT_RESOURCE(resources);
     QCoreApplication::setOrganizationName("GraphiXTest");
     QCoreApplication::setApplicationName("GraphiX Paint Test");
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);  // so the test can close every dialog
     QApplication a(argc, argv);
     g_out = argc > 1 ? QString::fromLocal8Bit(argv[1]) : QDir::currentPath() + "/uismoke";
     QDir().mkpath(g_out);
