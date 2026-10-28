@@ -10,6 +10,9 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QDialogButtonBox>
+#include <QCheckBox>
+#include <QFormLayout>
 #include <QActionGroup>
 #include <QProcess>
 #include <QLineEdit>
@@ -340,6 +343,7 @@ void MainWindow::createActions() {
     act("layer.recolor", "Recolor with the main color", "Layer", {}, [doc, curRaster] { if (auto* l = curRaster()) ops::recolorLayer(*doc(), l->id, app()->foreground()); });
     act("layer.copysel", "New layer from selection (copy)", "Layer", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_J), [doc] { ops::layerFromSelection(*doc(), false); });
     act("layer.cutsel", "New layer from selection (cut)", "Layer", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_J), [doc] { ops::layerFromSelection(*doc(), true); });
+    act("layer.flats", "Auto-fill colors (flats)...", "Layer", {}, [this] { autoFlatsDialog(); }, "fill");
     act("layer.center", "Center on canvas", "Layer", {}, [doc, cur] { if (auto* l = cur()) ops::centerLayer(*doc(), l->id); });
     act("layer.effects", "Layer effects...", "Layer", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F), [this, cur] { if (auto* l = cur()) layerEffects(l->id, {}); }, "fx");
 
@@ -549,7 +553,7 @@ void MainWindow::createMenus() {
     for (int t = 0; t < int(AdjustmentType::Count); ++t) add(adjLayer, QStringLiteral("adjustlayer.%1").arg(t));
     for (const char* id : {"", "layer.duplicate", "layer.delete", "", "layer.mergedown", "layer.mergeselected", "layer.mergevisible", "layer.flatten",
                            "layer.group", "layer.rasterize", "", "layer.up", "layer.down", "", "layer.clip", "layer.alphalock",
-                           "layer.hide", "layer.reference", "", "layer.properties", "layer.effects"}) {
+                           "layer.hide", "layer.reference", "layer.flats", "", "layer.properties", "layer.effects"}) {
         if (!*id) layer->addSeparator();
         else add(layer, id);
     }
@@ -1198,6 +1202,53 @@ void MainWindow::preferences(int page) {
         QTimer::singleShot(0, this, &MainWindow::restartApp);
     });
     dlg.exec();
+}
+
+void MainWindow::autoFlatsDialog() {
+    Document* d = activeDocument();
+    if (!d) return;
+    QDialog dlg(this);
+    dlg.setWindowTitle(T("Auto-fill colors (flats)"));
+    auto* v = new QVBoxLayout(&dlg);
+    auto* info = new QLabel(T("Every closed area of the line art gets its own flat color on a new layer under the lines. "
+                              "Then recolor the areas with the Fill tool (\"Borders from the current layer\")."), &dlg);
+    info->setWordWrap(true);
+    v->addWidget(info);
+    auto* f = new QFormLayout;
+    auto* gap = new QSpinBox(&dlg);
+    gap->setRange(0, 30);
+    gap->setValue(app()->settings().value("flats/gap", 4).toInt());
+    gap->setSuffix(" px");
+    f->addRow(T("Close gaps"), gap);
+    auto* bg = new QCheckBox(T("Leave the background empty"), &dlg);
+    bg->setChecked(app()->settings().value("flats/skipBg", true).toBool());
+    f->addRow(bg);
+    auto* colors = new QComboBox(&dlg);
+    colors->addItems({T("Soft different colors"), T("Grays"), T("The main color")});
+    colors->setCurrentIndex(app()->settings().value("flats/colors", 0).toInt());
+    f->addRow(T("Colors"), colors);
+    v->addLayout(f);
+    bool hasRef = false;
+    forEachLayer(d->root(), [&](Layer* l) {
+        if (l->reference) hasRef = true;
+        return !hasRef;
+    });
+    auto* src = new QLabel(hasRef ? T("Line art: the reference layers.") : T("Line art: the current layer (no reference layer is marked)."), &dlg);
+    src->setObjectName("sectionTitle");
+    v->addWidget(src);
+    auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    v->addWidget(bb);
+    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() != QDialog::Accepted) return;
+    app()->settings().setValue("flats/gap", gap->value());
+    app()->settings().setValue("flats/skipBg", bg->isChecked());
+    app()->settings().setValue("flats/colors", colors->currentIndex());
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    QString err;
+    Layer* l = ops::autoFlats(*d, gap->value(), bg->isChecked(), colors->currentIndex(), app()->foreground(), &err);
+    QApplication::restoreOverrideCursor();
+    if (!l && !err.isEmpty()) QMessageBox::information(this, T("Auto-fill colors (flats)"), T(err));
 }
 
 void MainWindow::switchLanguage(const QString& code) {

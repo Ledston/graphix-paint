@@ -53,6 +53,11 @@ void recolorLayer(Document& doc, quint32 id, const QColor& c);  // keeps the sha
 Layer* layerFromSelection(Document& doc, bool cut);
 void centerLayer(Document& doc, quint32 id);
 
+// ---- coloring line art ----
+// Fills every closed area of the line art with its own flat color on a new layer under it.
+// colorMode: 0 soft colors, 1 grays, 2 the main color everywhere.
+Layer* autoFlats(Document& doc, int gapClose, bool skipBackground, int colorMode, const QColor& main, QString* error = nullptr);
+
 // ---- masks ----
 void addMask(Document& doc, quint32 id, bool fromSelection);
 void deleteMask(Document& doc, quint32 id);

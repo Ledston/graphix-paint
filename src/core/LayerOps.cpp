@@ -7,6 +7,7 @@
 #include <QPainter>
 #include <QtMath>
 #include <algorithm>
+#include <deque>
 #include <cmath>
 
 #include "core/Compositor.h"
@@ -681,6 +682,146 @@ void centerLayer(Document& doc, quint32 id) {
     }
     l->version++;
     doc.pixelsChanged(b | b.translated(d), l);
+}
+
+// ---------------------------------------------------------------------------- flats
+
+Layer* autoFlats(Document& doc, int gapClose, bool skipBackground, int colorMode, const QColor& main, QString* error) {
+    // line art: the reference layers, or the current layer
+    std::vector<LayerPtr> refs;
+    Layer* lowestRef = nullptr;
+    forEachLayer(doc.root(), [&](Layer* l) {
+        if (l->reference && !l->isGroup()) {
+            LayerPtr c = l->clone();
+            c->visible = true;
+            c->clipping = false;
+            refs.push_back(c);
+            if (!lowestRef) lowestRef = l;
+        }
+        return true;
+    });
+    if (refs.empty())
+        if (Layer* cur = doc.currentLayer(); cur && !cur->isGroup() && cur->type() != LayerType::Adjustment) {
+            refs.push_back(cur->clone());
+            refs.back()->visible = true;
+            lowestRef = cur;
+        }
+    if (refs.empty()) {
+        if (error) *error = "Select the line art layer first.";
+        return nullptr;
+    }
+    const QRect area = doc.bounds();
+    const int W = area.width(), H = area.height();
+    if (qint64(W) * H > 200ll * 1000 * 1000) {
+        if (error) *error = "The area is too large to fill at once. Select a smaller area first.";
+        return nullptr;
+    }
+    RasterSurface lines = renderLayers(doc, refs, area);
+    const size_t N = size_t(W) * H;
+    std::vector<float> px(N * 4);
+    readFloat(lines, area, px.data());
+    std::vector<uint8_t> ink(N);
+    for (size_t i = 0; i < N; ++i) {
+        const float a = px[i * 4 + 3];
+        const float lum = a > 0 ? luminance(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]) / a : 1.f;
+        ink[i] = a * (1.f - lum) >= 0.35f ? 1 : 0;  // dark, solid paint = border
+    }
+    std::vector<uint8_t> wall = ink;
+    if (gapClose > 0) {
+        std::vector<float> d2;
+        distanceTransform(ink, W, H, d2);
+        const float r2 = float(gapClose) * float(gapClose) * 0.25f;
+        for (size_t i = 0; i < N; ++i) wall[i] = d2[i] <= r2 ? 1 : 0;
+    }
+    // label the closed areas
+    std::vector<int> label(N, -1);
+    std::vector<int> stack;
+    std::vector<int> areas;
+    std::vector<bool> touchesEdge;
+    for (int start = 0; start < int(N); ++start) {
+        if (wall[size_t(start)] || label[size_t(start)] >= 0) continue;
+        const int id = int(areas.size());
+        int count = 0;
+        bool edge = false;
+        stack.push_back(start);
+        label[size_t(start)] = id;
+        while (!stack.empty()) {
+            const int p = stack.back();
+            stack.pop_back();
+            ++count;
+            const int x = p % W, y = p / W;
+            if (x == 0 || y == 0 || x == W - 1 || y == H - 1) edge = true;
+            const int nb[4] = {x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, y > 0 ? p - W : -1, y < H - 1 ? p + W : -1};
+            for (int q : nb)
+                if (q >= 0 && !wall[size_t(q)] && label[size_t(q)] < 0) {
+                    label[size_t(q)] = id;
+                    stack.push_back(q);
+                }
+        }
+        areas.push_back(count);
+        touchesEdge.push_back(edge);
+    }
+    if (areas.empty()) {
+        if (error) *error = "No closed areas were found in the line art.";
+        return nullptr;
+    }
+    // tiny specks and (optionally) the background stay out; lines get the color of a neighbor
+    std::vector<bool> keep(areas.size());
+    for (size_t i = 0; i < areas.size(); ++i) keep[i] = areas[i] >= 12 && !(skipBackground && touchesEdge[i]);
+    std::vector<int> owner(N, -1);
+    std::deque<int> queue;
+    for (size_t i = 0; i < N; ++i)
+        if (label[i] >= 0 && keep[size_t(label[i])]) {
+            owner[i] = label[i];
+            queue.push_back(int(i));
+        }
+    // grow into lines, closed-gap borders and specks (up to a limit so the background stays empty)
+    std::vector<uint8_t> dist(N, 0);
+    const int maxGrow = std::max(6, gapClose + 6);
+    while (!queue.empty()) {
+        const int p = queue.front();
+        queue.pop_front();
+        const int x = p % W, y = p / W;
+        const int nb[4] = {x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, y > 0 ? p - W : -1, y < H - 1 ? p + W : -1};
+        for (int q : nb) {
+            if (q < 0 || owner[size_t(q)] >= 0) continue;
+            const bool lineOrGap = wall[size_t(q)] || (label[size_t(q)] >= 0 && !keep[size_t(label[size_t(q)])] && areas[size_t(label[size_t(q)])] < 12);
+            if (!lineOrGap || dist[size_t(p)] >= maxGrow) continue;
+            owner[size_t(q)] = owner[size_t(p)];
+            dist[size_t(q)] = uint8_t(std::min(255, dist[size_t(p)] + 1));
+            queue.push_back(q);
+        }
+    }
+    // colors
+    std::vector<quint32> colors(areas.size());
+    double hue = 0.11;
+    for (size_t i = 0; i < areas.size(); ++i) {
+        QColor c;
+        if (colorMode == 2) c = main;
+        else if (colorMode == 1) c = QColor::fromHsvF(0, 0, 0.55 + 0.4 * std::fmod(i * 0.381966, 1.0));
+        else {
+            hue = std::fmod(hue + 0.618034, 1.0);
+            c = QColor::fromHsvF(float(hue), float(0.32 + 0.2 * std::fmod(i * 0.7548, 1.0)), float(0.86 + 0.1 * std::fmod(i * 0.5698, 1.0)));
+        }
+        colors[i] = 0xff000000u | (quint32(c.red()) << 16) | (quint32(c.green()) << 8) | quint32(c.blue());
+    }
+    std::vector<quint32> out(N, 0u);
+    for (size_t i = 0; i < N; ++i)
+        if (owner[i] >= 0) out[i] = colors[size_t(owner[i])];
+    doc.pushUndo("Auto-fill colors");
+    auto flats = std::make_shared<RasterLayer>();
+    flats->id = doc.newLayerId();
+    flats->name = doc.uniqueLayerName("Flats");
+    flats->pixels.writeRect(area, out.data(), W);
+    flats->pixels.optimize();
+    // under the line art
+    Layer* ref = lowestRef ? doc.layer(lowestRef->id) : nullptr;
+    GroupLayer* parent = ref && ref->parent ? ref->parent : doc.root();
+    const int at = ref && ref->parent ? parent->indexOf(ref) : int(parent->children.size());
+    parent->insert(std::max(0, at), flats);
+    doc.setCurrentLayer(flats->id);
+    doc.structureChanged();
+    return flats.get();
 }
 
 // ---------------------------------------------------------------------------- several layers

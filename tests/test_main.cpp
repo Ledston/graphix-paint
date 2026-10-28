@@ -15,6 +15,7 @@
 #include "core/Pixel.h"
 #include "core/Textures.h"
 #include "io/NativeFormat.h"
+#include "tools/SelectTools.h"
 #include "io/PsdFormat.h"
 #include "vector/VectorRender.h"
 
@@ -418,6 +419,54 @@ static void testChannels() {
     CHECK(compositeAt(doc, 8, 50) != 0xffffffffu || compositeAt(doc, 112, 50) != 0xffffffffu);
 }
 
+static void testLineartColoring() {
+    Document doc(QSize(300, 200));
+    auto paper = std::make_shared<RasterLayer>();
+    paper->id = doc.newLayerId();
+    paper->pixels.fillRect(doc.bounds(), 0xffffffffu);
+    doc.root()->insert(0, paper);
+    auto color = std::make_shared<RasterLayer>();
+    color->id = doc.newLayerId();
+    doc.root()->insert(1, color);
+    // line art: two boxes, the right one has a 4 px gap in its border
+    auto lines = std::make_shared<RasterLayer>();
+    lines->id = doc.newLayerId();
+    auto box = [&](QRect r) {
+        lines->pixels.fillRect(QRect(r.left(), r.top(), r.width(), 3), 0xff000000u);
+        lines->pixels.fillRect(QRect(r.left(), r.bottom() - 2, r.width(), 3), 0xff000000u);
+        lines->pixels.fillRect(QRect(r.left(), r.top(), 3, r.height()), 0xff000000u);
+        lines->pixels.fillRect(QRect(r.right() - 2, r.top(), 3, r.height()), 0xff000000u);
+    };
+    box(QRect(20, 20, 100, 100));
+    box(QRect(160, 20, 100, 100));
+    lines->pixels.fillRect(QRect(160, 60, 3, 4), 0u);  // the gap
+    lines->reference = true;
+    doc.root()->insert(2, lines);
+    doc.setCurrentLayer(color->id);
+
+    QString err;
+    // without closing gaps the fill leaks out of the right box
+    MaskSurface leak = floodFillEx(&doc, QPoint(210, 70), 20, FillSource::ReferenceLayers, true, color.get(), 0, &err);
+    CHECK(err.isEmpty());
+    CHECK(leak.pixel(5, 5) == 255);
+    MaskSurface closed = floodFillEx(&doc, QPoint(210, 70), 20, FillSource::ReferenceLayers, true, color.get(), 6, &err);
+    CHECK(closed.pixel(5, 5) == 0);
+    CHECK(closed.pixel(210, 70) == 255);
+    CHECK(closed.pixel(124, 70) == 0);
+
+    // auto flats: two areas, different colors, background left empty, a layer under the lines
+    Layer* flats = ops::autoFlats(doc, 6, true, 0, Qt::red, &err);
+    CHECK(flats != nullptr);
+    if (flats) {
+        auto* fl = static_cast<RasterLayer*>(flats);
+        const quint32 a = fl->pixels.pixel(70, 70), b = fl->pixels.pixel(210, 70);
+        CHECK((a >> 24) == 255 && (b >> 24) == 255 && a != b);
+        CHECK((fl->pixels.pixel(5, 5) >> 24) == 0);
+        CHECK((fl->pixels.pixel(21, 70) >> 24) == 255);  // goes under the line
+        CHECK(doc.root()->indexOf(flats) < doc.root()->indexOf(doc.layer(lines->id)));
+    }
+}
+
 int main(int argc, char** argv) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
@@ -434,6 +483,7 @@ int main(int argc, char** argv) {
     testProjection();
     testCanvasOps();
     testChannels();
+    testLineartColoring();
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

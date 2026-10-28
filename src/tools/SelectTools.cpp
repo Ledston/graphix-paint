@@ -12,6 +12,8 @@
 #include "app/I18n.h"
 #include "brush/Dab.h"
 #include "core/Document.h"
+#include "core/ImageOps.h"
+#include "core/LayerOps.h"
 #include "core/Pixel.h"
 #include "ui/CanvasView.h"
 #include "ui/Theme.h"
@@ -207,6 +209,12 @@ void LassoSelectTool::drawOverlay(QPainter& p, CanvasView* v) {
 // ============================================================================ flood fill
 
 MaskSurface floodFill(Document* doc, const QPoint& seed, int tol, bool merged, bool contiguous, const Layer* layer, QString* error) {
+    return floodFillEx(doc, seed, tol, merged ? FillSource::AllVisible : FillSource::CurrentLayer, contiguous, layer, 0, error);
+}
+
+MaskSurface floodFillEx(Document* doc, const QPoint& seed, int tol, FillSource source, bool contiguous, const Layer* layer, int gapClose,
+                        QString* error) {
+    const bool merged = source == FillSource::AllVisible;
     MaskSurface out(0);
     QRect area = doc->hasSelection() ? doc->selectionBounds() : doc->bounds();
     if (!area.contains(seed)) return out;
@@ -232,6 +240,24 @@ MaskSurface floodFill(Document* doc, const QPoint& seed, int tol, bool merged, b
                     px[size_t(y - area.top()) * W + (x - area.left())] =
                         (e && e->tile) ? e->tile->at(((y & (TILE - 1)) << TILE_SHIFT) | (x & (TILE - 1))) : 0u;
         }
+    } else if (source == FillSource::ReferenceLayers) {
+        // only the layers marked as reference (line art), shown or not
+        std::vector<LayerPtr> refs;
+        forEachLayer(doc->root(), [&](Layer* l) {
+            if (l->reference && !l->isGroup()) {
+                LayerPtr c = l->clone();
+                c->visible = true;
+                c->clipping = false;
+                refs.push_back(c);
+            }
+            return true;
+        });
+        if (refs.empty()) {
+            if (error) *error = "No reference layer yet: right-click the line art layer and choose \"Reference layer\".";
+            return out;
+        }
+        RasterSurface rs = ops::renderLayers(*doc, refs, area);
+        rs.readRect(area, px.data(), int(W));
     } else if (layer && layer->displaySurface()) {
         layer->displaySurface()->readRect(area.translated(-layer->previewOffset), px.data(), int(W));
     }
@@ -245,6 +271,20 @@ MaskSurface floodFill(Document* doc, const QPoint& seed, int tol, bool merged, b
         return true;
     };
     std::vector<uint8_t> fill(size_t(W * H), 0);
+    // Closing gaps: the borders are made thicker so small breaks close, the fill
+    // happens, and then it grows back by the same amount under the borders.
+    std::vector<uint8_t> wall;
+    if (gapClose > 0 && contiguous) {
+        std::vector<uint8_t> border(size_t(W * H));
+        for (size_t i = 0; i < border.size(); ++i) border[i] = match(px[i]) ? 0 : 1;
+        std::vector<float> d2;
+        distanceTransform(border, int(W), int(H), d2);
+        const float r2 = float(gapClose) * float(gapClose) * 0.25f;  // gap width -> half on each side
+        wall.resize(border.size());
+        for (size_t i = 0; i < wall.size(); ++i) wall[i] = d2[i] <= r2 ? 1 : 0;
+        if (wall[size_t(seed.y() - area.top()) * W + (seed.x() - area.left())]) wall.clear();  // clicked right on a border
+    }
+    auto open = [&](size_t i) { return wall.empty() ? match(px[i]) : !wall[i]; };
     if (!contiguous) {
         for (size_t i = 0; i < px.size(); ++i) fill[i] = match(px[i]) ? 1 : 0;
     } else {
@@ -254,22 +294,32 @@ MaskSurface floodFill(Document* doc, const QPoint& seed, int tol, bool merged, b
             auto [x, y] = stack.back();
             stack.pop_back();
             size_t row = size_t(y) * W;
-            if (fill[row + x] || !match(px[row + x])) continue;
+            if (fill[row + x] || !open(row + x)) continue;
             int l = x, r = x;
-            while (l > 0 && !fill[row + l - 1] && match(px[row + l - 1])) --l;
-            while (r < W - 1 && !fill[row + r + 1] && match(px[row + r + 1])) ++r;
+            while (l > 0 && !fill[row + l - 1] && open(row + l - 1)) --l;
+            while (r < W - 1 && !fill[row + r + 1] && open(row + r + 1)) ++r;
             for (int i = l; i <= r; ++i) fill[row + i] = 1;
             for (int ny : {y - 1, y + 1}) {
                 if (ny < 0 || ny >= H) continue;
                 size_t nrow = size_t(ny) * W;
                 bool in = false;
                 for (int i = l; i <= r; ++i) {
-                    bool ok = !fill[nrow + i] && match(px[nrow + i]);
+                    bool ok = !fill[nrow + i] && open(nrow + i);
                     if (ok && !in) { stack.push_back({i, ny}); in = true; }
                     else if (!ok) in = false;
                 }
             }
         }
+    }
+    if (!wall.empty()) {
+        // grow back into the thickened border, but only over open pixels
+        std::vector<uint8_t> grown = fill;
+        std::vector<float> d2;
+        distanceTransform(fill, int(W), int(H), d2);
+        const float r2 = (float(gapClose) * 0.5f + 1.f) * (float(gapClose) * 0.5f + 1.f);
+        for (size_t i = 0; i < fill.size(); ++i)
+            if (!fill[i] && d2[i] <= r2 && match(px[i])) grown[i] = 1;
+        fill.swap(grown);
     }
     std::vector<quint8> m(fill.size());
     for (size_t i = 0; i < fill.size(); ++i) m[i] = fill[i] ? 255 : 0;

@@ -73,6 +73,7 @@ private:
     void imageSize();
     void preferences(int page = 0);
     void switchLanguage(const QString& code);
+    void autoFlatsDialog();
     void restartApp();
     void shortcutsDialog();
     void togglePanels();

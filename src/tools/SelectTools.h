@@ -123,4 +123,10 @@ private:
 MaskSurface floodFill(Document* doc, const QPoint& seed, int tolerance, bool sampleMerged, bool contiguous, const Layer* layer,
                       QString* error);
 
+// Where the fill looks for borders.
+enum class FillSource { AllVisible = 0, CurrentLayer = 1, ReferenceLayers = 2 };
+// gapClose: breaks in the borders up to this many px are treated as closed.
+MaskSurface floodFillEx(Document* doc, const QPoint& seed, int tolerance, FillSource source, bool contiguous, const Layer* layer,
+                        int gapClose, QString* error);
+
 }  // namespace gx

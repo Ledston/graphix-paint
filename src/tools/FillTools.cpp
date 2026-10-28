@@ -84,7 +84,7 @@ void FillTool::press(const PointerEvent& e) {
     QPoint seed(int(std::floor(e.pos.x())), int(std::floor(e.pos.y())));
     if (!d->bounds().contains(seed)) return;
     QString err;
-    MaskSurface m = floodFill(d, seed, tolerance, sampleMerged, contiguous, l, &err);
+    MaskSurface m = floodFillEx(d, seed, tolerance, FillSource(source), contiguous, l, gapClose, &err);
     if (!err.isEmpty()) {
         app()->showStatus(T(err));
         return;
@@ -130,19 +130,26 @@ QWidget* FillTool::createOptions(QWidget* parent) {
     op->setValue(opacity);
     connect(op, &ValueBar::valueChanged, this, [this](double v) { opacity = v; });
     auto* src = new QComboBox(w);
-    src->addItems({T("Sample all visible layers"), T("Sample current layer")});
-    src->setCurrentIndex(sampleMerged ? 0 : 1);
-    connect(src, &QComboBox::currentIndexChanged, this, [this](int i) { sampleMerged = i == 0; });
+    src->addItems({T("Borders from all visible layers"), T("Borders from the current layer"), T("Borders from reference layers (line art)")});
+    src->setCurrentIndex(source);
+    src->setToolTip(T("Reference layers: right-click the line art layer and choose \"Reference layer\"."));
+    connect(src, &QComboBox::currentIndexChanged, this, [this](int i) { source = i; });
+    auto* gap = new ValueBar(T("Close gaps"), 0, 30, 0, w);
+    gap->setSuffix(" px");
+    gap->setValue(gapClose);
+    gap->setToolTip(T("Small breaks in the lines up to this size count as closed"));
+    connect(gap, &ValueBar::valueChanged, this, [this](double v) { gapClose = int(v); });
     auto* cont = new QCheckBox(T("Contiguous"), w);
     cont->setChecked(contiguous);
     connect(cont, &QCheckBox::toggled, this, [this](bool on) { contiguous = on; });
     auto* aa = new QCheckBox(T("Soft edges"), w);
     aa->setChecked(antialias);
     connect(aa, &QCheckBox::toggled, this, [this](bool on) { antialias = on; });
-    for (QWidget* x : {static_cast<QWidget*>(tol), static_cast<QWidget*>(ex), static_cast<QWidget*>(op), static_cast<QWidget*>(src),
-                       static_cast<QWidget*>(cont), static_cast<QWidget*>(aa)})
+    ex->setLabel(T("Go under the lines"));
+    for (QWidget* x : {static_cast<QWidget*>(src), static_cast<QWidget*>(tol), static_cast<QWidget*>(gap), static_cast<QWidget*>(ex),
+                       static_cast<QWidget*>(op), static_cast<QWidget*>(cont), static_cast<QWidget*>(aa)})
         f->addWidget(x);
-    auto* hint = new QLabel(T("Fill flat colors under line art: keep \"all visible layers\" and paint on a layer below the lines."), w);
+    auto* hint = new QLabel(T("Coloring line art: mark the line art as reference layer, choose \"Borders from reference layers\" and fill on a layer under the lines."), w);
     hint->setWordWrap(true);
     hint->setObjectName("sectionTitle");
     f->addWidget(hint);

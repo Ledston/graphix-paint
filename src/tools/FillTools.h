@@ -17,7 +17,9 @@ public:
     QWidget* createOptions(QWidget* parent) override;
 
     int tolerance = 40;
-    bool sampleMerged = true;
+    bool sampleMerged = true;  // (old setting, see source)
+    int source = 0;            // FillSource: all visible, current layer, reference layers
+    int gapClose = 0;          // px
     bool contiguous = true;
     int expand = 1;
     bool antialias = true;
