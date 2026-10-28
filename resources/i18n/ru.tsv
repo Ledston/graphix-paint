@@ -181,9 +181,9 @@ Copies	Копии
 Copies are made in the background and never replace your files. After a crash the program offers to restore them.	Копии делаются в фоне и никогда не заменяют ваши файлы. После сбоя программа предложит их восстановить.
 Copy	Копировать
 Copy merged	Копировать сведённое
-Could not create the video file.	Не удалось создать видеофайл.
+Could not create the video file.	Не удалось создать файл видео.
 Could not export:\n%1	Не удалось экспортировать:\n%1
-Could not finish the video file.	Не удалось завершить видеофайл.
+Could not finish the video file.	Не удалось дописать файл видео.
 Could not open %1:\n%2	Не удалось открыть %1:\n%2
 Could not read some pixels of "%1".	Не удалось прочитать часть пикселей «%1».
 Could not read the image:\n%1	Не удалось прочитать изображение:\n%1
@@ -876,7 +876,7 @@ There is no layer below to merge into.	Нет слоя ниже для объе�
 Thickness	Толщина
 Thickness changes along the lines, like pen pressure	Толщина меняется вдоль линий, как от нажима пера
 This canvas has %1 megapixels. Empty areas cost no memory, but painting all of it needs a lot of RAM. Continue?	В холсте %1 мегапикселей. Пустые области не занимают память, но закрашивание всего холста потребует много ОЗУ. Продолжить?
-This computer could not start the H.264 video encoder.	На этом компьютере не запустился видеокодировщик H.264.
+This computer could not start the H.264 video encoder.	На этом компьютере не запустился видеокодек H.264.
 This format keeps only the flattened image. Save as .gxp or .psd to keep the layers.	Этот формат хранит только сведённое изображение. Чтобы сохранить слои, используйте .gxp или .psd.
 This is not a GraphiX file.	Это не файл GraphiX.
 This is not a PSD file.	Это не файл PSD.
@@ -965,8 +965,6 @@ cm	см
 inches	дюймы
 mm	мм
 pixels	пиксели
-Hide from the timelapse	Не показывать в таймлапсе
-The layer stays visible while you work, but the timelapse video is recorded without it.	Слой виден, пока вы рисуете, но видео таймлапса записывается без него.
 Layers left out of the video: %1.	Слоёв не попадёт в видео: %1.
 Reference over everything	Референс поверх всего
 Draw through the reference	Рисовать сквозь референс
@@ -986,3 +984,62 @@ Drawing through the reference. Turn it off with the same shortcut or the button 
 The reference can be moved and resized again.	Референс снова можно двигать и менять размер.
 Alpha as layer	Альфа как слой
 QHD 2560 x 1440	QHD 2560 x 1440
+Windows video support (Media Foundation) is missing. On Windows N, install the Media Feature Pack.	В Windows нет поддержки видео (Media Foundation). В Windows N установите «Пакет компонентов мультимедиа» (Media Feature Pack).
+Nothing to record.	Нечего записывать.
+Nothing was recorded yet.	Пока ничего не записано.
+Windows video support (Media Foundation) could not start.	Не удалось запустить поддержку видео Windows (Media Foundation).
+Could not read the video file.	Не удалось прочитать файл видео.
+The recorded video could not be read.	Не удалось прочитать записанное видео.
+Hide from the recording	Не показывать в записи
+The layer stays visible while you work, but the video recording is made without it.	Слой виден, пока вы рисуете, но в запись видео он не попадает.
+Video recording	Запись видео
+Delete the recording of this picture (%1)? The picture itself stays.	Удалить запись этого рисунка (%1)? Сам рисунок останется.
+The recording stopped.	Запись остановилась.
+What was recorded so far is kept.	То, что уже записано, сохранено.
+Open or create a picture first.	Сначала откройте или создайте рисунок.
+The recording is already running.	Запись уже идёт.
+Could not start the recording.	Не удалось начать запись.
+Recording the program window.	Идёт запись окна программы.
+Recording the canvas.	Идёт запись холста.
+%1 pauses.	%1 — пауза.
+%1 stops and saves the video.	%1 — стоп и сохранить видео.
+Recording paused (%1).	Запись на паузе (%1).
+%1 continues.	%1 — продолжить.
+Nothing is recorded yet. Press Record on the toolbar%1 to start.	Пока ничего не записано. Нажмите «Запись» на верхней панели%1, чтобы начать.
+Save the video	Сохранить видео
+Recorded: %1 (only the time you were drawing).	Записано: %1 (только время, когда вы рисовали).
+What is recorded: the program window.	Что записывается: окно программы.
+What is recorded: the canvas.	Что записывается: холст.
+Real speed (%1)	Реальная скорость (%1)
+Speed up to	Ускорить до
+Show the finished picture 2 more seconds at the end	Показать готовую картинку ещё 2 секунды в конце
+Save video...	Сохранить видео...
+Continue later	Продолжить потом
+Delete the recording	Удалить запись
+Keep the recording: press Record again to continue it.	Оставить запись: чтобы продолжить, снова нажмите «Запись».
+Delete the recording? This cannot be undone.	Удалить запись? Это нельзя отменить.
+The recording was deleted.	Запись удалена.
+The recording is kept. Press Record to continue it.	Запись сохранена. Нажмите «Запись», чтобы продолжить.
+recording	запись
+MP4 video	Видео MP4
+Saving the video...	Сохранение видео...
+Cancelled. The recording is kept.	Отменено. Запись сохранена.
+Could not save the video.	Не удалось сохранить видео.
+The recording is kept.	Запись сохранена.
+The video is saved:	Видео сохранено:
+Open folder	Открыть папку
+The recording of %1 is kept: open the file and press Record to continue it.	Запись рисунка «%1» сохранена: откройте файл и нажмите «Запись», чтобы продолжить.
+This picture is not saved, so its recording cannot be continued later. Save the video now?	Рисунок не сохранён, поэтому его запись нельзя будет продолжить потом. Сохранить видео сейчас?
+Recording. Pause: %1, stop and save: %2.	Идёт запись. Пауза: %1, стоп и сохранить: %2.
+Paused	Пауза
+The recording is paused. Record continues it, Stop saves the video.	Запись на паузе. «Запись» продолжает её, «Стоп» сохраняет видео.
+Continue recording	Продолжить запись
+Start recording	Начать запись
+Recording	Запись
+Pause recording	Пауза записи
+Record / pause	Запись / пауза
+Stop and save the video...	Стоп и сохранить видео...
+Open the recordings folder	Открыть папку с записями
+Record only the canvas	Записывать только холст
+Record the program window	Записывать окно программы
+ s	 с

@@ -13,6 +13,7 @@
 namespace gx {
 
 class Document;
+class Projection;
 
 // Shows a document and turns pen / mouse input into tool events.
 // Rendering is done on the CPU with all cores (like SAI): the screen is drawn
@@ -56,6 +57,12 @@ public:
     void refreshCursor();
     void invalidateAll();
 
+    // While true, views paint the picture for a screen recording (layers hidden from
+    // recordings are left out). Used around MainWindow::grab() by the recorder.
+    static void setRecordingPaint(bool on) { s_recordingPaint = on; }
+    // Frees the second picture cache once recording stops.
+    void dropRecordingCache() { m_rec = ViewCache(); }
+
 Q_SIGNALS:
     void viewChanged();
     void cursorMoved(const QPointF& canvasPos);
@@ -81,9 +88,16 @@ protected:
 private:
     PointerEvent makeEvent(const QPointF& wpos, double pressure, Qt::MouseButton b, Qt::MouseButtons bs,
                            Qt::KeyboardModifiers m, double timeMs, bool tablet) const;
+    struct ViewCache {
+        QImage img;
+        QTransform xf;
+        bool valid = false;
+        bool complete = false;
+        QRect dirty;  // physical pixels
+    };
     QTransform physicalTransform() const;
-    void ensureCache();
-    bool renderRect(const QRect& physRect, int level);
+    void ensureCache(ViewCache& vc, Projection* proj);
+    bool renderRect(ViewCache& vc, const Projection* proj, const QRect& physRect, int level);
     void markCanvasDirty(const QRect& canvasRect);
     void paintOverlays(QPainter& p);
     void drawSelection(QPainter& p);
@@ -100,10 +114,9 @@ private:
     double m_zoom = 1.0, m_rot = 0.0;
     bool m_flip = false;
 
-    QImage m_cache;
-    QTransform m_cacheXf;
-    bool m_cacheValid = false;
-    QRect m_dirty;  // physical pixels
+    ViewCache m_main;  // what the screen shows
+    ViewCache m_rec;   // the same for screen recordings (only while recording the window)
+    static bool s_recordingPaint;
     bool m_moreWork = false;
     quint32 m_frame = 0;
 

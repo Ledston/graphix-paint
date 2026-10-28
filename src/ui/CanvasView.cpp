@@ -21,6 +21,8 @@
 
 namespace gx {
 
+bool CanvasView::s_recordingPaint = false;
+
 namespace {
 constexpr double kMinZoom = 0.002, kMaxZoom = 64.0;
 
@@ -188,43 +190,47 @@ QPolygonF CanvasView::visibleCanvas() const {
 }
 
 void CanvasView::invalidateAll() {
-    m_cacheValid = false;
+    m_main.valid = m_rec.valid = false;
     m_selDirty = true;
     update();
 }
 
 void CanvasView::markCanvasDirty(const QRect& r) {
-    if (!m_cacheValid) { update(); return; }
-    QRect pr = m_cacheXf.mapRect(QRectF(r)).toAlignedRect().adjusted(-2, -2, 2, 2) & m_cache.rect();
+    if (m_rec.valid) {
+        QRect rr = m_rec.xf.mapRect(QRectF(r)).toAlignedRect().adjusted(-2, -2, 2, 2) & m_rec.img.rect();
+        m_rec.dirty |= rr;
+    }
+    if (!m_main.valid) { update(); return; }
+    QRect pr = m_main.xf.mapRect(QRectF(r)).toAlignedRect().adjusted(-2, -2, 2, 2) & m_main.img.rect();
     if (pr.isEmpty()) return;
-    m_dirty |= pr;
+    m_main.dirty |= pr;
     const double dpr = devicePixelRatioF();
     update(QRectF(pr.x() / dpr, pr.y() / dpr, pr.width() / dpr, pr.height() / dpr).toAlignedRect().adjusted(-2, -2, 2, 2));
 }
 
-void CanvasView::resizeEvent(QResizeEvent*) { m_cacheValid = false; }
+void CanvasView::resizeEvent(QResizeEvent*) { m_main.valid = m_rec.valid = false; }
 
-void CanvasView::ensureCache() {
+void CanvasView::ensureCache(ViewCache& vc, Projection* proj) {
     const double dpr = devicePixelRatioF();
     QSize phys(std::max(1, int(std::ceil(width() * dpr))), std::max(1, int(std::ceil(height() * dpr))));
-    if (m_cache.size() != phys) {
-        m_cache = QImage(phys, QImage::Format_RGB32);
-        m_cacheValid = false;
+    if (vc.img.size() != phys) {
+        vc.img = QImage(phys, QImage::Format_RGB32);
+        vc.valid = false;
     }
     QTransform xf = physicalTransform();
-    if (!m_cacheValid) {
-        m_dirty = m_cache.rect();
-    } else if (xf != m_cacheXf) {
-        bool sameLinear = qFuzzyCompare(xf.m11(), m_cacheXf.m11()) && qFuzzyCompare(xf.m22() + 10, m_cacheXf.m22() + 10) &&
-                          qFuzzyCompare(xf.m12() + 10, m_cacheXf.m12() + 10) && qFuzzyCompare(xf.m21() + 10, m_cacheXf.m21() + 10);
-        double ddx = xf.dx() - m_cacheXf.dx(), ddy = xf.dy() - m_cacheXf.dy();
+    if (!vc.valid) {
+        vc.dirty = vc.img.rect();
+    } else if (xf != vc.xf) {
+        bool sameLinear = qFuzzyCompare(xf.m11(), vc.xf.m11()) && qFuzzyCompare(xf.m22() + 10, vc.xf.m22() + 10) &&
+                          qFuzzyCompare(xf.m12() + 10, vc.xf.m12() + 10) && qFuzzyCompare(xf.m21() + 10, vc.xf.m21() + 10);
+        double ddx = xf.dx() - vc.xf.dx(), ddy = xf.dy() - vc.xf.dy();
         int ix = int(std::lround(ddx)), iy = int(std::lround(ddy));
         if (sameLinear && std::fabs(ddx - ix) < 1e-6 && std::fabs(ddy - iy) < 1e-6 && std::abs(ix) < phys.width() &&
             std::abs(iy) < phys.height()) {
             // Pure scroll: move the pixels, redraw only the uncovered strips.
             const int W = phys.width(), H = phys.height();
-            const qsizetype bpl = m_cache.bytesPerLine();
-            uchar* bits = m_cache.bits();
+            const qsizetype bpl = vc.img.bytesPerLine();
+            uchar* bits = vc.img.bits();
             auto copyRow = [&](int dstY, int srcY) {
                 quint32* d = reinterpret_cast<quint32*>(bits + bpl * dstY);
                 const quint32* s = reinterpret_cast<const quint32*>(bits + bpl * srcY);
@@ -235,27 +241,30 @@ void CanvasView::ensureCache() {
                 for (int y = H - 1; y >= iy; --y) copyRow(y, y - iy);
             else
                 for (int y = 0; y < H + iy; ++y) copyRow(y, y - iy);
-            QRect moved = m_dirty.translated(ix, iy);
-            m_dirty = moved & m_cache.rect();
-            if (ix > 0) m_dirty |= QRect(0, 0, ix, H);
-            if (ix < 0) m_dirty |= QRect(W + ix, 0, -ix, H);
-            if (iy > 0) m_dirty |= QRect(0, 0, W, iy);
-            if (iy < 0) m_dirty |= QRect(0, H + iy, W, -iy);
+            QRect moved = vc.dirty.translated(ix, iy);
+            vc.dirty = moved & vc.img.rect();
+            if (ix > 0) vc.dirty |= QRect(0, 0, ix, H);
+            if (ix < 0) vc.dirty |= QRect(W + ix, 0, -ix, H);
+            if (iy > 0) vc.dirty |= QRect(0, 0, W, iy);
+            if (iy < 0) vc.dirty |= QRect(0, H + iy, W, -iy);
         } else {
-            m_dirty = m_cache.rect();
+            vc.dirty = vc.img.rect();
         }
     }
-    m_cacheXf = xf;
-    m_cacheValid = true;
-    if (m_dirty.isEmpty()) return;
+    vc.xf = xf;
+    vc.valid = true;
+    if (vc.dirty.isEmpty()) {
+        vc.complete = true;
+        return;
+    }
 
     // Which projection level to sample
     double s = std::sqrt(std::fabs(xf.determinant()));
-    int maxL = m_doc->projection()->maxLevel();
+    int maxL = proj->maxLevel();
     int L = 0;
     if (s < 1.0) L = std::clamp(int(std::floor(std::log2(1.0 / s))), 0, maxL);
 
-    QRect dirty = m_dirty;
+    QRect dirty = vc.dirty;
     QRect canvasArea = xf.inverted().mapRect(QRectF(dirty)).toAlignedRect().adjusted(-2, -2, 2, 2) & m_doc->bounds();
     bool complete = true;
     if (!canvasArea.isEmpty()) {
@@ -272,20 +281,21 @@ void CanvasView::ensureCache() {
             }
         std::sort(order.begin(), order.end());
         for (auto& o : order) keys << o.second;
-        complete = m_doc->projection()->update(L, keys, 14.0);
-        for (qint64 k : keys) m_doc->projection()->touch(L, k);
+        complete = proj->update(L, keys, 14.0);
+        for (qint64 k : keys) proj->touch(L, k);
     }
-    renderRect(dirty, L);
-    m_dirty = complete ? QRect() : dirty;
-    m_moreWork = !complete;
+    renderRect(vc, proj, dirty, L);
+    vc.dirty = complete ? QRect() : dirty;
+    if (&vc == &m_main) m_moreWork = !complete;
+    vc.complete = complete;
     if (++m_frame % 90 == 0) {
-        m_doc->projection()->nextFrame();
-        m_doc->projection()->trim(app()->prefs().projectionCacheMB * 16);
+        proj->nextFrame();
+        proj->trim(app()->prefs().projectionCacheMB * 16);
     }
 }
 
-bool CanvasView::renderRect(const QRect& pr, int L) {
-    const QTransform inv = m_cacheXf.inverted();
+bool CanvasView::renderRect(ViewCache& vc, const Projection* proj, const QRect& pr, int L) {
+    const QTransform inv = vc.xf.inverted();
     const double m11 = inv.m11(), m12 = inv.m12(), m21 = inv.m21(), m22 = inv.m22(), dx = inv.dx(), dy = inv.dy();
     const Preferences& prefs = app()->prefs();
     const QString theme = prefs.theme;
@@ -295,17 +305,16 @@ bool CanvasView::renderRect(const QRect& pr, int L) {
     auto rgb = [](const QColor& c) { return (quint32(c.red()) << 16) | (quint32(c.green()) << 8) | quint32(c.blue()); };
     const quint32 c1 = rgb(prefs.checker1), c2 = rgb(prefs.checker2), paper = rgb(prefs.paperColor);
     const int cs = std::max(2, int(prefs.checkerSize * devicePixelRatioF()));
-    const double scale = std::sqrt(std::fabs(m_cacheXf.determinant()));
+    const double scale = std::sqrt(std::fabs(vc.xf.determinant()));
     const double lvScale = scale * double(1 << L);  // screen px per level px
-    const bool rotated = std::fabs(m_cacheXf.m12()) > 1e-9 || std::fabs(m_cacheXf.m21()) > 1e-9;
+    const bool rotated = std::fabs(vc.xf.m12()) > 1e-9 || std::fabs(vc.xf.m21()) > 1e-9;
     const bool nearest = (lvScale >= 1.999 && prefs.pixelatedZoomIn) || (!rotated && std::fabs(lvScale - 1.0) < 1e-6);
     const bool gray = app()->grayscaleView() && !m_scratch;
     const int CW = m_doc->size().width(), CH = m_doc->size().height();
     const int LW = (CW + (1 << L) - 1) >> L, LH = (CH + (1 << L) - 1) >> L;
     const double inv2L = 1.0 / double(1 << L);
-    const Projection* proj = m_doc->projection();
-    uchar* bits = m_cache.bits();
-    const qsizetype bpl = m_cache.bytesPerLine();
+    uchar* bits = vc.img.bits();
+    const qsizetype bpl = vc.img.bytesPerLine();
 
     const int bandH = 16;
     std::vector<int> bands;
@@ -357,11 +366,25 @@ bool CanvasView::renderRect(const QRect& pr, int L) {
 }
 
 void CanvasView::paintEvent(QPaintEvent* ev) {
-    ensureCache();
+    if (s_recordingPaint) {
+        // A frame for a screen recording (MainWindow::grab): the picture without the layers
+        // hidden from recordings, drawn completely (no half-computed tiles in the video).
+        Projection* proj = m_doc->recordingProjection();
+        for (int i = 0; i < 40; ++i) {
+            ensureCache(m_rec, proj);
+            if (m_rec.complete) break;
+        }
+        QPainter p(this);
+        m_rec.img.setDevicePixelRatio(devicePixelRatioF());
+        p.drawImage(QPointF(0, 0), m_rec.img);
+        paintOverlays(p);
+        return;
+    }
+    ensureCache(m_main, m_doc->projection());
     QPainter p(this);
-    m_cache.setDevicePixelRatio(devicePixelRatioF());
+    m_main.img.setDevicePixelRatio(devicePixelRatioF());
     p.setClipRect(ev->rect());
-    p.drawImage(QPointF(0, 0), m_cache);
+    p.drawImage(QPointF(0, 0), m_main.img);
     paintOverlays(p);
     if (m_moreWork) QTimer::singleShot(0, this, [this] { update(); });
 }

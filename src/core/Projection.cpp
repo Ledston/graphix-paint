@@ -13,7 +13,7 @@
 
 namespace gx {
 
-Projection::Projection(Document* doc) : m_doc(doc) { reset(); }
+Projection::Projection(Document* doc, bool recording) : m_doc(doc), m_recording(recording) { reset(); }
 
 int Projection::maxLevel() const {
     QSize s = m_doc->size();
@@ -155,7 +155,9 @@ void Projection::computeLevel0(const QVector<qint64>& keys) {
         QRect tr = tileRectForKey(k);
         if (canvas.contains(tr) && regionUniform(root, tr)) {
             float px[4];
-            Compositor::samplePixel(root, tr.left(), tr.top(), px);
+            CompositeOptions opt;
+            opt.recording = m_recording;
+            Compositor::samplePixel(root, tr.left(), tr.top(), px, opt);
             quint32 v = pack(px);
             RasterSurface::Ptr t;
             if (v) {
@@ -173,7 +175,9 @@ void Projection::computeLevel0(const QVector<qint64>& keys) {
         QRect tr = tileRectForKey(heavy[i]);
         QRect cr = tr & canvas;
         std::vector<float> buf(size_t(cr.width()) * cr.height() * 4);
-        Compositor::composite(root, cr, buf.data());
+        CompositeOptions opt;
+        opt.recording = m_recording;
+        Compositor::composite(root, cr, buf.data(), opt);
         auto t = std::make_shared<Tile<quint32>>();
         t->px.reset(new quint32[TILE_PIXELS]);
         if (cr != tr) std::memset(t->px.get(), 0, sizeof(quint32) * TILE_PIXELS);

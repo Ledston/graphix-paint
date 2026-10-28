@@ -28,7 +28,13 @@ if(TARGET Qt6::GuiPrivate)
 endif()
 
 if(WIN32)
-  target_link_libraries(gxcore PUBLIC mfplat mfreadwrite mfuuid ole32)  # timelapse video export
+  # screen recording to MP4 (Media Foundation); user32 for hiding the reference from captures
+  target_link_libraries(gxcore PUBLIC mfplat mfreadwrite mfuuid ole32 user32)
+  if(MSVC)
+    # Media Foundation is loaded only when recording, so the program also starts on Windows N
+    target_link_libraries(gxcore PUBLIC delayimp)
+    target_link_options(gxcore PUBLIC /DELAYLOAD:mfplat.dll /DELAYLOAD:mfreadwrite.dll)
+  endif()
 endif()
 
 if(MSVC)

@@ -24,7 +24,9 @@ public:
         quint32 lastUse = 0;
     };
 
-    explicit Projection(Document* doc);
+    // recording = true: the picture without the layers hidden from screen recordings
+    explicit Projection(Document* doc, bool recording = false);
+    bool isRecording() const { return m_recording; }
 
     void invalidate(const QRect& canvasRect);
     void invalidateAll();
@@ -59,6 +61,7 @@ private:
     std::vector<QHash<qint64, Entry>> m_levels;
     quint32 m_version = 1;
     quint32 m_frame = 1;
+    bool m_recording = false;
 };
 
 }  // namespace gx

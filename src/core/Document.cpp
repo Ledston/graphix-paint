@@ -33,9 +33,17 @@ Document::Document(const QSize& size, QObject* parent) : QObject(parent) {
 
 Document::~Document() = default;
 
+Projection* Document::recordingProjection() {
+    if (!m_recProjection) m_recProjection = std::make_unique<Projection>(this, true);
+    return m_recProjection.get();
+}
+
+void Document::releaseRecordingProjection() { m_recProjection.reset(); }
+
 void Document::setSizeNoUndo(const QSize& s) {
     m_state.size = s.expandedTo(QSize(1, 1));
     m_projection->reset();
+    if (m_recProjection) m_recProjection->reset();
     touch();
     Q_EMIT sizeChanged();
     Q_EMIT imageChanged(bounds());
@@ -258,9 +266,11 @@ void Document::restore(DocState&& s) {
     m_state = std::move(s);
     if (sizeChange) {
         m_projection->reset();
+        if (m_recProjection) m_recProjection->reset();
         Q_EMIT sizeChanged();
     } else {
         m_projection->invalidateAll();
+        if (m_recProjection) m_recProjection->invalidateAll();
     }
     touch();
     Q_EMIT layersChanged();
@@ -277,6 +287,7 @@ void Document::pixelsChanged(const QRect& r, Layer* l) {
         for (Layer* p = l->parent; p; p = p->parent) p->version++;
     }
     m_projection->invalidate(r);
+    if (m_recProjection) m_recProjection->invalidate(r);
     touch();
     Q_EMIT imageChanged(r);
 }
@@ -286,6 +297,7 @@ void Document::layerChanged(Layer* l) {
     // canvas is marked; only tiles on screen get recomputed.
     QRect r = bounds();
     m_projection->invalidate(r);
+    if (m_recProjection) m_recProjection->invalidate(r);
     touch();
     if (l) Q_EMIT layerPropertiesChanged(l->id);
     Q_EMIT imageChanged(r);
@@ -293,6 +305,7 @@ void Document::layerChanged(Layer* l) {
 
 void Document::structureChanged() {
     m_projection->invalidateAll();
+    if (m_recProjection) m_recProjection->invalidateAll();
     touch();
     Q_EMIT layersChanged();
     Q_EMIT currentLayerChanged();

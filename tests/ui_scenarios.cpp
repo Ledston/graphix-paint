@@ -26,10 +26,12 @@
 #include "ui/ReferenceOverlay.h"
 #include "ui/ReferencePanel.h"
 #include "app/I18n.h"
-#include "app/Timelapse.h"
+#include "app/Recorder.h"
+#include "io/VideoWriter.h"
 #include <QAction>
 #include <QClipboard>
 #include <QDir>
+#include <QFileInfo>
 #include <QThreadPool>
 #include "ui/Theme.h"
 
@@ -351,7 +353,7 @@ int main(int argc, char** argv) {
         app()->setGrayscaleView(false);
     }, w);
 
-    scenario("timelapse leaves out hidden layers", [](MainWindow&) {
+    scenario("video recording: record, pause, continue, save", [](MainWindow& w) {
         Document* d = view()->doc();
         Layer* l = d->currentLayer();
         auto* r = static_cast<RasterLayer*>(l);
@@ -362,35 +364,191 @@ int main(int argc, char** argv) {
         blue->pixels.fillRect(QRect(500, 100, 200, 200), 0xff0000ffu);
         d->root()->insert(2, blue);
         d->structureChanged();
-        d->pixelsChanged(d->bounds());
         l->hideInTimelapse = true;
         pump(50);
-        Timelapse& t = Timelapse::instance();
-        t.watch(d);
-        CHECK(Timelapse::hiddenLayerCount(d) == 1);
-        auto lastFrame = [&] {
-            QThreadPool::globalInstance()->waitForDone(10000);
-            pump(80);
-            QStringList f = QDir(t.folder(d)).entryList({"frame_*.jpg"}, QDir::Files, QDir::Name);
-            return f.isEmpty() ? QImage() : QImage(t.folder(d) + "/" + f.last());
-        };
-        t.setRecording(d, true);
-        QImage f1 = lastFrame();
-        CHECK(!f1.isNull());
-        if (!f1.isNull()) {
-            CHECK(QColor(f1.pixel(200, 200)).red() > 230 && QColor(f1.pixel(200, 200)).green() > 230);  // no red: white paper
-            CHECK(QColor(f1.pixel(600, 200)).blue() > 200 && QColor(f1.pixel(600, 200)).red() < 60);    // the rest is there
+        Recorder& rec = Recorder::instance();
+        rec.setNewMode(Recorder::Mode::Canvas);
+        CHECK(Recorder::hiddenLayerCount(d) == 1);
+        QString err;
+        CHECK(rec.start(d, &err));
+        CHECK(rec.state(d) == Recorder::State::Recording);
+        CHECK(w.windowTitle().startsWith(QString::fromUtf8("● REC")));
+        // some drawing: the green block grows
+        for (int i = 0; i < 8; ++i) {
+            blue->pixels.fillRect(QRect(100, 400, 60 * (i + 1), 80), 0xff00a000u);
+            d->pixelsChanged(QRect(100, 400, 480, 80), blue.get());
+            pump(40);
+            rec.tick();
         }
-        // the layer is still shown on the canvas while drawing
-        CHECK(l->visible);
-        l->hideInTimelapse = false;
-        t.setRecording(d, false);
-        t.setRecording(d, true);
-        QImage f2 = lastFrame();
-        CHECK(!f2.isNull() && QColor(f2.pixel(200, 200)).red() > 200 && QColor(f2.pixel(200, 200)).green() < 80);
-        t.setRecording(d, false);
-        t.deleteFrames(d);
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/recording.png");
+        rec.pause();
+        CHECK(rec.state(d) == Recorder::State::Paused);
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) {
+            pump(30);
+            w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/paused.png");
+        }
+        CHECK(!w.windowTitle().startsWith(QString::fromUtf8("●")));
+        const qint64 len1 = rec.length(d);
+        CHECK(len1 > 0);
+        Recorder::Job job = rec.job(d);
+        CHECK(job.files.size() == 1);
+        // the video: the hidden red layer is not there, the rest is
+        {
+            VideoReader vr;
+            CHECK(!job.files.isEmpty() && vr.open(job.files.first(), nullptr));
+            QImage frame, last;
+            qint64 dur = 0, total = 0;
+            int n = 0;
+            while (vr.readFrame(frame, &dur)) {
+                last = frame;
+                total += dur;
+                ++n;
+            }
+            CHECK(n >= 5);
+            CHECK(std::abs(total - len1) < kVideoSecond / 10);
+            CHECK(!last.isNull() && last.width() % 16 == 0 && last.height() % 16 == 0);
+            if (!last.isNull()) {
+                const double k = std::min(last.width() / 800.0, last.height() / 600.0);
+                const QPointF off((last.width() - 800 * k) / 2, (last.height() - 600 * k) / 2);
+                auto at = [&](int x, int y) { return QColor(last.pixel(int(off.x() + x * k), int(off.y() + y * k))); };
+                CHECK(at(200, 200).red() > 220 && at(200, 200).green() > 220);  // white paper, no red
+                CHECK(at(600, 200).blue() > 180 && at(600, 200).red() < 80);    // blue
+                CHECK(at(500, 440).green() > 100 && at(500, 440).red() < 80);   // the last green block
+            }
+        }
+        // continue: a second piece, then save sped up and at real speed
+        CHECK(rec.start(d, &err));
+        for (int i = 0; i < 5; ++i) {
+            d->pixelsChanged(QRect(0, 0, 50, 50), blue.get());
+            pump(40);
+            rec.tick();
+        }
+        rec.pause();
+        job = rec.job(d);
+        CHECK(job.files.size() == 2);
+        CHECK(rec.length(d) > len1);
+        const QString out1 = QDir::tempPath() + "/gx_rec_real.mp4", out2 = QDir::tempPath() + "/gx_rec_fast.mp4";
+        Recorder::ExportOptions opt;
+        opt.holdEnd = true;
+        CHECK(Recorder::exportVideo(job, out1, opt, {}, &err));
+        auto lengthOf = [](const QString& f, int* frames) {
+            VideoReader vr;
+            qint64 t = 0, dur = 0;
+            QImage img;
+            *frames = 0;
+            if (!vr.open(f, nullptr)) return qint64(-1);
+            while (vr.readFrame(img, &dur)) {
+                t += dur;
+                ++*frames;
+            }
+            return t;
+        };
+        int frames = 0;
+        const qint64 realLen = lengthOf(out1, &frames);
+        CHECK(std::abs(realLen - (job.length + 2 * kVideoSecond)) < kVideoSecond / 10);
+        opt.targetLength = job.length / 3;  // three times faster
+        opt.holdEnd = false;
+        double lastProgress = 0;
+        CHECK(Recorder::exportVideo(job, out2, opt, [&](double p) { lastProgress = p; return true; }, &err));
+        CHECK(lastProgress > 0.99);
+        const qint64 fastLen = lengthOf(out2, &frames);
+        CHECK(fastLen > 0 && std::abs(fastLen - opt.targetLength) < kVideoSecond / 10 + job.length / 30);
+        // cancel
+        CHECK(!Recorder::exportVideo(job, out2 + ".x", opt, [](double) { return false; }, &err) && err.isEmpty());
+        CHECK(!QFileInfo::exists(out2 + ".x"));
+        QFile::remove(out1);
+        QFile::remove(out2);
+        rec.discard(d);
+        CHECK(rec.state(d) == Recorder::State::None);
+        CHECK(rec.length(d) == 0);
     }, w);
+
+    scenario("video recording: the program window without hidden layers", [](MainWindow& w) {
+        Document* d = view()->doc();
+        auto* l = static_cast<RasterLayer*>(d->currentLayer());
+        l->pixels.fillRect(d->bounds(), 0xffff0000u);  // all red, hidden from recordings
+        l->hideInTimelapse = true;
+        d->pixelsChanged(d->bounds(), l);
+        pump(80);
+        CanvasView* v = view();
+        const QPoint c(v->width() / 2, v->height() / 2);
+        QImage normal = v->grab().toImage();
+        CanvasView::setRecordingPaint(true);
+        QImage forRec = v->grab().toImage();
+        CanvasView::setRecordingPaint(false);
+        const double k = normal.devicePixelRatio();
+        CHECK(QColor(normal.pixel(int(c.x() * k), int(c.y() * k))).red() > 200 && QColor(normal.pixel(int(c.x() * k), int(c.y() * k))).green() < 60);
+        CHECK(QColor(forRec.pixel(int(c.x() * k), int(c.y() * k))).green() > 200);  // white paper in the recording
+        // the screen itself still shows the layer afterwards
+        QImage again = v->grab().toImage();
+        CHECK(QColor(again.pixel(int(c.x() * k), int(c.y() * k))).green() < 60);
+
+        Recorder& rec = Recorder::instance();
+        rec.setNewMode(Recorder::Mode::Window);
+        QString err;
+        CHECK(rec.start(d, &err));
+        CHECK(rec.mode(d) == Recorder::Mode::Window);
+        for (int i = 0; i < 4; ++i) {
+            QMouseEvent move(QEvent::MouseMove, QPointF(c) + QPointF(i, i), v->mapToGlobal(QPointF(c)), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(v, &move);
+            pump(40);
+            rec.tick();
+        }
+        rec.pause();
+        Recorder::Job job = rec.job(d);
+        CHECK(job.files.size() == 1 && job.mode == Recorder::Mode::Window);
+        VideoReader vr;
+        QImage frame;
+        qint64 dur = 0;
+        CHECK(!job.files.isEmpty() && vr.open(job.files.first(), nullptr) && vr.readFrame(frame, &dur));
+        CHECK(frame.width() == job.width && frame.height() == job.height);
+        // the canvas in the middle of the window is white, not red
+        if (!frame.isNull()) {
+            const QPoint vc = v->mapTo(&w, c);
+            const double kx = double(frame.width()) / w.width(), ky = double(frame.height()) / w.height();
+            const double kk = std::min(kx, ky);
+            const QPointF off((frame.width() - w.width() * kk) / 2, (frame.height() - w.height() * kk) / 2);
+            const QColor px(frame.pixel(int(off.x() + vc.x() * kk), int(off.y() + vc.y() * kk)));
+            CHECK(px.green() > 180 && px.red() > 180);
+        }
+        rec.discard(d);
+        rec.setNewMode(Recorder::Mode::Canvas);
+        l->hideInTimelapse = false;
+    }, w);
+
+    if (qEnvironmentVariableIsSet("GX_BENCH")) {
+        // how long one recorded frame takes on a big picture
+        auto big = std::make_shared<Document>(QSize(4000, 3000));
+        auto paper = std::make_shared<RasterLayer>();
+        paper->id = big->newLayerId();
+        paper->pixels.fillRect(big->bounds(), 0xffffffffu);
+        big->root()->insert(0, paper);
+        auto lay = std::make_shared<RasterLayer>();
+        lay->id = big->newLayerId();
+        for (int i = 0; i < 40; ++i) lay->pixels.fillRect(QRect(i * 90, i * 60, 300, 200), 0xff000000u | quint32(i * 6000));
+        big->root()->insert(1, lay);
+        big->setCurrentLayer(lay->id);
+        w.addDocument(big);
+        pump(300);
+        for (auto m : {Recorder::Mode::Canvas, Recorder::Mode::Window}) {
+            Recorder& rec = Recorder::instance();
+            rec.setNewMode(m);
+            QElapsedTimer t;
+            t.start();
+            rec.start(big.get(), nullptr);
+            const qint64 first = t.elapsed();
+            t.restart();
+            for (int i = 0; i < 60; ++i) {
+                lay->pixels.fillRect(QRect(1000 + i * 20, 1500, 30, 30), 0xff336699u);
+                big->pixelsChanged(QRect(1000 + i * 20, 1500, 30, 30), lay.get());
+                rec.tick();
+            }
+            std::fprintf(stderr, "BENCH %s: start %lld ms, %.1f ms per frame\n", m == Recorder::Mode::Canvas ? "canvas" : "window", first, t.elapsed() / 60.0);
+            rec.pause();
+            rec.discard(big.get());
+        }
+        Recorder::instance().setNewMode(Recorder::Mode::Canvas);
+    }
 
     scenario("reference over everything", [](MainWindow& w) {
         auto* panel = w.findChild<ReferencePanel*>();

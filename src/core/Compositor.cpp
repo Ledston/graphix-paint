@@ -35,7 +35,10 @@ struct Scratch {
 struct Ctx {
     QRect r;
     int n;
+    bool rec = false;  // leave out layers hidden from the recording
 };
+
+inline bool shown(const Layer* l, const Ctx& c) { return l->visible && !(c.rec && l->hideInTimelapse); }
 
 bool anyTileIn(const RasterSurface& s, const QRect& r) {
     if (s.isEmpty()) return false;
@@ -131,7 +134,7 @@ void applyAdjustment(const AdjustmentLayer* a, const Ctx& c, float* acc) {
 }
 
 void applyLayer(const Layer* l, const Ctx& c, float* acc, bool atop) {
-    if (!l->visible) return;
+    if (!shown(l, c)) return;
     if (l->type() == LayerType::Adjustment) {
         applyAdjustment(static_cast<const AdjustmentLayer*>(l), c, acc);
         return;
@@ -159,7 +162,7 @@ void compositeStack(const GroupLayer* g, const Ctx& c, float* acc) {
         const Layer* base = ch[size_t(i)].get();
         int j = i + 1;
         while (j < n && ch[size_t(j)]->clipping) ++j;
-        if (!base->visible) { i = j; continue; }
+        if (!shown(base, c)) { i = j; continue; }
         // Clipping onto folders works too: the folder is rendered on its own and
         // the clipped layers are limited to its combined opacity.
         bool canClip = base->type() != LayerType::Adjustment;
@@ -199,7 +202,7 @@ void Compositor::prepare(GroupLayer* root, const QRect& r) {
 }
 
 void Compositor::composite(const GroupLayer* root, const QRect& r, float* out, const CompositeOptions& opt) {
-    Ctx c{r, r.width() * r.height()};
+    Ctx c{r, r.width() * r.height(), opt.recording};
     std::memset(out, 0, sizeof(float) * size_t(c.n) * 4);
     if (!root || r.isEmpty()) return;
     if (opt.only) {
@@ -234,8 +237,8 @@ QImage Compositor::renderImage(GroupLayer* root, const QRect& r, const Composite
     return img;
 }
 
-void Compositor::samplePixel(const GroupLayer* root, int x, int y, float* rgba) {
-    composite(root, QRect(x, y, 1, 1), rgba);
+void Compositor::samplePixel(const GroupLayer* root, int x, int y, float* rgba, const CompositeOptions& opt) {
+    composite(root, QRect(x, y, 1, 1), rgba, opt);
 }
 
 }  // namespace gx

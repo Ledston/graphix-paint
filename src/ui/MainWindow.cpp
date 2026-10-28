@@ -30,10 +30,17 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <QUrl>
+#include <QProgressDialog>
+#include <QPushButton>
+#include <QRadioButton>
+#include <QStandardPaths>
+#include <QThread>
+#include <QtConcurrent/QtConcurrentRun>
+#include <atomic>
 
 #include "app/App.h"
 #include "app/TabletInput.h"
-#include "app/Timelapse.h"
+#include "app/Recorder.h"
 #include "io/VideoWriter.h"
 #include "app/BrushLibrary.h"
 #include "app/I18n.h"
@@ -134,6 +141,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     createDocks();
     createStatusBar();
     Shortcuts::instance().load(app()->settings());
+    Recorder::instance().setWindow(this);
 
     QSettings& s = app()->settings();
     if (!restoreGeometry(s.value("window/geometry").toByteArray())) {
@@ -244,40 +252,51 @@ void MainWindow::createActions() {
     act("file.saveas", "Save as...", "File", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S), [this, commit] { commit(); save(activeDocument(), true); });
     act("file.export", "Export...", "File", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S), [this, commit] { commit(); exportDialog(); });
     act("file.import", "Import as layer...", "File", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O), [this] { importAsLayer(); });
+    // ---- video recording
+    act("rec.start", "Start recording", "Recording", {}, [this] { startRecording(); }, "record");
+    act("rec.pause", "Pause recording", "Recording", {}, [this] { pauseRecording(); }, "pause", false);
+    act("rec.toggle", "Record / pause", "Recording", QKeySequence(Qt::Key_F9), [this] {
+        if (Recorder::instance().recordingDocument()) pauseRecording();
+        else startRecording();
+    }, {}, false);
+    act("rec.stop", "Stop and save the video...", "Recording", QKeySequence(Qt::SHIFT | Qt::Key_F9), [this] { stopRecording(); }, "stop", false);
+    act("rec.discard", "Delete the recording", "Recording", {}, [this] {
+        Document* d = Recorder::instance().recordingDocument();
+        if (!d) d = activeDocument();
+        if (!d || Recorder::instance().state(d) == Recorder::State::None) return;
+        if (QMessageBox::question(this, T("Video recording"), T("Delete the recording of this picture (%1)? The picture itself stays.")
+                                                                  .arg(Recorder::formatLength(Recorder::instance().length(d)))) == QMessageBox::Yes)
+            Recorder::instance().discard(d);
+    }, "trash", false);
+    act("rec.folder", "Open the recordings folder", "Recording", {}, [] {
+        QString f = app()->dataDir() + "/recordings";
+        QDir().mkpath(f);
+        QDesktopServices::openUrl(QUrl::fromLocalFile(f));
+    }, {}, false);
     {
-        QAction* rec = act("timelapse.record", "Record timelapse", "File", {}, [doc] {
-            Timelapse& t = Timelapse::instance();
-            t.setRecording(doc(), !t.isRecording(doc()));
-            QString msg = t.isRecording(doc()) ? T("Recording the timelapse: every change is saved as a frame.") : T("Timelapse recording paused.");
-            if (t.isRecording(doc()))
-                if (const int hidden = Timelapse::hiddenLayerCount(doc()))
-                    msg += " " + T("Layers left out of the video: %1.").arg(hidden);
-            app()->showStatus(msg, 5000);
-        }, "timelapse");
-        rec->setCheckable(true);
-        auto sync = [this, rec] {
-            Document* d = activeDocument();
-            rec->setChecked(d && Timelapse::instance().isRecording(d));
-            const int n = d ? Timelapse::instance().frameCount(d) : 0;
-            rec->setText(n ? T("Record timelapse (%1 frames)").arg(n) : T("Record timelapse"));
-        };
-        connect(&Timelapse::instance(), &Timelapse::changed, rec, sync);
-        connect(app(), &App::activeViewChanged, rec, sync);
-    }
-    act("timelapse.export", "Export timelapse video...", "File", {}, [this] { exportTimelapse(); });
-    act("timelapse.folder", "Open timelapse frames folder", "File", {}, [this] {
-        if (Document* d = activeDocument()) {
-            QString f = Timelapse::instance().folder(d);
-            QDir().mkpath(f);
-            QDesktopServices::openUrl(QUrl::fromLocalFile(f));
+        auto* group = new QActionGroup(this);
+        QAction* canvas = act("rec.mode.canvas", "Record only the canvas", "Recording", {}, [] { Recorder::instance().setNewMode(Recorder::Mode::Canvas); }, {}, false);
+        QAction* window = act("rec.mode.window", "Record the program window", "Recording", {}, [] { Recorder::instance().setNewMode(Recorder::Mode::Window); }, {}, false);
+        for (QAction* a : {canvas, window}) {
+            a->setCheckable(true);
+            group->addAction(a);
         }
-    });
-    act("timelapse.delete", "Delete the timelapse recording", "File", {}, [this] {
-        Document* d = activeDocument();
-        if (!d) return;
-        if (QMessageBox::question(this, T("Timelapse"), T("Delete all recorded frames of this picture?")) == QMessageBox::Yes)
-            Timelapse::instance().deleteFrames(d);
-    });
+        auto syncMode = [this, canvas, window] {
+            Document* d = Recorder::instance().recordingDocument();
+            if (!d) d = activeDocument();
+            Recorder& r = Recorder::instance();
+            // a started recording keeps its mode
+            const bool fixed = d && r.state(d) != Recorder::State::None;
+            const Recorder::Mode m = fixed ? r.mode(d) : r.newMode();
+            canvas->setChecked(m == Recorder::Mode::Canvas);
+            window->setChecked(m == Recorder::Mode::Window);
+            canvas->setEnabled(!fixed);
+            window->setEnabled(!fixed);
+        };
+        connect(&Recorder::instance(), &Recorder::changed, this, syncMode);
+        connect(app(), &App::activeViewChanged, this, syncMode);
+        syncMode();
+    }
     act("file.close", "Close", "File", QKeySequence(Qt::CTRL | Qt::Key_W), [this] { if (m_mdi->activeSubWindow()) m_mdi->activeSubWindow()->close(); });
     act("file.quit", "Exit", "File", QKeySequence(Qt::CTRL | Qt::Key_Q), [this] { close(); }, {}, false);
 
@@ -595,8 +614,9 @@ void MainWindow::createMenus() {
     add(file, "file.export");
     add(file, "file.import");
     file->addSeparator();
-    QMenu* tl = file->addMenu(Theme::icon("timelapse"), T("Timelapse"));
-    for (const char* id : {"timelapse.record", "timelapse.export", "", "timelapse.folder", "timelapse.delete"}) {
+    QMenu* tl = file->addMenu(Theme::icon("record"), T("Video recording"));
+    for (const char* id : {"rec.start", "rec.pause", "rec.stop", "", "rec.toggle", "", "rec.mode.canvas", "rec.mode.window", "", "rec.discard",
+                           "rec.folder"}) {
         if (!*id) tl->addSeparator();
         else add(tl, id);
     }
@@ -746,6 +766,19 @@ void MainWindow::createToolbar() {
     tb->addSeparator();
     for (const char* id : {"view.zoomout", "view.zoomin", "view.fit", "view.rotreset", "view.flip"}) tb->addAction(m_actions.value(id));
     tb->addSeparator();
+    // video recording: ● record (its arrow chooses canvas / window), ❚❚ pause, ■ stop and save
+    for (const char* id : {"rec.start", "rec.pause", "rec.stop"}) tb->addAction(m_actions.value(id));
+    if (auto* recBtn = qobject_cast<QToolButton*>(tb->widgetForAction(m_actions.value("rec.start")))) {
+        auto* m = new QMenu(recBtn);
+        m->addAction(m_actions.value("rec.mode.canvas"));
+        m->addAction(m_actions.value("rec.mode.window"));
+        m->addSeparator();
+        m->addAction(m_actions.value("rec.discard"));
+        m->addAction(m_actions.value("rec.folder"));
+        recBtn->setMenu(m);
+        recBtn->setPopupMode(QToolButton::MenuButtonPopup);
+    }
+    tb->addSeparator();
 
     auto* stabLabel = new QLabel(T("Stabilizer"), tb);
     stabLabel->setContentsMargins(6, 0, 2, 0);
@@ -870,6 +903,25 @@ void MainWindow::createStatusBar() {
     m_statusZoom = new QLabel(this);
     m_statusPos = new QLabel(this);
     statusBar()->addWidget(m_statusMsg, 1);
+    // ● REC 00:12:34 while recording, ❚❚ Paused when a recording waits
+    m_recLabel = new QLabel(this);
+    m_recLabel->setTextFormat(Qt::RichText);
+    m_recLabel->setContentsMargins(8, 0, 8, 0);
+    m_recLabel->hide();
+    statusBar()->addPermanentWidget(m_recLabel);
+    auto* recTimer = new QTimer(this);
+    recTimer->setInterval(500);
+    connect(recTimer, &QTimer::timeout, this, &MainWindow::updateRecordingIndicator);
+    recTimer->start();
+    connect(&Recorder::instance(), &Recorder::changed, this, [this] {
+        updateRecordingIndicator();
+        updateTitle();
+    });
+    connect(&Recorder::instance(), &Recorder::failed, this, [this](const QString& msg) {
+        QMessageBox::warning(this, T("Video recording"), T("The recording stopped.") + "\n\n" + T(msg) + "\n\n" + T("What was recorded so far is kept."));
+    });
+    connect(app(), &App::activeViewChanged, this, &MainWindow::updateRecordingIndicator);
+    updateRecordingIndicator();
     statusBar()->addPermanentWidget(m_statusPos);
     statusBar()->addPermanentWidget(m_statusSize);
     statusBar()->addPermanentWidget(m_statusZoom);
@@ -878,7 +930,7 @@ void MainWindow::createStatusBar() {
 // ============================================================================ documents
 
 CanvasView* MainWindow::addDocument(std::shared_ptr<Document> doc) {
-    Timelapse::instance().watch(doc.get());
+    Recorder::instance().watch(doc.get());
     doc->setUndoLimit(app()->prefs().undoLimit);
     auto* v = new CanvasView(doc);
     auto* w = new CanvasWindow(this, v);
@@ -889,6 +941,7 @@ CanvasView* MainWindow::addDocument(std::shared_ptr<Document> doc) {
             if (auto* cw = dynamic_cast<CanvasWindow*>(sw); cw && cw->view()->doc() == d) ++views;
         if (views <= 1) {
             if (!maybeSave(d)) return false;
+            if (!keepOrSaveRecording(d)) return false;
             Recovery::instance().unwatch(d);
         }
         if (app()->activeView() == view) app()->setActiveView(nullptr);
@@ -947,7 +1000,9 @@ void MainWindow::updateTitle() {
         cw->setWindowTitle(t);
     }
     Document* d = activeDocument();
-    setWindowTitle(d ? QStringLiteral("%1%2 - GraphiX Paint").arg(d->displayName(), d->isModified() ? " *" : "") : "GraphiX Paint");
+    // the taskbar also shows that a recording is running
+    const QString rec = Recorder::instance().recordingDocument() ? QStringLiteral("\u25CF REC - ") : QString();
+    setWindowTitle(rec + (d ? QStringLiteral("%1%2 - GraphiX Paint").arg(d->displayName(), d->isModified() ? " *" : "") : QStringLiteral("GraphiX Paint")));
     m_statusSize->setText(d ? formatSize(d->size()) : QString());
 }
 
@@ -1114,6 +1169,7 @@ void MainWindow::newView() {
             if (auto* cw = dynamic_cast<CanvasWindow*>(sw); cw && cw->view()->doc() == view->doc()) ++views;
         if (views <= 1) {
             if (!maybeSave(view->doc())) return false;
+            if (!keepOrSaveRecording(view->doc())) return false;
             Recovery::instance().unwatch(view->doc());
         }
         if (app()->activeView() == view) app()->setActiveView(nullptr);
@@ -1288,34 +1344,218 @@ void MainWindow::preferences(int page) {
     dlg.exec();
 }
 
-void MainWindow::exportTimelapse() {
+// ============================================================================ video recording
+
+void MainWindow::startRecording() {
     Document* d = activeDocument();
-    if (!d) return;
-    const int frames = Timelapse::instance().frameCount(d);
-    if (frames == 0) {
-        QMessageBox::information(this, T("Timelapse"), T("Nothing was recorded yet. Turn on File > Timelapse > Record first."));
+    if (!d) {
+        app()->showStatus(T("Open or create a picture first."), 4000);
         return;
     }
-    if (!VideoWriter::available()) {
-        QMessageBox::information(this, T("Timelapse"), T("Video export works on Windows. The frames are in: %1").arg(Timelapse::instance().folder(d)));
+    Recorder& r = Recorder::instance();
+    if (r.recordingDocument() == d) {
+        app()->showStatus(T("The recording is already running."), 3000);
         return;
     }
-    int seconds = Dialogs::askInt(this, T("Timelapse"), T("%1 frames recorded. Video length in seconds:").arg(frames),
-                                  app()->settings().value("timelapse/seconds", 30).toInt(), 3, 600);
-    if (seconds <= 0) return;
-    app()->settings().setValue("timelapse/seconds", seconds);
-    QString base = d->filePath().isEmpty() ? T("Untitled") : QFileInfo(d->filePath()).completeBaseName();
-    QString dir = app()->settings().value("paths/lastDir").toString();
-    QString path = QFileDialog::getSaveFileName(this, T("Export timelapse video..."), (dir.isEmpty() ? QString() : dir + "/") + base + " timelapse.mp4",
-                                                "MP4 video (*.mp4)");
-    if (path.isEmpty()) return;
-    if (QFileInfo(path).suffix().isEmpty()) path += ".mp4";
-    QApplication::setOverrideCursor(Qt::WaitCursor);
     QString err;
-    bool ok = Timelapse::instance().exportVideo(d, path, seconds, &err);
-    QApplication::restoreOverrideCursor();
-    if (!ok) QMessageBox::warning(this, T("Timelapse"), T(err) + "\n\n" + T("The frames are in: %1").arg(Timelapse::instance().folder(d)));
-    else app()->showStatus(T("Exported %1").arg(QFileInfo(path).fileName()), 5000);
+    if (!r.start(d, &err)) {
+        QMessageBox::warning(this, T("Video recording"), T("Could not start the recording.") + "\n\n" + T(err));
+        return;
+    }
+    const QString toggle = m_actions.value("rec.toggle")->shortcut().toString(QKeySequence::NativeText);
+    const QString stop = m_actions.value("rec.stop")->shortcut().toString(QKeySequence::NativeText);
+    QString msg = (r.mode(d) == Recorder::Mode::Window ? T("Recording the program window.") : T("Recording the canvas."));
+    if (!toggle.isEmpty()) msg += " " + T("%1 pauses.").arg(toggle);
+    if (!stop.isEmpty()) msg += " " + T("%1 stops and saves the video.").arg(stop);
+    if (const int hidden = Recorder::hiddenLayerCount(d)) msg += " " + T("Layers left out of the video: %1.").arg(hidden);
+    app()->showStatus(msg, 6000);
+}
+
+void MainWindow::pauseRecording() {
+    Recorder& r = Recorder::instance();
+    Document* d = r.recordingDocument();
+    if (!d) return;
+    r.pause();
+    const QString toggle = m_actions.value("rec.toggle")->shortcut().toString(QKeySequence::NativeText);
+    app()->showStatus(T("Recording paused (%1).").arg(Recorder::formatLength(r.length(d))) +
+                          (toggle.isEmpty() ? QString() : " " + T("%1 continues.").arg(toggle)),
+                      5000);
+}
+
+bool MainWindow::stopRecording(Document* d) {
+    Recorder& r = Recorder::instance();
+    if (!d) d = r.recordingDocument();
+    if (!d) d = activeDocument();
+    if (!d || r.state(d) == Recorder::State::None) {
+        const QString key = m_actions.value("rec.toggle")->shortcut().toString(QKeySequence::NativeText);
+        QMessageBox::information(this, T("Video recording"),
+                                 T("Nothing is recorded yet. Press Record on the toolbar%1 to start.").arg(key.isEmpty() ? QString() : " (" + key + ")"));
+        return false;
+    }
+    if (r.recordingDocument() == d) r.pause();
+    const qint64 len = r.length(d);
+    const qint64 secs = std::max<qint64>(1, len / kVideoSecond);
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(T("Save the video"));
+    auto* v = new QVBoxLayout(&dlg);
+    auto* info = new QLabel(T("Recorded: %1 (only the time you were drawing).").arg(Recorder::formatLength(len)) + "\n" +
+                                (r.mode(d) == Recorder::Mode::Window ? T("What is recorded: the program window.") : T("What is recorded: the canvas.")),
+                            &dlg);
+    info->setWordWrap(true);
+    v->addWidget(info);
+    auto* real = new QRadioButton(T("Real speed (%1)").arg(Recorder::formatLength(len)), &dlg);
+    auto* fast = new QRadioButton(T("Speed up to"), &dlg);
+    auto* fastLen = new QSpinBox(&dlg);
+    fastLen->setRange(3, int(std::clamp<qint64>(secs - 1, 3, 36000)));
+    fastLen->setSuffix(T(" s"));
+    fastLen->setValue(int(std::clamp<qint64>(app()->settings().value("recording/targetSeconds", 60).toInt(), 3, fastLen->maximum())));
+    auto* fastRow = new QHBoxLayout;
+    fastRow->addWidget(fast);
+    fastRow->addWidget(fastLen);
+    fastRow->addStretch();
+    v->addWidget(real);
+    v->addLayout(fastRow);
+    const bool canSpeedUp = secs > 4;
+    fast->setEnabled(canSpeedUp);
+    fastLen->setEnabled(canSpeedUp);
+    (canSpeedUp && secs > 90 ? fast : real)->setChecked(true);
+    connect(fastLen, &QSpinBox::valueChanged, fast, [fast] { fast->setChecked(true); });
+    auto* hold = new QCheckBox(T("Show the finished picture 2 more seconds at the end"), &dlg);
+    hold->setChecked(app()->settings().value("recording/holdEnd", true).toBool());
+    v->addWidget(hold);
+    auto* bb = new QDialogButtonBox(&dlg);
+    QPushButton* saveBtn = bb->addButton(T("Save video..."), QDialogButtonBox::AcceptRole);
+    QPushButton* laterBtn = bb->addButton(T("Continue later"), QDialogButtonBox::RejectRole);
+    QPushButton* delBtn = bb->addButton(T("Delete the recording"), QDialogButtonBox::DestructiveRole);
+    laterBtn->setToolTip(T("Keep the recording: press Record again to continue it."));
+    saveBtn->setDefault(true);
+    bool deleteIt = false;
+    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    connect(delBtn, &QPushButton::clicked, &dlg, [&] {
+        if (QMessageBox::question(&dlg, T("Video recording"), T("Delete the recording? This cannot be undone.")) == QMessageBox::Yes) {
+            deleteIt = true;
+            dlg.reject();
+        }
+    });
+    v->addWidget(bb);
+    const int res = dlg.exec();
+    if (deleteIt) {
+        r.discard(d);
+        app()->showStatus(T("The recording was deleted."), 4000);
+        return true;
+    }
+    if (res != QDialog::Accepted) {
+        app()->showStatus(T("The recording is kept. Press Record to continue it."), 4000);
+        return false;
+    }
+    app()->settings().setValue("recording/targetSeconds", fastLen->value());
+    app()->settings().setValue("recording/holdEnd", hold->isChecked());
+
+    QString dir = app()->settings().value("recording/lastDir").toString();
+    if (dir.isEmpty()) dir = d->filePath().isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::MoviesLocation) : QFileInfo(d->filePath()).absolutePath();
+    const QString base = d->filePath().isEmpty() ? T("Untitled") : QFileInfo(d->filePath()).completeBaseName();
+    QString path = QFileDialog::getSaveFileName(this, T("Save the video"), dir + "/" + base + " - " + T("recording") + ".mp4", T("MP4 video") + " (*.mp4)");
+    if (path.isEmpty()) {
+        app()->showStatus(T("The recording is kept. Press Record to continue it."), 4000);
+        return false;
+    }
+    if (QFileInfo(path).suffix().isEmpty()) path += ".mp4";
+    app()->settings().setValue("recording/lastDir", QFileInfo(path).absolutePath());
+
+    const Recorder::Job job = r.job(d);
+    Recorder::ExportOptions opt;
+    opt.targetLength = fast->isChecked() ? qint64(fastLen->value()) * kVideoSecond : 0;
+    opt.holdEnd = hold->isChecked();
+    std::atomic<int> progress{0};
+    std::atomic<bool> cancel{false};
+    QString err;
+    QProgressDialog pd(T("Saving the video..."), T("Cancel"), 0, 1000, this);
+    pd.setWindowModality(Qt::WindowModal);
+    pd.setMinimumDuration(300);
+    QFuture<bool> f = QtConcurrent::run([&] {
+        return Recorder::exportVideo(job, path, opt, [&](double p) {
+            progress = int(p * 1000);
+            return !cancel.load();
+        }, &err);
+    });
+    while (!f.isFinished()) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
+        pd.setValue(progress.load());
+        if (pd.wasCanceled()) cancel = true;
+        QThread::msleep(10);
+    }
+    const bool ok = f.result();
+    pd.reset();
+    if (!ok) {
+        if (err.isEmpty()) {
+            app()->showStatus(T("Cancelled. The recording is kept."), 4000);
+        } else {
+            QMessageBox::warning(this, T("Video recording"), T("Could not save the video.") + "\n\n" + T(err) + "\n\n" + T("The recording is kept."));
+        }
+        return false;
+    }
+    r.discard(d);
+    QMessageBox box(QMessageBox::Information, T("Video recording"), T("The video is saved:") + "\n" + QDir::toNativeSeparators(path), QMessageBox::Ok, this);
+    QPushButton* openBtn = box.addButton(T("Open folder"), QMessageBox::ActionRole);
+    box.exec();
+    if (box.clickedButton() == openBtn) QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
+    return true;
+}
+
+bool MainWindow::keepOrSaveRecording(Document* d) {
+    Recorder& r = Recorder::instance();
+    if (!d || r.state(d) == Recorder::State::None) return true;
+    if (r.recordingDocument() == d) r.pause();
+    if (!d->filePath().isEmpty()) {
+        app()->showStatus(T("The recording of %1 is kept: open the file and press Record to continue it.").arg(d->displayName()), 6000);
+        return true;
+    }
+    QMessageBox box(QMessageBox::Question, T("Video recording"),
+                    T("This picture is not saved, so its recording cannot be continued later. Save the video now?"), QMessageBox::NoButton, this);
+    QPushButton* saveBtn = box.addButton(T("Save video..."), QMessageBox::AcceptRole);
+    QPushButton* delBtn = box.addButton(T("Delete the recording"), QMessageBox::DestructiveRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(saveBtn);
+    box.exec();
+    if (box.clickedButton() == saveBtn) return stopRecording(d);
+    if (box.clickedButton() == delBtn) {
+        r.discard(d);
+        return true;
+    }
+    return false;
+}
+
+void MainWindow::updateRecordingIndicator() {
+    Recorder& r = Recorder::instance();
+    Document* rec = r.recordingDocument();
+    Document* d = activeDocument();
+    QString text;
+    if (rec) {
+        m_recBlink = !m_recBlink;
+        const QString dot = m_recBlink ? "<span style='color:#e5484d'>&#9679;</span>" : "<span style='color:transparent'>&#9679;</span>";
+        text = dot + " <b style='color:#e5484d'>REC</b> " + Recorder::formatLength(r.length(rec));
+        if (rec != d) text += " &middot; " + rec->displayName().toHtmlEscaped();
+        m_recLabel->setToolTip(T("Recording. Pause: %1, stop and save: %2.")
+                                   .arg(m_actions.value("rec.toggle")->shortcut().toString(QKeySequence::NativeText),
+                                        m_actions.value("rec.stop")->shortcut().toString(QKeySequence::NativeText)));
+    } else if (d && r.state(d) == Recorder::State::Paused) {
+        text = "<b>&#10074;&#10074; " + T("Paused").toHtmlEscaped() + "</b> " + Recorder::formatLength(r.length(d));
+        m_recLabel->setToolTip(T("The recording is paused. Record continues it, Stop saves the video."));
+    }
+    m_recLabel->setText(text);
+    m_recLabel->setVisible(!text.isEmpty());
+    // toolbar buttons and menu
+    const bool recording = rec != nullptr;
+    const bool hasSession = (rec != nullptr) || (d && r.state(d) != Recorder::State::None);
+    if (QAction* a = m_actions.value("rec.start")) {
+        a->setIcon(Theme::icon(recording ? "record-on" : "record"));
+        a->setText(d && r.state(d) == Recorder::State::Paused ? T("Continue recording") : T("Start recording"));
+    }
+    if (QAction* a = m_actions.value("rec.pause")) a->setEnabled(recording);
+    if (QAction* a = m_actions.value("rec.stop")) a->setEnabled(hasSession);
+    if (QAction* a = m_actions.value("rec.discard")) a->setEnabled(hasSession);
 }
 
 void MainWindow::autoFlatsDialog() {
@@ -1452,10 +1692,11 @@ void MainWindow::closeEvent(QCloseEvent* e) {
     for (QMdiSubWindow* sw : m_mdi->subWindowList())
         if (auto* cw = dynamic_cast<CanvasWindow*>(sw)) docs.insert(cw->view()->doc());
     for (Document* d : docs)
-        if (!maybeSave(d)) {
+        if (!maybeSave(d) || !keepOrSaveRecording(d)) {
             e->ignore();
             return;
         }
+    Recorder::instance().pause();  // finishes the video file
     for (QMdiSubWindow* sw : m_mdi->subWindowList())
         if (auto* cw = dynamic_cast<CanvasWindow*>(sw)) cw->canClose = nullptr;
     QSettings& s = app()->settings();

@@ -96,6 +96,9 @@ public:
     void guidesModified() { Q_EMIT guidesChanged(); }
 
     Projection* projection() { return m_projection.get(); }
+    // The picture without the layers hidden from screen recordings (made when first asked for).
+    Projection* recordingProjection();
+    void releaseRecordingProjection();
 
     // ---- non-layer document data (saved, not undoable) ----
     Perspective perspective;
@@ -132,6 +135,7 @@ private:
     std::vector<HistoryEntry> m_undo, m_redo;
     int m_undoLimit = 200;
     std::unique_ptr<Projection> m_projection;
+    std::unique_ptr<Projection> m_recProjection;
     MaskSurface m_lastSelection{0};
     QString m_filePath;
     bool m_modified = false;

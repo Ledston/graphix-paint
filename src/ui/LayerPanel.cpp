@@ -712,7 +712,7 @@ void LayerPanel::contextMenu(const QPoint& pos) {
         });
     };
     flag("reference", T("Reference layer (fills take borders from it)"), &Layer::reference);
-    flag("timelapse-off", T("Hide from the timelapse"), &Layer::hideInTimelapse);
+    flag("timelapse-off", T("Hide from the recording"), &Layer::hideInTimelapse);
     flag("clip", T("Clipping"), &Layer::clipping);
     flag("alpha-lock", T("Preserve opacity"), &Layer::alphaLock);
     flag("lock", T("Lock layer"), &Layer::locked);

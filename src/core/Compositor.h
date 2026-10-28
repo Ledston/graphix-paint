@@ -9,6 +9,8 @@ namespace gx {
 struct CompositeOptions {
     // When set, only this layer is rendered (respecting its own opacity, mask and effects).
     const Layer* only = nullptr;
+    // The picture for a screen recording: layers marked "Hide from the recording" are left out.
+    bool recording = false;
 };
 
 class Compositor {
@@ -23,7 +25,7 @@ public:
     // Convenience: whole region as an image (prepares and composites in parallel tiles).
     static QImage renderImage(GroupLayer* root, const QRect& r, const CompositeOptions& opt = {});
     // Merged color at one pixel (prepare must have run for that area, or effects are ignored).
-    static void samplePixel(const GroupLayer* root, int x, int y, float* rgba);
+    static void samplePixel(const GroupLayer* root, int x, int y, float* rgba, const CompositeOptions& opt = {});
 };
 
 }  // namespace gx

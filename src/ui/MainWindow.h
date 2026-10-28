@@ -33,6 +33,11 @@ public:
     bool openFile(const QString& path);
     void checkRecovery();
 
+    // File > Video recording
+    void startRecording();
+    void pauseRecording();
+    bool stopRecording(Document* d = nullptr);  // asks for the speed and the file, saves the video
+
 protected:
     void closeEvent(QCloseEvent* e) override;
     void dragEnterEvent(QDragEnterEvent* e) override;
@@ -75,7 +80,8 @@ private:
     void preferences(int page = 0);
     void switchLanguage(const QString& code);
     void autoFlatsDialog();
-    void exportTimelapse();
+    bool keepOrSaveRecording(Document* d);  // when a picture is closed
+    void updateRecordingIndicator();
     void restartApp();
     void shortcutsDialog();
     void togglePanels();
@@ -95,6 +101,8 @@ private:
     QLabel* m_statusZoom = nullptr;
     QLabel* m_statusSize = nullptr;
     QLabel* m_statusMsg = nullptr;
+    QLabel* m_recLabel = nullptr;
+    bool m_recBlink = false;
     QComboBox* m_stabMode = nullptr;
     QSpinBox* m_stabLevel = nullptr;
     QSpinBox* m_pressSmooth = nullptr;

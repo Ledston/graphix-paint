@@ -112,6 +112,11 @@ QToolButton { border: 1px solid transparent; border-radius: 3px; padding: 2px; b
 QToolButton:hover { background: %BUTTON%; border-color: %BORDER%; }
 QToolButton:checked { background: %ACCENT%; color: %ACCENTTEXT%; border-color: %ACCENT%; }
 QToolButton:pressed { background: %BORDER%; }
+QToolButton[popupMode="1"] { padding-right: 13px; }
+QToolButton::menu-button { border: none; border-left: 1px solid transparent; background: transparent; width: 12px; }
+QToolButton::menu-button:hover { border-left-color: %BORDER%; background: %BUTTON%; }
+QToolButton::menu-arrow { image: url("%ASSETS%/down.png"); width: 8px; height: 8px; }
+QToolButton::menu-indicator { image: url("%ASSETS%/down.png"); width: 8px; height: 8px; subcontrol-origin: padding; subcontrol-position: bottom right; }
 QPushButton { background: %BUTTON%; border: 1px solid %BORDER%; border-radius: 3px; padding: 4px 10px; min-height: 18px; }
 QPushButton:hover { border-color: %ACCENT%; }
 QPushButton:pressed, QPushButton:checked { background: %ACCENT%; color: %ACCENTTEXT%; }
@@ -798,6 +803,27 @@ void drawIcon(QPainter& p, const QString& n, const QColor& col, const QColor& ac
     } else if (n == "close") {
         line(6, 6, 18, 18);
         line(18, 6, 6, 18);
+    } else if (n == "record" || n == "record-on") {
+        // always red, so it reads as "record" in every theme; filled while recording
+        const QColor red(229, 72, 64);
+        p.setPen(QPen(red, 2.0));
+        p.setBrush(n == "record-on" ? QBrush(red) : QBrush(QColor(red.red(), red.green(), red.blue(), 70)));
+        p.drawEllipse(QPointF(12, 12), 6.5, 6.5);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(pen);
+    } else if (n == "pause") {
+        p.setPen(Qt::NoPen);
+        p.setBrush(col);
+        p.drawRoundedRect(QRectF(6.5, 5.5, 3.8, 13), 1, 1);
+        p.drawRoundedRect(QRectF(13.7, 5.5, 3.8, 13), 1, 1);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(pen);
+    } else if (n == "stop") {
+        p.setPen(Qt::NoPen);
+        p.setBrush(col);
+        p.drawRoundedRect(QRectF(6, 6, 12, 12), 1.5, 1.5);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(pen);
     } else {
         circle(12, 12, 6);
     }
