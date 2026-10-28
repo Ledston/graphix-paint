@@ -39,6 +39,7 @@ const BlendModeInfo kInfos[] = {
     {BlendMode::Luminosity, "Luminosity", "lum ", false},
     {BlendMode::DarkerColor, "Darker Color", "dkCl", false},
     {BlendMode::LighterColor, "Lighter Color", "lgCl", false},
+    {BlendMode::Dissolve, "Dissolve (noise)", "diss", false},
 };
 static_assert(sizeof(kInfos) / sizeof(kInfos[0]) == int(BlendMode::Count), "blend mode table out of sync");
 
@@ -313,8 +314,28 @@ BlendMode blendModeFromPsdKey(const QByteArray& key, bool* passThrough) {
 
 QList<BlendMode> blendModeUiOrder() {
     QList<BlendMode> l;
-    for (int i = 0; i < int(BlendMode::Count); ++i) l << kInfos[i].mode;
+    for (int i = 0; i < int(BlendMode::Count); ++i)
+        if (kInfos[i].mode != BlendMode::Dissolve) l << kInfos[i].mode;
+    l.insert(1, BlendMode::Dissolve);  // right after Normal, like in Photoshop
     return l;
+}
+
+void dissolveRow(float* p, int n, int x, int y) {
+    for (int i = 0; i < n; ++i) {
+        float* q = p + i * 4;
+        const float a = q[3];
+        if (a <= 0.f || a >= 1.f) continue;
+        quint32 h = quint32(x + i) * 374761393u + quint32(y) * 668265263u + 0x9e3779b9u;
+        h = (h ^ (h >> 13)) * 1274126177u;
+        h ^= h >> 16;
+        const float r = float(h & 0xffff) / 65536.f;
+        if (r < a) {
+            const float inv = 1.f / a;
+            q[0] *= inv; q[1] *= inv; q[2] *= inv; q[3] = 1.f;
+        } else {
+            q[0] = q[1] = q[2] = q[3] = 0.f;
+        }
+    }
 }
 
 void blendRow(BlendMode mode, float* dst, const float* src, int n) { dispatch<false>(mode, dst, src, n); }

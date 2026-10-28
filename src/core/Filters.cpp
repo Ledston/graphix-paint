@@ -20,7 +20,7 @@ QJsonObject filterDefaults(const QString& id) {
     if (id == "unsharp") return {{"radius", 2.0}, {"amount", 80.0}, {"threshold", 0.0}};
     if (id == "sharpen") return {{"amount", 50.0}};
     if (id == "glow") return {{"radius", 20.0}, {"strength", 80.0}, {"threshold", 150.0}};
-    if (id == "noise") return {{"amount", 10.0}, {"mono", true}, {"seed", 1}};
+    if (id == "noise") return {{"amount", 10.0}, {"mono", true}, {"seed", 1}, {"size", 1.0}, {"blend", -1}, {"fill", false}};
     if (id == "pixelate") return {{"cell", 8}};
     return {};
 }
@@ -109,26 +109,35 @@ void applyFilter(const QString& id, const QJsonObject& p, std::vector<float>& bu
             blendRow(BlendMode::Screen, o, g, 1);
         }
     } else if (id == "noise") {
-        float amt = float(p.value("amount").toDouble(10)) / 100.f;
-        bool mono = p.value("mono").toBool(true);
-        unsigned seed = unsigned(p.value("seed").toInt(1));
-        auto rnd = [seed](unsigned x, unsigned y, unsigned c) {
-            unsigned hsh = x * 374761393u + y * 668265263u + c * 2246822519u + seed * 3266489917u;
-            hsh = (hsh ^ (hsh >> 13)) * 1274126177u;
-            hsh ^= hsh >> 16;
-            return float(hsh & 0xffff) / 65535.f - 0.5f;
-        };
-        for (int y = 0; y < h; ++y)
+        const float amt = float(p.value("amount").toDouble(10)) / 100.f;
+        const bool mono = p.value("mono").toBool(true);
+        const unsigned seed = unsigned(p.value("seed").toInt(1));
+        const double size = std::max(1.0, p.value("size").toDouble(1.0));
+        const int blend = p.value("blend").toInt(-1);  // -1 = add to the colors, otherwise a blending mode
+        const bool fill = p.value("fill").toBool(false);  // also make noise where the layer is empty
+        parallelFor(h, [&](int y) {
+            float g[4];
             for (int x = 0; x < w; ++x) {
                 float* o = &buf[(size_t(y) * w + x) * 4];
-                if (o[3] <= 0) continue;
-                unsigned gx = unsigned(x + ox), gy = unsigned(y + oy);
-                float base = rnd(gx, gy, 0);
-                for (int k = 0; k < 3; ++k) {
-                    float r = mono ? base : rnd(gx, gy, unsigned(k + 1));
-                    o[k] = std::clamp(o[k] + r * amt * 2.f * o[3], 0.f, o[3]);
+                if (o[3] <= 0 && !fill) continue;
+                const double gx = x + ox, gy = y + oy;
+                const float base = grainNoise(gx, gy, 0, seed, size);
+                float n[3];
+                for (int k = 0; k < 3; ++k) n[k] = mono ? base : grainNoise(gx, gy, unsigned(k + 1), seed, size);
+                if (o[3] <= 0) {  // empty: gray noise, ready for an Overlay / Soft light layer
+                    for (int k = 0; k < 3; ++k) o[k] = clamp01(0.5f + n[k] * amt * 2.f);
+                    o[3] = 1.f;
+                    continue;
+                }
+                if (blend < 0) {
+                    for (int k = 0; k < 3; ++k) o[k] = std::clamp(o[k] + n[k] * amt * 2.f * o[3], 0.f, o[3]);
+                } else {
+                    for (int k = 0; k < 3; ++k) g[k] = clamp01(0.5f + n[k] * amt * 2.f);
+                    g[3] = 1.f;
+                    blendRowAtop(BlendMode(blend), o, g, 1);
                 }
             }
+        });
     } else if (id == "pixelate") {
         int cell = std::max(2, p.value("cell").toInt(8));
         for (int by = -((oy % cell + cell) % cell); by < h; by += cell)

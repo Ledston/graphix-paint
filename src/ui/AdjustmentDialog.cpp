@@ -3,6 +3,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QHBoxLayout>
 #include <QJsonArray>
 #include <QLabel>
 #include <QMutex>
@@ -12,6 +13,7 @@
 
 #include "app/App.h"
 #include "app/I18n.h"
+#include "core/BlendModes.h"
 #include "core/Document.h"
 #include "core/Filters.h"
 #include "core/ImageOps.h"
@@ -322,7 +324,11 @@ void AdjustmentDialog::buildFilter() {
         m_original = static_cast<RasterLayer*>(l)->pixels;
         m_area = m_original.exactBounds() & m_doc->bounds();
         if (m_doc->hasSelection()) m_area &= m_doc->selectionBounds();
-        if (m_filter == "noise" || m_filter == "glow" || m_filter == "motion" || m_filter == "gaussian") {
+        if (m_filter == "noise") {
+            // noise may also fill empty areas: work on the whole canvas (or the selection)
+            m_area = m_doc->bounds();
+            if (m_doc->hasSelection()) m_area &= m_doc->selectionBounds();
+        } else if (m_filter == "glow" || m_filter == "motion" || m_filter == "gaussian") {
             // blurs may spread into empty areas next to the content
             int mg = filterMargin(m_filter, m_params);
             m_area = m_area.adjusted(-mg, -mg, mg, mg) & m_doc->bounds();
@@ -345,7 +351,23 @@ void AdjustmentDialog::buildFilter() {
         m_body->addWidget(slider(T("Threshold"), "threshold", 0, 255, 0));
     } else if (f == "noise") {
         m_body->addWidget(slider(T("Amount"), "amount", 0, 100, 0, "%"));
+        m_body->addWidget(slider(T("Grain size"), "size", 1, 8, 1, " px"));
+        auto* row = new QHBoxLayout;
+        row->addWidget(new QLabel(T("How to apply"), this));
+        auto* mode = new QComboBox(this);
+        mode->addItem(T("Add to the colors"), -1);
+        for (BlendMode bm : {BlendMode::Overlay, BlendMode::SoftLight, BlendMode::Multiply, BlendMode::Screen, BlendMode::HardLight,
+                             BlendMode::Luminosity, BlendMode::Normal})
+            mode->addItem(T(blendModeName(bm)), int(bm));
+        mode->setCurrentIndex(std::max(0, mode->findData(m_params.value("blend").toInt(-1))));
+        connect(mode, &QComboBox::currentIndexChanged, this, [this, mode] {
+            m_params["blend"] = mode->currentData().toInt();
+            schedulePreview();
+        });
+        row->addWidget(mode, 1);
+        m_body->addLayout(row);
         m_body->addWidget(checkbox(T("Monochrome"), "mono"));
+        m_body->addWidget(checkbox(T("Also fill empty areas (for a noise layer)"), "fill"));
         auto* seed = new QPushButton(T("New random pattern"), this);
         connect(seed, &QPushButton::clicked, this, [this] {
             m_params["seed"] = m_params.value("seed").toInt() + 1;

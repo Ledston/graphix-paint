@@ -36,6 +36,7 @@ enum class BlendMode : int {
     Luminosity = 26,
     DarkerColor = 27,
     LighterColor = 28,
+    Dissolve = 29,   // random pixels: partly transparent paint becomes a speckle of solid pixels
     Count
 };
 
@@ -48,6 +49,9 @@ struct BlendModeInfo {
 
 const BlendModeInfo* blendModeInfos();  // array of int(BlendMode::Count)
 QString blendModeName(BlendMode m);
+// Dissolve: turns the partly transparent pixels of a premultiplied row starting at canvas (x, y)
+// into fully opaque or fully transparent ones (repeatable random pattern).
+void dissolveRow(float* p, int n, int x, int y);
 QByteArray blendModePsdKey(BlendMode m);
 BlendMode blendModeFromPsdKey(const QByteArray& key, bool* passThrough = nullptr);
 // Order modes appear in the UI (SAI modes first, then Photoshop groups)

@@ -78,6 +78,10 @@ bool loadContent(const Layer* l, const Ctx& c, float* out) {
     return true;
 }
 
+void dissolveRect(float* p, const QRect& r) {
+    for (int y = 0; y < r.height(); ++y) dissolveRow(p + size_t(y) * r.width() * 4, r.width(), r.left(), r.top() + y);
+}
+
 void scale(float* p, int n, float k) {
     if (k >= 1.f) return;
     for (int i = 0; i < n * 4; ++i) p[i] *= k;
@@ -142,6 +146,7 @@ void applyLayer(const Layer* l, const Ctx& c, float* acc, bool atop) {
     Scratch tmp(size_t(c.n) * 4);
     if (!renderContent(l, c, tmp.p)) return;
     scale(tmp.p, c.n, l->opacity);
+    if (l->blend == BlendMode::Dissolve) dissolveRect(tmp.p, c.r);
     if (atop) blendRowAtop(l->blend, acc, tmp.p, c.n);
     else blendRow(l->blend, acc, tmp.p, c.n);
 }
@@ -168,6 +173,7 @@ void compositeStack(const GroupLayer* g, const Ctx& c, float* acc) {
         if (renderContent(base, c, tmp.p)) {
             for (int k = i + 1; k < j; ++k) applyLayer(ch[size_t(k)].get(), c, tmp.p, true);
             scale(tmp.p, c.n, base->opacity);
+            if (base->blend == BlendMode::Dissolve) dissolveRect(tmp.p, c.r);
             blendRow(base->blend, acc, tmp.p, c.n);
         }
         i = j;
