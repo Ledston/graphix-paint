@@ -291,6 +291,7 @@ void LayerDelegate::paint(QPainter* p, const QStyleOptionViewItem& opt, const QM
     };
     if (l->locked) badge("lock");
     if (l->reference) badge("reference");
+    if (l->hideInTimelapse) badge("timelapse-off");
     if (l->alphaLock) badge("alpha-lock");
     if (l->fx.anyActive()) badge("fx");
     p->restore();
@@ -711,6 +712,7 @@ void LayerPanel::contextMenu(const QPoint& pos) {
         });
     };
     flag("reference", T("Reference layer (fills take borders from it)"), &Layer::reference);
+    flag("timelapse-off", T("Hide from the timelapse"), &Layer::hideInTimelapse);
     flag("clip", T("Clipping"), &Layer::clipping);
     flag("alpha-lock", T("Preserve opacity"), &Layer::alphaLock);
     flag("lock", T("Lock layer"), &Layer::locked);

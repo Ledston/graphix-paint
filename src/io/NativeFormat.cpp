@@ -104,6 +104,7 @@ QJsonObject layerToJson(const Layer& l, Writer& w) {
     o["alphaLock"] = l.alphaLock;
     if (l.labelColor.isValid()) o["label"] = l.labelColor.name();
     if (l.reference) o["reference"] = true;
+    if (l.hideInTimelapse) o["hideInTimelapse"] = true;
     if (l.fx.anyActive() || !(l.fx == LayerEffects())) o["fx"] = l.fx.toJson();
     if (l.hasMask) {
         o["mask"] = w.add(l.mask);
@@ -210,6 +211,7 @@ LayerPtr layerFromJson(const QJsonObject& o, Reader& r, int depth) {
     l->alphaLock = o.value("alphaLock").toBool();
     if (o.contains("label")) l->labelColor = QColor(o.value("label").toString());
     l->reference = o.value("reference").toBool();
+    l->hideInTimelapse = o.value("hideInTimelapse").toBool();
     if (o.contains("fx")) l->fx = LayerEffects::fromJson(o.value("fx").toObject());
     if (o.contains("mask")) {
         l->hasMask = true;

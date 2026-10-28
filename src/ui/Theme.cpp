@@ -754,6 +754,18 @@ void drawIcon(QPainter& p, const QString& n, const QColor& col, const QColor& ac
         p.drawEllipse(QPointF(18.5, 5.5), 2.6, 2.6);
         p.setPen(pen);
         p.setBrush(Qt::NoBrush);
+    } else if (n == "timelapse-off") {
+        circle(12, 12, 8);
+        line(12, 12, 12, 7);
+        line(12, 12, 15.5, 14);
+        p.setPen(QPen(QColor(229, 83, 75), 2.0, Qt::SolidLine, Qt::RoundCap));
+        line(5, 19, 19, 5);
+        p.setPen(pen);
+    } else if (n == "overlay") {
+        p.drawRect(QRectF(3, 7, 13, 11));
+        p.setBrush(QColor(acc.red(), acc.green(), acc.blue(), 110));
+        p.drawRect(QRectF(8, 4, 13, 11));
+        p.setBrush(Qt::NoBrush);
     } else if (n == "harmony") {
         circle(12, 12, 8);
         p.setPen(QPen(acc, 1.6));

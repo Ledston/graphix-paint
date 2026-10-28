@@ -115,6 +115,8 @@ LayerPropertiesDialog::LayerPropertiesDialog(Document* doc, quint32 layerId, QWi
     flag(T("Clipping"), &Layer::clipping, T("Clipping: use the layer (or folder) below as a mask"));
     flag(T("Preserve opacity"), &Layer::alphaLock, T("Preserve opacity: paint only where the layer already has paint"));
     flag(T("Lock layer"), &Layer::locked);
+    flag(T("Hide from the timelapse"), &Layer::hideInTimelapse,
+         T("The layer stays visible while you work, but the timelapse video is recorded without it."));
     flag(T("Reference layer (fills take borders from it)"), &Layer::reference,
          T("Mark the line art as reference, then fill on the layers under it with 'Borders from: reference layer'."));
 

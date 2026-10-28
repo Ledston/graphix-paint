@@ -56,6 +56,7 @@ std::shared_ptr<RasterLayer> toRaster(const Layer* l) {
     r->alphaLock = l->alphaLock;
     r->labelColor = l->labelColor;
     r->reference = l->reference;
+    r->hideInTimelapse = l->hideInTimelapse;
     r->fx = l->fx;
     r->hasMask = l->hasMask;
     r->maskEnabled = l->maskEnabled;

@@ -11,6 +11,7 @@
 #include <QThreadPool>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include "core/Compositor.h"
 #include "core/Document.h"
 #include "io/VideoWriter.h"
 
@@ -114,9 +115,66 @@ void Timelapse::scheduleCapture(Document* d) {
     });
 }
 
+int Timelapse::hiddenLayerCount(Document* d) {
+    int n = 0;
+    if (!d) return 0;
+    forEachLayer(d->root(), [&](Layer* l) {
+        if (l->hideInTimelapse && l->isEffectivelyVisible()) ++n;
+        return true;
+    });
+    return n;
+}
+
+namespace {
+QImage frameImage(const QImage& img) {
+    // about 1600 px across, flattened on white paper
+    QImage scaled = std::max(img.width(), img.height()) > 1600 ? img.scaled(1600, 1600, Qt::KeepAspectRatio, Qt::SmoothTransformation) : img;
+    QImage out(scaled.size(), QImage::Format_RGB32);
+    out.fill(Qt::white);
+    QPainter p(&out);
+    p.drawImage(0, 0, scaled);
+    p.end();
+    return out;
+}
+}  // namespace
+
 void Timelapse::capture(Document* d) {
     auto it = m_docs.find(d);
     if (it == m_docs.end() || !it->recording) return;
+    if (hiddenLayerCount(d) > 0) {
+        // Some layers stay out of the video: draw a copy of the picture without them,
+        // in the background (the copy shares the pixels, so it costs almost no memory).
+        if (it->rendering) {
+            it->again = true;
+            return;
+        }
+        auto root = std::static_pointer_cast<GroupLayer>(d->root()->clone());
+        forEachLayer(root.get(), [](Layer* l) {
+            if (l->hideInTimelapse) l->visible = false;
+            return true;
+        });
+        const QRect bounds = d->bounds();
+        QDir().mkpath(it->dir);
+        const QString file = QStringLiteral("%1/frame_%2.jpg").arg(it->dir).arg(it->frames, 6, 10, QChar('0'));
+        it->frames++;
+        it->last.restart();
+        it->rendering = true;
+        QPointer<Document> guard(d);
+        QtConcurrent::run([root, bounds, file] {
+            frameImage(Compositor::renderImage(root.get(), bounds)).save(file, "JPG", 90);
+        }).then(this, [this, guard] {
+            if (!guard) return;
+            auto it2 = m_docs.find(guard.data());
+            if (it2 == m_docs.end()) return;
+            it2->rendering = false;
+            if (it2->again) {
+                it2->again = false;
+                scheduleCapture(guard.data());
+            }
+        });
+        Q_EMIT changed();
+        return;
+    }
     QImage img;
     // the whole picture, about 1600 px across
     for (int i = 0; i < 60 && !d->projection()->thumbnail(1600, 50.0, img); ++i) {}
@@ -126,14 +184,7 @@ void Timelapse::capture(Document* d) {
     it->frames++;
     it->last.restart();
     // flatten on white and write in the background
-    (void)QtConcurrent::run([img, file] {
-        QImage out(img.size(), QImage::Format_RGB32);
-        out.fill(Qt::white);
-        QPainter p(&out);
-        p.drawImage(0, 0, img);
-        p.end();
-        out.save(file, "JPG", 90);
-    });
+    (void)QtConcurrent::run([img, file] { frameImage(img).save(file, "JPG", 90); });
     Q_EMIT changed();
 }
 

@@ -173,6 +173,7 @@ public:
     bool alphaLock = false;  // "Preserve opacity"
     QColor labelColor;       // invalid = none
     bool reference = false;  // fill tools can take their borders from this layer (line art)
+    bool hideInTimelapse = false;  // shown on the canvas, left out of the timelapse recording
     LayerEffects fx;
 
     // Layer mask (white reveals). Default value 255 so an empty mask shows everything.

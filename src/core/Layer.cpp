@@ -207,6 +207,7 @@ void Layer::copyBaseTo(Layer& o) const {
     o.alphaLock = alphaLock;
     o.labelColor = labelColor;
     o.reference = reference;
+    o.hideInTimelapse = hideInTimelapse;
     o.fx = fx;
     o.hasMask = hasMask;
     o.maskEnabled = maskEnabled;

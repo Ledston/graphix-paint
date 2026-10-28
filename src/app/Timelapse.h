@@ -27,6 +27,8 @@ public:
     void deleteFrames(Document* d);
     // Makes the video. Returns false with an error message.
     bool exportVideo(Document* d, const QString& path, double seconds, QString* error);
+    // Layers marked "Hide from the timelapse" that are visible right now.
+    static int hiddenLayerCount(Document* d);
 
 Q_SIGNALS:
     void changed();
@@ -39,6 +41,8 @@ private:
         int frames = 0;
         QElapsedTimer last;
         bool pending = false;
+        bool rendering = false;  // a frame without hidden layers is being drawn in the background
+        bool again = false;      // something changed meanwhile
     };
     QString folderFor(Document* d) const;
     void capture(Document* d);
