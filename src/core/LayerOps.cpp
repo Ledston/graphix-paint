@@ -1,0 +1,941 @@
+#include "core/LayerOps.h"
+
+#include <QImage>
+#include <QMutex>
+#include <QPainter>
+#include <QtMath>
+#include <algorithm>
+#include <cmath>
+
+#include "core/Compositor.h"
+#include "core/ImageOps.h"
+#include "core/Pixel.h"
+#include "vector/VectorRender.h"
+
+namespace gx {
+namespace ops {
+
+namespace {
+
+void assignNewIds(Document& doc, Layer* l) {
+    l->id = doc.newLayerId();
+    if (l->isGroup())
+        for (auto& c : static_cast<GroupLayer*>(l)->children) assignNewIds(doc, c.get());
+}
+
+LayerPtr sharedOf(Layer* l) {
+    if (!l || !l->parent) return nullptr;
+    int i = l->parent->indexOf(l);
+    return i >= 0 ? l->parent->children[size_t(i)] : nullptr;
+}
+
+void ensureOneLayer(Document& doc) {
+    if (!doc.root()->children.empty()) return;
+    auto l = std::make_shared<RasterLayer>();
+    l->id = doc.newLayerId();
+    l->name = doc.uniqueLayerName("Layer");
+    doc.root()->insert(0, l);
+    doc.setCurrentLayer(l->id);
+}
+
+// Rasterizes a vector/text layer into a raster layer object with the same properties.
+std::shared_ptr<RasterLayer> toRaster(const Layer* l) {
+    auto r = std::make_shared<RasterLayer>();
+    r->id = l->id;
+    r->name = l->name;
+    r->visible = l->visible;
+    r->opacity = l->opacity;
+    r->blend = l->blend;
+    r->clipping = l->clipping;
+    r->locked = l->locked;
+    r->alphaLock = l->alphaLock;
+    r->labelColor = l->labelColor;
+    r->fx = l->fx;
+    r->hasMask = l->hasMask;
+    r->maskEnabled = l->maskEnabled;
+    r->mask = l->mask;
+    if (const RasterSurface* s = l->displaySurface()) r->pixels = *s;
+    return r;
+}
+
+void replaceLayer(Layer* old, LayerPtr nl) {
+    GroupLayer* p = old->parent;
+    int i = p->indexOf(old);
+    p->take(i);
+    p->insert(i, std::move(nl));
+}
+
+QImage maskRegionToAlphaImage(const MaskSurface& m, const QRect& r, bool invert) {
+    QImage img(r.size(), QImage::Format_ARGB32_Premultiplied);
+    if (img.isNull()) return img;
+    std::vector<quint8> v(size_t(r.width()) * r.height());
+    m.readRect(r, v.data(), r.width());
+    for (int y = 0; y < r.height(); ++y) {
+        quint32* row = reinterpret_cast<quint32*>(img.scanLine(y));
+        for (int x = 0; x < r.width(); ++x) {
+            quint32 a = v[size_t(y) * r.width() + x];
+            if (invert) a = 255 - a;
+            row[x] = a * 0x01010101u;
+        }
+    }
+    return img;
+}
+
+void alphaImageToMask(const QImage& img, MaskSurface& m, const QPoint& at, bool invert) {
+    std::vector<quint8> v(size_t(img.width()) * img.height());
+    for (int y = 0; y < img.height(); ++y) {
+        const quint32* row = reinterpret_cast<const quint32*>(img.constScanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            quint8 a = quint8(row[x] >> 24);
+            v[size_t(y) * img.width() + x] = invert ? quint8(255 - a) : a;
+        }
+    }
+    QRect r(at, img.size());
+    m.writeRect(r, v.data(), img.width());
+    m.optimizeRect(r);
+}
+
+}  // namespace
+
+// ============================================================================ layers
+
+Layer* insertLayer(Document& doc, LayerPtr layer, Layer* above, bool undo, const QString& undoName) {
+    if (undo) doc.pushUndo(undoName.isEmpty() ? QStringLiteral("New layer") : undoName);
+    if (layer->id == 0 || doc.layer(layer->id)) layer->id = doc.newLayerId();
+    if (layer->name.isEmpty()) layer->name = doc.uniqueLayerName(layerTypeName(layer->type()));
+    Layer* ref = above ? above : doc.currentLayer();
+    GroupLayer* parent = doc.root();
+    int index = int(parent->children.size());
+    if (ref && ref->parent) {
+        parent = ref->parent;
+        index = parent->indexOf(ref) + 1;
+        // A new layer above a clipped layer joins the clipping group (like Photoshop).
+        if (ref->clipping && layer->hasPixels()) layer->clipping = true;
+    }
+    Layer* raw = layer.get();
+    parent->insert(index, std::move(layer));
+    doc.setCurrentLayer(raw->id);
+    doc.structureChanged();
+    return raw;
+}
+
+RasterLayer* addRasterLayer(Document& doc, const QString& name) {
+    auto l = std::make_shared<RasterLayer>();
+    l->name = name.isEmpty() ? doc.uniqueLayerName("Layer") : name;
+    return static_cast<RasterLayer*>(insertLayer(doc, l, nullptr, true, "New layer"));
+}
+
+VectorLayer* addVectorLayer(Document& doc, const QString& name) {
+    auto l = std::make_shared<VectorLayer>();
+    l->name = name.isEmpty() ? doc.uniqueLayerName("Linework") : name;
+    return static_cast<VectorLayer*>(insertLayer(doc, l, nullptr, true, "New linework layer"));
+}
+
+GroupLayer* addGroup(Document& doc, const QString& name) {
+    auto l = std::make_shared<GroupLayer>();
+    l->name = name.isEmpty() ? doc.uniqueLayerName("Folder") : name;
+    return static_cast<GroupLayer*>(insertLayer(doc, l, nullptr, true, "New folder"));
+}
+
+AdjustmentLayer* addAdjustmentLayer(Document& doc, const Adjustment& adj) {
+    auto l = std::make_shared<AdjustmentLayer>();
+    l->adjustment = adj;
+    l->name = doc.uniqueLayerName(adjustmentTypeName(adj.type));
+    return static_cast<AdjustmentLayer*>(insertLayer(doc, l, nullptr, true, "New adjustment layer"));
+}
+
+TextLayer* addTextLayer(Document& doc, const TextParams& params) {
+    auto l = std::make_shared<TextLayer>();
+    l->text = params;
+    QString first = params.text.section('\n', 0, 0).left(24).trimmed();
+    l->name = first.isEmpty() ? doc.uniqueLayerName("Text") : first;
+    renderTextLayer(*l);
+    return static_cast<TextLayer*>(insertLayer(doc, l, nullptr, true, "New text layer"));
+}
+
+void deleteLayer(Document& doc, quint32 id) {
+    Layer* l = doc.layer(id);
+    if (!l || !l->parent) return;
+    doc.pushUndo("Delete layer");
+    GroupLayer* p = l->parent;
+    int i = p->indexOf(l);
+    p->take(i);
+    Layer* next = nullptr;
+    if (!p->children.empty()) next = p->children[size_t(std::clamp(i - 1, 0, int(p->children.size()) - 1))].get();
+    else if (p != doc.root()) next = p;
+    ensureOneLayer(doc);
+    if (next) doc.setCurrentLayer(next->id);
+    else if (!doc.root()->children.empty()) doc.setCurrentLayer(doc.root()->children.back()->id);
+    doc.structureChanged();
+}
+
+Layer* duplicateLayer(Document& doc, quint32 id) {
+    Layer* l = doc.layer(id);
+    if (!l || !l->parent) return nullptr;
+    auto c = l->clone();
+    assignNewIds(doc, c.get());
+    c->name = l->name + " copy";
+    return insertLayer(doc, c, l, true, "Duplicate layer");
+}
+
+RasterSurface renderLayers(Document& doc, const std::vector<LayerPtr>& layers, const QRect& bounds) {
+    RasterSurface out;
+    QRect b = bounds & doc.bounds();
+    if (b.isEmpty()) return out;
+    auto tmp = std::make_shared<GroupLayer>();
+    for (const auto& l : layers) {
+        auto c = l->clone();
+        c->parent = tmp.get();
+        tmp->children.push_back(c);
+    }
+    Compositor::prepare(tmp.get(), b);
+    TileRange tr = tileRangeFor(b);
+    QVector<qint64> keys;
+    for (int ty = tr.y0; ty <= tr.y1; ++ty)
+        for (int tx = tr.x0; tx <= tr.x1; ++tx) keys << tileKey(tx, ty);
+    QMutex mx;
+    QHash<qint64, RasterSurface::Ptr> res;
+    parallelForTiles(keys, [&](qint64 k) {
+        QRect r = tileRectForKey(k) & b;
+        std::vector<float> buf(size_t(r.width()) * r.height() * 4);
+        Compositor::composite(tmp.get(), r, buf.data());
+        auto t = std::make_shared<Tile<quint32>>();
+        t->px.reset(new quint32[TILE_PIXELS]);
+        std::fill_n(t->px.get(), TILE_PIXELS, 0u);
+        QRect tr2 = tileRectForKey(k);
+        quint32 any = 0;
+        for (int y = 0; y < r.height(); ++y)
+            for (int x = 0; x < r.width(); ++x) {
+                quint32 v = pack(&buf[(size_t(y) * r.width() + x) * 4]);
+                t->px[(r.top() - tr2.top() + y) * TILE + (r.left() - tr2.left() + x)] = v;
+                any |= v;
+            }
+        if (!any) return;
+        QMutexLocker lock(&mx);
+        res.insert(k, t);
+    });
+    for (auto it = res.begin(); it != res.end(); ++it) out.setTile(it.key(), it.value());
+    out.optimize();
+    return out;
+}
+
+bool mergeDown(Document& doc, quint32 id, QString* error) {
+    Layer* l = doc.layer(id);
+    if (!l || !l->parent) return false;
+    GroupLayer* p = l->parent;
+    int i = p->indexOf(l);
+    if (i <= 0) {
+        if (error) *error = "There is no layer below to merge into.";
+        return false;
+    }
+    Layer* below = p->children[size_t(i - 1)].get();
+    if (below->isGroup() || below->type() == LayerType::Adjustment) {
+        if (error) *error = "Layers can only be merged into a pixel layer.";
+        return false;
+    }
+    if (below->locked || l->locked) {
+        if (error) *error = "The layer is locked.";
+        return false;
+    }
+    doc.pushUndo("Merge down");
+    QRect b = doc.layerBounds(below);
+    if (l->type() != LayerType::Adjustment) b |= doc.layerBounds(l);
+    auto bc = below->clone();
+    bc->opacity = 1;
+    bc->blend = BlendMode::Normal;
+    bc->clipping = false;
+    bc->visible = true;
+    auto lc = l->clone();
+    lc->clipping = l->clipping && !below->clipping;
+    RasterSurface merged = renderLayers(doc, {bc, lc}, b);
+    auto r = toRaster(below);
+    r->pixels = std::move(merged);
+    r->fx = LayerEffects();
+    r->hasMask = false;
+    r->mask = MaskSurface(255);
+    p->take(i);  // remove upper layer
+    replaceLayer(below, r);
+    doc.setCurrentLayer(r->id);
+    doc.structureChanged();
+    return true;
+}
+
+void mergeVisible(Document& doc) {
+    doc.pushUndo("Merge visible");
+    RasterSurface merged = renderLayers(doc, doc.root()->children, doc.bounds());
+    auto r = std::make_shared<RasterLayer>();
+    r->id = doc.newLayerId();
+    r->name = "Merged";
+    r->pixels = std::move(merged);
+    auto& ch = doc.root()->children;
+    int pos = -1;
+    for (int i = int(ch.size()) - 1; i >= 0; --i)
+        if (ch[size_t(i)]->visible) {
+            doc.root()->take(i);
+            pos = i;
+        }
+    if (pos < 0) pos = int(ch.size());
+    doc.root()->insert(std::min(pos, int(ch.size())), r);
+    doc.setCurrentLayer(r->id);
+    doc.structureChanged();
+}
+
+void flatten(Document& doc) {
+    doc.pushUndo("Flatten image");
+    RasterSurface merged = renderLayers(doc, doc.root()->children, doc.bounds());
+    auto r = std::make_shared<RasterLayer>();
+    r->id = doc.newLayerId();
+    r->name = "Background";
+    r->pixels = std::move(merged);
+    doc.root()->children.clear();
+    doc.root()->insert(0, r);
+    doc.setCurrentLayer(r->id);
+    doc.structureChanged();
+}
+
+Layer* rasterize(Document& doc, quint32 id) {
+    Layer* l = doc.layer(id);
+    if (!l || l->isRaster() || l->type() == LayerType::Adjustment) return l;
+    doc.pushUndo("Rasterize layer");
+    std::shared_ptr<RasterLayer> r;
+    if (l->isGroup()) {
+        auto gc = l->clone();
+        gc->opacity = 1;
+        gc->blend = BlendMode::Normal;
+        gc->clipping = false;
+        gc->visible = true;
+        static_cast<GroupLayer*>(gc.get())->passThrough = false;
+        r = std::make_shared<RasterLayer>();
+        r->id = l->id;
+        r->name = l->name;
+        r->visible = l->visible;
+        r->opacity = l->opacity;
+        r->blend = l->blend;
+        r->clipping = l->clipping;
+        r->pixels = renderLayers(doc, {gc}, doc.layerBounds(l));
+    } else {
+        r = toRaster(l);
+    }
+    Layer* raw = r.get();
+    replaceLayer(l, r);
+    doc.setCurrentLayer(raw->id);
+    doc.structureChanged();
+    return raw;
+}
+
+void moveLayer(Document& doc, quint32 id, GroupLayer* newParent, int index) {
+    Layer* l = doc.layer(id);
+    if (!l || !l->parent || !newParent) return;
+    if (newParent == l || isAncestor(l, newParent)) return;
+    GroupLayer* old = l->parent;
+    int oi = old->indexOf(l);
+    if (old == newParent && (index == oi || index == oi + 1)) return;
+    doc.pushUndo("Move layer");
+    LayerPtr keep = old->take(oi);
+    if (old == newParent && oi < index) --index;
+    newParent->insert(index, keep);
+    doc.setCurrentLayer(id);
+    doc.structureChanged();
+}
+
+void moveLayerUp(Document& doc, quint32 id) {
+    Layer* l = doc.layer(id);
+    if (!l || !l->parent) return;
+    GroupLayer* p = l->parent;
+    int i = p->indexOf(l);
+    if (i < int(p->children.size()) - 1) moveLayer(doc, id, p, i + 2);
+    else if (p->parent) moveLayer(doc, id, p->parent, p->parent->indexOf(p) + 1);
+}
+
+void moveLayerDown(Document& doc, quint32 id) {
+    Layer* l = doc.layer(id);
+    if (!l || !l->parent) return;
+    GroupLayer* p = l->parent;
+    int i = p->indexOf(l);
+    if (i > 0) moveLayer(doc, id, p, i - 1);
+    else if (p->parent) moveLayer(doc, id, p->parent, p->parent->indexOf(p));
+}
+
+GroupLayer* groupLayer(Document& doc, quint32 id) {
+    Layer* l = doc.layer(id);
+    if (!l || !l->parent) return nullptr;
+    doc.pushUndo("Group into folder");
+    GroupLayer* p = l->parent;
+    int i = p->indexOf(l);
+    LayerPtr keep = p->take(i);
+    auto g = std::make_shared<GroupLayer>();
+    g->id = doc.newLayerId();
+    g->name = doc.uniqueLayerName("Folder");
+    keep->clipping = false;
+    g->insert(0, keep);
+    p->insert(i, g);
+    doc.setCurrentLayer(g->id);
+    doc.structureChanged();
+    return g.get();
+}
+
+void clearLayer(Document& doc, quint32 id) {
+    Layer* l = doc.layer(id);
+    if (!l) return;
+    if (l->type() == LayerType::Vector) {
+        doc.pushUndo("Clear layer");
+        auto* v = static_cast<VectorLayer*>(l);
+        QRect r = v->cache.tileBounds();
+        v->strokes.clear();
+        v->cache.clear();
+        doc.pixelsChanged(r, l);
+        return;
+    }
+    if (!l->isRaster()) return;
+    auto* rl = static_cast<RasterLayer*>(l);
+    doc.pushUndo("Clear layer");
+    QRect changed = rl->pixels.tileBounds();
+    if (!doc.hasSelection()) {
+        rl->pixels.clear();
+    } else {
+        QRect r = doc.selectionBounds() & changed;
+        std::vector<float> px(size_t(r.width()) * r.height() * 4), sel(size_t(r.width()) * r.height());
+        readFloat(rl->pixels, r, px.data());
+        readMask(doc.selection(), r, sel.data());
+        for (size_t i = 0; i < sel.size(); ++i)
+            for (int k = 0; k < 4; ++k) px[i * 4 + size_t(k)] *= 1.f - sel[i];
+        writeFloat(rl->pixels, r, px.data());
+        rl->pixels.optimizeRect(r);
+        changed = r;
+    }
+    doc.pixelsChanged(changed, l);
+}
+
+void fillLayer(Document& doc, quint32 id, const QColor& c) {
+    Layer* l = doc.layer(id);
+    if (!l || !l->isRaster()) return;
+    auto* rl = static_cast<RasterLayer*>(l);
+    doc.pushUndo("Fill");
+    float col[4] = {float(c.redF()), float(c.greenF()), float(c.blueF()), 1.f};
+    QRect r = doc.hasSelection() ? doc.selectionBounds() : doc.bounds();
+    if (r.isEmpty()) return;
+    if (!doc.hasSelection() && !l->alphaLock) {
+        rl->pixels.fillRect(r, premulFromColor(c));
+    } else {
+        std::vector<float> px(size_t(r.width()) * r.height() * 4), sel(size_t(r.width()) * r.height(), 1.f);
+        readFloat(rl->pixels, r, px.data());
+        if (doc.hasSelection()) readMask(doc.selection(), r, sel.data());
+        for (size_t i = 0; i < sel.size(); ++i) {
+            float* p = &px[i * 4];
+            float w = sel[i];
+            if (w <= 0) continue;
+            float oldA = p[3];
+            for (int k = 0; k < 4; ++k) p[k] += (col[k] - p[k]) * w;
+            if (l->alphaLock) {
+                float f = p[3] > 1e-6f ? oldA / p[3] : 0.f;
+                p[0] *= f; p[1] *= f; p[2] *= f; p[3] = oldA;
+            }
+        }
+        writeFloat(rl->pixels, r, px.data());
+        rl->pixels.optimizeRect(r);
+    }
+    doc.pixelsChanged(r, l);
+}
+
+void flipLayer(Document& doc, quint32 id, bool horizontal) {
+    Layer* l = doc.layer(id);
+    if (!l || l->isGroup() || l->type() == LayerType::Adjustment) return;
+    if (l->type() == LayerType::Text) l = rasterize(doc, id);
+    doc.pushUndo(horizontal ? "Flip layer horizontally" : "Flip layer vertically");
+    QRect before = doc.layerBounds(l);
+    QTransform t = horizontal ? QTransform(-1, 0, 0, 1, doc.size().width(), 0) : QTransform(1, 0, 0, -1, 0, doc.size().height());
+    transformLayerContent(*l, t, false);
+    doc.pixelsChanged(before | doc.layerBounds(l), l);
+}
+
+// ============================================================================ masks
+
+void addMask(Document& doc, quint32 id, bool fromSelection) {
+    Layer* l = doc.layer(id);
+    if (!l || l->hasMask) return;
+    doc.pushUndo("Add layer mask");
+    l->hasMask = true;
+    l->maskEnabled = true;
+    l->mask = MaskSurface(255);
+    if (fromSelection && doc.hasSelection()) {
+        l->mask.fillRect(doc.bounds(), 0);
+        const auto& sel = doc.selection();
+        for (auto it = sel.tiles().cbegin(); it != sel.tiles().cend(); ++it) l->mask.setTile(it.key(), it.value());
+    }
+    doc.layerChanged(l);
+    doc.structureChanged();
+}
+
+void deleteMask(Document& doc, quint32 id) {
+    Layer* l = doc.layer(id);
+    if (!l || !l->hasMask) return;
+    doc.pushUndo("Delete layer mask");
+    l->hasMask = false;
+    l->mask = MaskSurface(255);
+    doc.structureChanged();
+}
+
+void applyMask(Document& doc, quint32 id) {
+    Layer* l = doc.layer(id);
+    if (!l || !l->hasMask || !l->isRaster()) return;
+    doc.pushUndo("Apply layer mask");
+    auto* rl = static_cast<RasterLayer*>(l);
+    QRect r = rl->pixels.tileBounds();
+    if (!r.isEmpty()) {
+        std::vector<float> px(size_t(r.width()) * r.height() * 4), m(size_t(r.width()) * r.height());
+        readFloat(rl->pixels, r, px.data());
+        readMask(l->mask, r, m.data());
+        for (size_t i = 0; i < m.size(); ++i)
+            for (int k = 0; k < 4; ++k) px[i * 4 + size_t(k)] *= m[i];
+        writeFloat(rl->pixels, r, px.data());
+        rl->pixels.optimizeRect(r);
+    }
+    l->hasMask = false;
+    l->mask = MaskSurface(255);
+    doc.structureChanged();
+}
+
+// ============================================================================ selection
+
+MaskSurface rasterizePath(const QPainterPath& path, const QRect& clip, bool antialias) {
+    MaskSurface m(0);
+    QRect r = path.boundingRect().toAlignedRect().adjusted(-1, -1, 1, 1) & clip;
+    if (r.isEmpty()) return m;
+    QImage img(r.size(), QImage::Format_ARGB32_Premultiplied);
+    if (img.isNull()) return m;
+    img.fill(0);
+    {
+        QPainter p(&img);
+        p.setRenderHint(QPainter::Antialiasing, antialias);
+        p.translate(-r.topLeft());
+        p.fillPath(path, Qt::white);
+    }
+    alphaImageToMask(img, m, r.topLeft(), false);
+    return m;
+}
+
+void selectAll(Document& doc) {
+    doc.pushUndo("Select all");
+    doc.selection().clear();
+    doc.selection().fillRect(doc.bounds(), 255);
+    doc.setHasSelection(true);
+    doc.selectionModified();
+}
+
+void deselect(Document& doc) {
+    if (!doc.hasSelection()) return;
+    doc.savedSelection() = doc.selection();
+    doc.pushUndo("Deselect");
+    doc.setHasSelection(false);
+    doc.selectionModified();
+}
+
+void reselect(Document& doc) {
+    if (doc.savedSelection().isEmpty()) return;
+    doc.pushUndo("Reselect");
+    doc.selection() = doc.savedSelection();
+    doc.setHasSelection(true);
+    doc.selectionModified();
+}
+
+void invertSelection(Document& doc) {
+    if (!doc.hasSelection()) return;
+    doc.pushUndo("Invert selection");
+    MaskSurface& s = doc.selection();
+    MaskSurface out(0);
+    const QRect canvas = doc.bounds();
+    TileRange tr = tileRangeFor(canvas);
+    for (int ty = tr.y0; ty <= tr.y1; ++ty)
+        for (int tx = tr.x0; tx <= tr.x1; ++tx) {
+            QRect r = tileRect(tx, ty);
+            const auto* t = s.tile(tx, ty);
+            if (canvas.contains(r) && (!t || !t->px)) {
+                quint8 v = 255 - (t ? t->uniform : 0);
+                if (v) {
+                    auto u = std::make_shared<Tile<quint8>>();
+                    u->uniform = v;
+                    out.setTile(tileKey(tx, ty), u);
+                }
+                continue;
+            }
+            QRect ir = r & canvas;
+            quint8* p = out.writable(tx, ty);
+            for (int y = ir.top(); y <= ir.bottom(); ++y)
+                for (int x = ir.left(); x <= ir.right(); ++x) {
+                    int i = ((y & (TILE - 1)) << TILE_SHIFT) | (x & (TILE - 1));
+                    p[i] = quint8(255 - (t ? t->at(i) : 0));
+                }
+        }
+    out.optimize();
+    s = std::move(out);
+    doc.setHasSelection(!s.isEmpty());
+    doc.selectionModified();
+}
+
+void combineSelection(Document& doc, const MaskSurface& shape, SelectMode mode, const QString& undoName) {
+    doc.pushUndo(undoName);
+    MaskSurface& s = doc.selection();
+    if (mode == SelectMode::Replace || (!doc.hasSelection() && (mode == SelectMode::Add || mode == SelectMode::Intersect))) {
+        s = shape;
+    } else if (!doc.hasSelection() && mode == SelectMode::Subtract) {
+        // nothing selected: subtracting changes nothing
+    } else {
+        QSet<qint64> keys;
+        for (auto it = s.tiles().cbegin(); it != s.tiles().cend(); ++it) keys.insert(it.key());
+        for (auto it = shape.tiles().cbegin(); it != shape.tiles().cend(); ++it) keys.insert(it.key());
+        for (qint64 k : keys) {
+            const auto* a = s.tile(keyTx(k), keyTy(k));
+            const auto* b = shape.tile(keyTx(k), keyTy(k));
+            if (mode == SelectMode::Add && !b) continue;
+            if (mode == SelectMode::Subtract && !b) continue;
+            if (mode == SelectMode::Intersect && !a) continue;
+            std::vector<quint8> res(TILE_PIXELS);
+            for (int i = 0; i < TILE_PIXELS; ++i) {
+                int va = a ? a->at(i) : 0, vb = b ? b->at(i) : 0;
+                int v = 0;
+                switch (mode) {
+                case SelectMode::Add: v = std::max(va, vb); break;
+                case SelectMode::Subtract: v = std::min(va, 255 - vb); break;
+                case SelectMode::Intersect: v = std::min(va, vb); break;
+                default: v = vb; break;
+                }
+                res[size_t(i)] = quint8(v);
+            }
+            quint8* p = s.writable(keyTx(k), keyTy(k));
+            std::copy(res.begin(), res.end(), p);
+        }
+    }
+    s.optimize();
+    doc.setHasSelection(!s.isEmpty());
+    doc.selectionModified();
+}
+
+void selectPath(Document& doc, const QPainterPath& path, SelectMode mode, bool antialias, const QString& undoName) {
+    MaskSurface m = rasterizePath(path, doc.bounds(), antialias);
+    combineSelection(doc, m, mode, undoName);
+}
+
+void selectLayerAlpha(Document& doc, quint32 id, SelectMode mode) {
+    Layer* l = doc.layer(id);
+    if (!l) return;
+    MaskSurface m(0);
+    const RasterSurface* s = l->displaySurface();
+    RasterSurface rendered;
+    if (l->isGroup()) {
+        rendered = renderLayers(doc, {sharedOf(l)}, doc.layerBounds(l));
+        s = &rendered;
+    }
+    if (!s) return;
+    for (auto it = s->tiles().cbegin(); it != s->tiles().cend(); ++it) {
+        QRect r = tileRectForKey(it.key());
+        if (!r.intersects(doc.bounds())) continue;
+        quint8* p = m.writable(keyTx(it.key()), keyTy(it.key()));
+        for (int i = 0; i < TILE_PIXELS; ++i) p[i] = quint8(it.value()->at(i) >> 24);
+    }
+    if (l->hasMask && l->maskEnabled)
+        for (auto it = m.tiles().cbegin(); it != m.tiles().cend(); ++it) {
+            // multiply by the layer mask
+            int tx = keyTx(it.key()), ty = keyTy(it.key());
+            const auto* mt = l->mask.tile(tx, ty);
+            if (!mt) continue;
+            quint8* p = m.writable(tx, ty);
+            for (int i = 0; i < TILE_PIXELS; ++i) p[i] = quint8(p[i] * mt->at(i) / 255);
+        }
+    m.optimize();
+    combineSelection(doc, m, mode, "Select layer opacity");
+}
+
+namespace {
+// Region of the selection grown by margin, as a float buffer
+struct SelBuf {
+    QRect r;
+    std::vector<float> v;
+};
+SelBuf readSel(Document& doc, int margin) {
+    SelBuf b;
+    b.r = doc.selectionBounds().adjusted(-margin, -margin, margin, margin) & doc.bounds();
+    b.v.resize(size_t(b.r.width()) * b.r.height());
+    readMask(doc.selection(), b.r, b.v.data());
+    return b;
+}
+void writeSel(Document& doc, const SelBuf& b) {
+    std::vector<quint8> u(b.v.size());
+    for (size_t i = 0; i < u.size(); ++i) u[i] = quint8(std::clamp(int(b.v[i] * 255.f + 0.5f), 0, 255));
+    doc.selection().clear();
+    doc.selection().writeRect(b.r, u.data(), b.r.width());
+    doc.selection().optimize();
+    doc.setHasSelection(!doc.selection().isEmpty());
+    doc.selectionModified();
+}
+std::vector<float> grownCoverage(const SelBuf& b, int px) {
+    // px > 0: distance outward from inside; px < 0: shrink
+    const int w = b.r.width(), h = b.r.height();
+    std::vector<uint8_t> seeds(b.v.size());
+    bool grow = px >= 0;
+    for (size_t i = 0; i < b.v.size(); ++i) seeds[i] = grow ? (b.v[i] >= 0.5f) : (b.v[i] < 0.5f);
+    std::vector<float> d2;
+    distanceTransform(seeds, w, h, d2);
+    std::vector<float> out(b.v.size());
+    float R = float(std::abs(px));
+    for (size_t i = 0; i < out.size(); ++i) {
+        float d = std::sqrt(d2[i]);
+        float c = clamp01(R + 0.5f - d);
+        out[i] = grow ? std::max(c, b.v[i]) : std::min(1.f - c, b.v[i]);
+    }
+    return out;
+}
+}  // namespace
+
+void growSelection(Document& doc, int px) {
+    if (!doc.hasSelection() || px == 0) return;
+    doc.pushUndo(px > 0 ? "Expand selection" : "Contract selection");
+    SelBuf b = readSel(doc, std::abs(px) + 2);
+    b.v = grownCoverage(b, px);
+    writeSel(doc, b);
+}
+
+void featherSelection(Document& doc, double radius) {
+    if (!doc.hasSelection() || radius <= 0) return;
+    doc.pushUndo("Feather selection");
+    SelBuf b = readSel(doc, int(std::ceil(radius * 3)) + 2);
+    gaussianBlur(b.v.data(), b.r.width(), b.r.height(), 1, float(radius) * 0.5f);
+    writeSel(doc, b);
+}
+
+void borderSelection(Document& doc, int px) {
+    if (!doc.hasSelection() || px <= 0) return;
+    doc.pushUndo("Border selection");
+    SelBuf b = readSel(doc, px + 2);
+    std::vector<float> g = grownCoverage(b, px);
+    std::vector<float> s = grownCoverage(b, -px);
+    for (size_t i = 0; i < b.v.size(); ++i) b.v[i] = clamp01(g[i] - s[i]);
+    writeSel(doc, b);
+}
+
+// ============================================================================ transforms
+
+void transformSurface(RasterSurface& s, const QTransform& t, bool smooth, const QRect& srcBounds) {
+    QRect R = srcBounds.isEmpty() ? s.tileBounds() : srcBounds;
+    if (R.isEmpty()) return;
+    QImage src = surfaceToImage(s, R);
+    QRect dr = t.mapRect(QRectF(R)).toAlignedRect();
+    if (dr.isEmpty() || src.isNull()) return;
+    QImage dst(dr.size(), QImage::Format_ARGB32_Premultiplied);
+    if (dst.isNull()) return;
+    dst.fill(0);
+    {
+        QPainter p(&dst);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, smooth);
+        p.setRenderHint(QPainter::Antialiasing, smooth);
+        p.setTransform(t * QTransform::fromTranslate(-dr.left(), -dr.top()));
+        p.drawImage(R.topLeft(), src);
+    }
+    if (srcBounds.isEmpty()) s.clear();
+    else s.fillRect(R, 0);
+    // merge (paint over what is left)
+    RasterSurface tmp;
+    imageToSurface(dst, tmp, dr.topLeft());
+    for (auto it = tmp.tiles().cbegin(); it != tmp.tiles().cend(); ++it) {
+        if (srcBounds.isEmpty() || !s.tile(keyTx(it.key()), keyTy(it.key()))) {
+            s.setTile(it.key(), it.value());
+            continue;
+        }
+        QRect tr = tileRectForKey(it.key());
+        std::vector<float> a(size_t(TILE_PIXELS) * 4), b(size_t(TILE_PIXELS) * 4);
+        readFloat(s, tr, a.data());
+        readFloat(tmp, tr, b.data());
+        blendRow(BlendMode::Normal, a.data(), b.data(), TILE_PIXELS);
+        writeFloat(s, tr, a.data());
+    }
+    s.optimize();
+}
+
+void transformMask(MaskSurface& m, const QTransform& t, bool smooth) {
+    const bool inv = m.defaultValue() == 255;
+    QRect R = m.tileBounds();
+    if (R.isEmpty()) return;
+    QImage src = maskRegionToAlphaImage(m, R, inv);
+    QRect dr = t.mapRect(QRectF(R)).toAlignedRect();
+    QImage dst(dr.size(), QImage::Format_ARGB32_Premultiplied);
+    if (dst.isNull() || src.isNull()) return;
+    dst.fill(0);
+    {
+        QPainter p(&dst);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, smooth);
+        p.setTransform(t * QTransform::fromTranslate(-dr.left(), -dr.top()));
+        p.drawImage(R.topLeft(), src);
+    }
+    m.clear();
+    alphaImageToMask(dst, m, dr.topLeft(), inv);
+}
+
+void transformLayerContent(Layer& l, const QTransform& t, bool smooth) {
+    if (l.hasMask) transformMask(l.mask, t, smooth);
+    switch (l.type()) {
+    case LayerType::Raster: transformSurface(static_cast<RasterLayer&>(l).pixels, t, smooth); break;
+    case LayerType::Vector: {
+        auto& v = static_cast<VectorLayer&>(l);
+        double sc = std::sqrt(std::fabs(t.determinant()));
+        for (auto& s : v.strokes) {
+            for (auto& p : s.points) p.pos = t.map(p.pos);
+            s.width = float(s.width * sc);
+        }
+        v.cache.clear();
+        renderVectorLayer(v);
+        break;
+    }
+    case LayerType::Text: {
+        auto& tl = static_cast<TextLayer&>(l);
+        double sc = std::sqrt(std::fabs(t.determinant()));
+        tl.text.origin = t.map(tl.text.origin);
+        QPointF ax = t.map(QPointF(1, 0)) - t.map(QPointF(0, 0));
+        tl.text.rotation += qRadiansToDegrees(std::atan2(ax.y(), ax.x()));
+        tl.text.scale *= sc;
+        renderTextLayer(tl);
+        break;
+    }
+    case LayerType::Group:
+        for (auto& c : static_cast<GroupLayer&>(l).children) transformLayerContent(*c, t, smooth);
+        break;
+    default: break;
+    }
+}
+
+void applyToSelection(Document& doc, RasterSurface& target, const RasterSurface& original, const QRect& r) {
+    if (!doc.hasSelection() || r.isEmpty()) return;
+    const size_t n = size_t(r.width()) * r.height();
+    std::vector<float> a(n * 4), b(n * 4), m(n);
+    readFloat(original, r, a.data());
+    readFloat(target, r, b.data());
+    readMask(doc.selection(), r, m.data());
+    for (size_t i = 0; i < n; ++i)
+        for (int k = 0; k < 4; ++k) {
+            float& av = a[i * 4 + size_t(k)];
+            av += (b[i * 4 + size_t(k)] - av) * m[i];
+        }
+    writeFloat(target, r, a.data());
+    target.optimizeRect(r);
+}
+
+// ============================================================================ canvas
+
+namespace {
+
+void forAllLayers(Document& doc, const std::function<void(Layer&)>& fn) {
+    forEachLayer(doc.root(), [&](Layer* l) { fn(*l); return true; });
+}
+
+// Text layers cannot be mirrored and stay editable; they are rasterized first.
+void rasterizeTextForMirror(Document& doc) {
+    QList<Layer*> texts;
+    forEachLayer(doc.root(), [&](Layer* l) {
+        if (l->type() == LayerType::Text) texts << l;
+        return true;
+    });
+    for (Layer* l : texts) replaceLayer(l, toRaster(l));
+}
+
+void transformDocument(Document& doc, const QTransform& t, const QSize& newSize, bool smooth) {
+    forAllLayers(doc, [&](Layer& l) {
+        if (l.isGroup()) {
+            if (l.hasMask) transformMask(l.mask, t, smooth);
+            return;  // children are visited separately
+        }
+        transformLayerContent(l, t, smooth);
+    });
+    if (doc.hasSelection()) transformMask(doc.selection(), t, smooth);
+    for (auto& p : doc.perspective.vp) p = t.map(p);
+    doc.symmetry.center = t.map(doc.symmetry.center);
+    doc.setSizeNoUndo(newSize);
+}
+
+}  // namespace
+
+void resizeCanvas(Document& doc, const QSize& size, const QPoint& offset) {
+    if (size.isEmpty()) return;
+    doc.pushUndo("Canvas size");
+    forAllLayers(doc, [&](Layer& l) {
+        if (l.hasMask) l.mask = l.mask.translated(offset.x(), offset.y());
+        switch (l.type()) {
+        case LayerType::Raster: {
+            auto& r = static_cast<RasterLayer&>(l);
+            r.pixels = r.pixels.translated(offset.x(), offset.y());
+            break;
+        }
+        case LayerType::Vector: {
+            auto& v = static_cast<VectorLayer&>(l);
+            for (auto& s : v.strokes)
+                for (auto& p : s.points) p.pos += offset;
+            v.cache = v.cache.translated(offset.x(), offset.y());
+            break;
+        }
+        case LayerType::Text: {
+            auto& t = static_cast<TextLayer&>(l);
+            t.text.origin += offset;
+            t.cache = t.cache.translated(offset.x(), offset.y());
+            break;
+        }
+        default: break;
+        }
+    });
+    if (doc.hasSelection()) doc.selection() = doc.selection().translated(offset.x(), offset.y());
+    for (auto& p : doc.perspective.vp) p += offset;
+    doc.symmetry.center += offset;
+    doc.setSizeNoUndo(size);
+    doc.structureChanged();
+}
+
+void scaleImage(Document& doc, const QSize& size, bool smooth) {
+    if (size.isEmpty() || size == doc.size()) return;
+    doc.pushUndo("Image size");
+    double sx = double(size.width()) / doc.size().width(), sy = double(size.height()) / doc.size().height();
+    transformDocument(doc, QTransform::fromScale(sx, sy), size, smooth);
+    doc.structureChanged();
+}
+
+void rotateCanvas(Document& doc, int q) {
+    q = ((q % 4) + 4) % 4;
+    if (q == 0) return;
+    doc.pushUndo("Rotate canvas");
+    const int W = doc.size().width(), H = doc.size().height();
+    QTransform t;
+    QSize ns(W, H);
+    if (q == 1) { t = QTransform(0, 1, -1, 0, H, 0); ns = QSize(H, W); }
+    else if (q == 2) { t = QTransform(-1, 0, 0, -1, W, H); }
+    else { t = QTransform(0, -1, 1, 0, 0, W); ns = QSize(H, W); }
+    transformDocument(doc, t, ns, false);
+    doc.structureChanged();
+}
+
+void flipCanvas(Document& doc, bool horizontal) {
+    doc.pushUndo(horizontal ? "Flip canvas horizontally" : "Flip canvas vertically");
+    rasterizeTextForMirror(doc);
+    const int W = doc.size().width(), H = doc.size().height();
+    QTransform t = horizontal ? QTransform(-1, 0, 0, 1, W, 0) : QTransform(1, 0, 0, -1, 0, H);
+    transformDocument(doc, t, doc.size(), false);
+    doc.structureChanged();
+}
+
+void cropToSelection(Document& doc) {
+    if (!doc.hasSelection()) return;
+    QRect r = doc.selectionBounds();
+    if (r.isEmpty()) return;
+    resizeCanvas(doc, r.size(), -r.topLeft());
+    doc.setHasSelection(false);
+    doc.selectionModified();
+}
+
+void trimCanvas(Document& doc) {
+    QRect b;
+    forEachLayer(doc.root(), [&](Layer* l) {
+        if (const RasterSurface* s = l->displaySurface())
+            if (l->visible) b |= s->exactBounds();
+        return true;
+    });
+    b &= doc.bounds();
+    if (b.isEmpty() || b == doc.bounds()) return;
+    resizeCanvas(doc, b.size(), -b.topLeft());
+}
+
+}  // namespace ops
+}  // namespace gx
