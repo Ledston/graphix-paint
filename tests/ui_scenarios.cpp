@@ -370,7 +370,9 @@ int main(int argc, char** argv) {
         rec.setNewMode(Recorder::Mode::Canvas);
         CHECK(Recorder::hiddenLayerCount(d) == 1);
         QString err;
-        CHECK(rec.start(d, &err));
+        const bool started = rec.start(d, &err);
+        if (!started) std::fprintf(stderr, "NOTE recording did not start: %s\n", qPrintable(err));
+        CHECK(started);
         CHECK(rec.state(d) == Recorder::State::Recording);
         CHECK(w.windowTitle().startsWith(QString::fromUtf8("● REC")));
         // some drawing: the green block grows
@@ -395,7 +397,10 @@ int main(int argc, char** argv) {
         // the video: the hidden red layer is not there, the rest is
         {
             VideoReader vr;
-            CHECK(!job.files.isEmpty() && vr.open(job.files.first(), nullptr));
+            QString rerr;
+            const bool opened = !job.files.isEmpty() && vr.open(job.files.first(), &rerr);
+            if (!opened) std::fprintf(stderr, "NOTE could not read %s: %s\n", qPrintable(job.files.value(0)), qPrintable(rerr));
+            CHECK(opened);
             QImage frame, last;
             qint64 dur = 0, total = 0;
             int n = 0;
@@ -404,6 +409,8 @@ int main(int argc, char** argv) {
                 total += dur;
                 ++n;
             }
+            if (n < 5 || std::abs(total - len1) >= kVideoSecond / 10)
+                std::fprintf(stderr, "NOTE frames %d, read length %lld, recorded %lld\n", n, (long long)total, (long long)len1);
             CHECK(n >= 5);
             CHECK(std::abs(total - len1) < kVideoSecond / 10);
             CHECK(!last.isNull() && last.width() % 16 == 0 && last.height() % 16 == 0);
@@ -430,7 +437,9 @@ int main(int argc, char** argv) {
         const QString out1 = QDir::tempPath() + "/gx_rec_real.mp4", out2 = QDir::tempPath() + "/gx_rec_fast.mp4";
         Recorder::ExportOptions opt;
         opt.holdEnd = true;
-        CHECK(Recorder::exportVideo(job, out1, opt, {}, &err));
+        const bool ex1 = Recorder::exportVideo(job, out1, opt, {}, &err);
+        if (!ex1) std::fprintf(stderr, "NOTE export failed: %s\n", qPrintable(err));
+        CHECK(ex1);
         auto lengthOf = [](const QString& f, int* frames) {
             VideoReader vr;
             qint64 t = 0, dur = 0;
@@ -445,13 +454,17 @@ int main(int argc, char** argv) {
         };
         int frames = 0;
         const qint64 realLen = lengthOf(out1, &frames);
+        std::fprintf(stderr, "NOTE-INFO real-speed video %lld (recorded %lld), %d frames\n", (long long)realLen, (long long)job.length, frames);
         CHECK(std::abs(realLen - (job.length + 2 * kVideoSecond)) < kVideoSecond / 10);
         opt.targetLength = job.length / 3;  // three times faster
         opt.holdEnd = false;
         double lastProgress = 0;
-        CHECK(Recorder::exportVideo(job, out2, opt, [&](double p) { lastProgress = p; return true; }, &err));
+        const bool ex2 = Recorder::exportVideo(job, out2, opt, [&](double p) { lastProgress = p; return true; }, &err);
+        if (!ex2) std::fprintf(stderr, "NOTE fast export failed: %s\n", qPrintable(err));
+        CHECK(ex2);
         CHECK(lastProgress > 0.99);
         const qint64 fastLen = lengthOf(out2, &frames);
+        std::fprintf(stderr, "NOTE-INFO fast video %lld (target %lld), %d frames\n", (long long)fastLen, (long long)opt.targetLength, frames);
         CHECK(fastLen > 0 && std::abs(fastLen - opt.targetLength) < kVideoSecond / 10 + job.length / 30);
         // cancel
         CHECK(!Recorder::exportVideo(job, out2 + ".x", opt, [](double) { return false; }, &err) && err.isEmpty());

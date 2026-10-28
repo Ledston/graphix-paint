@@ -42,10 +42,21 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: build\gx_tests.exe
 
-      - name: UI scenario tests (warp, layers, line art, settings)
+      - name: UI scenario tests (warp, layers, line art, settings, recording)
+        shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
-        run: build\gx_uiscenarios.exe
+        run: |
+          $out = & build\gx_uiscenarios.exe 2>&1 | ForEach-Object { "$_" }
+          $code = $LASTEXITCODE
+          $out | Write-Output
+          # failures as annotations, so they can be read without the full log
+          $scenario = ""
+          foreach ($line in $out) {
+            if ($line -like "== *") { $scenario = $line }
+            elseif ($line -like "FAIL*" -or $line -like "NOTE*") { Write-Output "::error::$scenario $line" }
+          }
+          exit $code
 
       - name: UI smoke test (every tool and menu command)
         env:
