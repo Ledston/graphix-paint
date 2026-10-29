@@ -38,6 +38,7 @@ protected:
     void mousePressEvent(QMouseEvent* e) override;
     void mouseDoubleClickEvent(QMouseEvent* e) override;
     void resizeEvent(QResizeEvent*) override;
+    bool event(QEvent* e) override;
 private:
     struct Layout {
         QList<QPair<QString, QRect>> tabs;

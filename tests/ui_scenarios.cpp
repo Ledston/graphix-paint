@@ -178,6 +178,7 @@ int main(int argc, char** argv) {
     QApplication a(argc, argv);
     App application;
     application.init();
+    if (qEnvironmentVariableIsSet("GX_LANG")) setLanguage(qEnvironmentVariable("GX_LANG"));
     Theme::apply("dark", 0);
     Recovery::instance().start(application.dataDir() + "/recovery", 0);
     MainWindow w;

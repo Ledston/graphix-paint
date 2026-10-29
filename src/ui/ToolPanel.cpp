@@ -18,7 +18,9 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QStackedWidget>
+#include <QHelpEvent>
 #include <QToolButton>
+#include <QToolTip>
 #include <QVBoxLayout>
 
 #include "app/App.h"
@@ -38,7 +40,7 @@ namespace gx {
 // ============================================================================ BrushSlots
 
 namespace {
-constexpr int kTabH = 20, kCellH = 40, kCellMinW = 74;
+constexpr int kTabH = 20, kCellH = 40, kCellMinW = 92;
 }
 
 BrushSlots::BrushSlots(QWidget* parent) : QWidget(parent) {
@@ -235,6 +237,26 @@ void BrushSlots::mousePressEvent(QMouseEvent* e) {
         return;
     }
     if (i >= 0) app()->tools()->selectBrushSlot(i);
+}
+
+bool BrushSlots::event(QEvent* e) {
+    if (e->type() == QEvent::ToolTip) {
+        // the full name of the brush under the mouse (names are cut in narrow panels)
+        auto* he = static_cast<QHelpEvent*>(e);
+        bool addCell = false;
+        QString tab;
+        const int i = indexAt(he->pos(), &addCell, &tab);
+        if (i >= 0) {
+            const BrushSettings& b = app()->brushes()->at(i);
+            QToolTip::showText(he->globalPos(), QStringLiteral("<b>%1</b><br>%2 px<br><i>%3</i>")
+                                                    .arg(T(b.name).toHtmlEscaped())
+                                                    .arg(b.size, 0, 'f', b.size < 10 ? 1 : 0)
+                                                    .arg(T("Double-click for all settings").toHtmlEscaped()),
+                               this);
+            return true;
+        }
+    }
+    return QWidget::event(e);
 }
 
 void BrushSlots::mouseDoubleClickEvent(QMouseEvent* e) {
