@@ -51,7 +51,7 @@ private:
     std::function<void()> m_changed;
     bool m_loading = false;
     QList<std::function<void()>> m_loaders;
-    QList<QComboBox*> m_shapeCombos, m_textureCombos;
+    QList<QComboBox*> m_shapeCombos, m_textureCombos, m_stampCombos, m_ribbonCombos;
 };
 
 }  // namespace gx

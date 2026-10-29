@@ -52,6 +52,12 @@ BrushStroke::BrushStroke(const StrokeContext& ctx) : m_ctx(ctx), m_rng(std::rand
     auto& lib = TextureLibrary::instance();
     if (ctx.brush.textureStrength > 0 && !ctx.brush.texture.isEmpty()) m_texture = lib.findAny(ctx.brush.texture);
     if (!ctx.brush.shape.isEmpty()) m_shape = lib.get(TextureKind::Shape, ctx.brush.shape);
+    if (!ctx.brush.stampSet.isEmpty()) m_stamps = lib.stampSet(ctx.brush.stampSet);
+    if (!ctx.brush.ribbon.isEmpty()) {
+        m_ribbon = lib.get(TextureKind::Ribbon, ctx.brush.ribbon);
+        // the pattern keeps its proportions at the full brush size (pressure only makes it narrower)
+        if (m_ribbon) m_ribbonRepeat = std::max(1.0, m_ribbon->w * (ctx.brush.size / std::max(1, m_ribbon->h)) * ctx.brush.ribbonLength);
+    }
 
     m_color[0] = float(ctx.color.redF());
     m_color[1] = float(ctx.color.greenF());
@@ -150,6 +156,33 @@ float BrushStroke::textureAt(int x, int y) const {
     if (!m_texture) return 1.f;
     float sc = float(std::max(0.05, m_ctx.brush.textureScale));
     return textureValue(m_texture->sample((x + 0.5f) / sc, (y + 0.5f) / sc));
+}
+
+float BrushStroke::ribbonAt(int x, int y, const TexFrame& tf, double diameter, float* dist) const {
+    if (!m_ribbon) return 1.f;
+    const double X = x + 0.5, Y = y + 0.5;
+    double u, across, w = diameter;
+    if (tf.hasPrev) {
+        // the pixel's place on the center line between the previous dab and this one:
+        // neighbouring dabs agree there, so the pattern bends smoothly with the stroke
+        const double sx = tf.cx - tf.px, sy = tf.cy - tf.py;
+        const double L2 = sx * sx + sy * sy;
+        const double t = L2 > 1e-9 ? std::clamp(((X - tf.px) * sx + (Y - tf.py) * sy) / L2, 0.0, 1.0) : 1.0;
+        const double qx = tf.px + sx * t, qy = tf.py + sy * t;
+        const double L = std::sqrt(std::max(L2, 1e-18));
+        const double dx = L2 > 1e-9 ? sx / L : tf.dx, dy = L2 > 1e-9 ? sy / L : tf.dy;
+        u = tf.palong + (tf.along - tf.palong) * t;
+        const double side = -(X - tf.px) * dy + (Y - tf.py) * dx;
+        across = std::copysign(std::hypot(X - qx, Y - qy), side);
+        w = tf.pdiam + (diameter - tf.pdiam) * t;
+        if (dist) *dist = float(std::hypot(X - qx, Y - qy) + (t <= 0.0 || t >= 1.0 ? 0.25 : 0.0));
+    } else {
+        const double rx = X - tf.cx, ry = Y - tf.cy;
+        u = tf.along + rx * tf.dx + ry * tf.dy;
+        across = -rx * tf.dy + ry * tf.dx;
+        if (dist) *dist = float(std::hypot(rx, ry));
+    }
+    return m_ribbon->sampleRibbon(float(u / m_ribbonRepeat), float(across / std::max(0.5, w) + 0.5));
 }
 
 float BrushStroke::textureAlong(int x, int y, const TexFrame& tf) const {
@@ -290,11 +323,43 @@ void BrushStroke::dab(Emitter& e, const PathPoint& p, const QPointF& dir) {
     d.shapeAsTip = b.shapeAsTip;
     d.fringe = b.fringe;
 
+    if (!m_stamps.empty()) {
+        // a stamp: one random picture of the set, the round tip only frames it
+        d.shape = m_stamps[size_t(m_uni(m_rng) * double(m_stamps.size())) % m_stamps.size()].get();
+        d.shapeAsTip = true;
+        d.shapeStrength = 1.0;
+        d.hardness = 1.0;
+    }
     TexFrame tf;
     tf.on = m_texture && b.textureFollowsStroke;
     tf.dx = dir.x();
     tf.dy = dir.y();
     tf.along = e.traveled;
+    if (m_ribbon) {
+        // The input is a polyline: its direction jumps at every point. Patterns along the
+        // stroke follow a smoothed direction so they bend evenly instead of fraying.
+        if (e.smoothAt < 0) e.smoothDir = dir;
+        else {
+            const double k = std::clamp((e.traveled - e.smoothAt) / std::max(2.0, b.size * 0.6), 0.0, 1.0);
+            e.smoothDir = e.smoothDir * (1.0 - k) + dir * k;
+            const double len = std::hypot(e.smoothDir.x(), e.smoothDir.y());
+            e.smoothDir = len > 1e-9 ? e.smoothDir / len : dir;
+        }
+        e.smoothAt = e.traveled;
+        tf.dx = e.smoothDir.x();
+        tf.dy = e.smoothDir.y();
+        if (e.hasDab) {
+            tf.hasPrev = true;
+            tf.px = e.dabC.x();
+            tf.py = e.dabC.y();
+            tf.palong = e.dabAlong;
+            tf.pdiam = e.dabDiam;
+        }
+        e.hasDab = true;
+        e.dabC = c;
+        e.dabAlong = e.traveled;
+        e.dabDiam = diameter;
+    }
 
     if (!m_lines.empty()) {
         // a bundle of parallel lines across the brush (hatching)
@@ -368,6 +433,7 @@ void BrushStroke::bufferedDab(const DabParams& d, float density, bool sub, const
     if (!rasterizeDab(d, box, tlCov.data())) return;
     const bool along = m_texture && tf.on;
     const bool eachDab = m_texture && (m_ctx.brush.textureEachDab || along);
+    const bool ribbon = m_ribbon != nullptr;
     const bool buildup = m_ctx.brush.buildup;
     FloatSurface& mask = sub ? m_mask2 : m_mask;
     TileRange tr = tileRangeFor(box);
@@ -375,6 +441,7 @@ void BrushStroke::bufferedDab(const DabParams& d, float density, bool sub, const
         for (int tx = tr.x0; tx <= tr.x1; ++tx) {
             QRect ir = tileRect(tx, ty) & box;
             float* tm = mask.writable(tx, ty);
+            float* td = ribbon ? m_ribbonDist.writable(tx, ty) : nullptr;
             for (int y = ir.top(); y <= ir.bottom(); ++y) {
                 float* mrow = tm + ((y & (TILE - 1)) << TILE_SHIFT);
                 const float* crow = tlCov.data() + size_t(y - box.top()) * box.width() - box.left();
@@ -382,6 +449,19 @@ void BrushStroke::bufferedDab(const DabParams& d, float density, bool sub, const
                     float v = crow[x];
                     if (v <= 0.f) continue;
                     v *= density;
+                    if (ribbon) {
+                        // On a curve the dabs disagree a little about where along the pattern a pixel
+                        // is; the nearest dab decides, so the gaps of the pattern stay open.
+                        float dist = 0.f;
+                        const float rv = ribbonAt(x, y, tf, d.diameter, &dist);
+                        float& owner = td[((y & (TILE - 1)) << TILE_SHIFT) | (x & (TILE - 1))];
+                        if (dist >= owner) continue;
+                        owner = dist;
+                        v = density * rv;  // the pattern itself gives the soft edges
+                        if (eachDab) v *= along ? textureAlong(x, y, tf) : textureAt(x, y);
+                        mrow[x & (TILE - 1)] = v;
+                        continue;
+                    }
                     if (eachDab) v *= along ? textureAlong(x, y, tf) : textureAt(x, y);
                     float& a = mrow[x & (TILE - 1)];
                     if (buildup) a = a + v * (1.f - a);
@@ -493,6 +573,9 @@ void BrushStroke::directDab(Carry& carry, const float* base, const DabParams& d,
         for (int y = 0; y < box.height(); ++y)
             for (int x = 0; x < box.width(); ++x)
                 tlCov[size_t(y) * box.width() + x] *= tf.on ? textureAlong(box.left() + x, box.top() + y, tf) : textureAt(box.left() + x, box.top() + y);
+    if (m_ribbon)
+        for (int y = 0; y < box.height(); ++y)
+            for (int x = 0; x < box.width(); ++x) tlCov[size_t(y) * box.width() + x] *= ribbonAt(box.left() + x, box.top() + y, tf, d.diameter, nullptr);
     if (m_useSelection) {
         if (tlSel.size() < n) tlSel.resize(n);
         readMask(m_ctx.doc->selection(), box, tlSel.data());

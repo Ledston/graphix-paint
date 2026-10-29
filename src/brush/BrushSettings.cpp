@@ -60,6 +60,9 @@ QJsonObject BrushSettings::toJson() const {
     o["particles"] = particles;
     o["particleSize"] = particleSize;
     o["subColorShare"] = subColorShare;
+    o["stampSet"] = stampSet;
+    o["ribbon"] = ribbon;
+    o["ribbonLength"] = ribbonLength;
     o["blending"] = blending;
     o["dilution"] = dilution;
     o["persistence"] = persistence;
@@ -126,6 +129,9 @@ BrushSettings BrushSettings::fromJson(const QJsonObject& o) {
     b.particles = std::clamp(int(d("particles", b.particles)), 0, 60);
     b.particleSize = std::clamp(d("particleSize", b.particleSize), 0.01, 1.0);
     b.subColorShare = std::clamp(d("subColorShare", b.subColorShare), 0.0, 1.0);
+    b.stampSet = o.value("stampSet").toString();
+    b.ribbon = o.value("ribbon").toString();
+    b.ribbonLength = std::clamp(d("ribbonLength", b.ribbonLength), 0.1, 10.0);
     b.blending = std::clamp(d("blending", b.blending), 0.0, 1.0);
     b.dilution = std::clamp(d("dilution", b.dilution), 0.0, 1.0);
     b.persistence = std::clamp(d("persistence", b.persistence), 0.0, 1.0);
@@ -229,6 +235,7 @@ QVector<BrushSettings> BrushSettings::defaults() {
         v << b;
     }
     v << defaultsSince(2);
+    v << defaultsSince(3);
     for (BrushSettings& b : v)
         if (b.group.isEmpty()) b.group = defaultGroupFor(b.name);
     return v;
@@ -236,7 +243,8 @@ QVector<BrushSettings> BrushSettings::defaults() {
 
 QVector<BrushSettings> BrushSettings::defaultsSince(int version) {
     QVector<BrushSettings> v;
-    if (version > 2) return v;
+    if (version == 3) return decorDefaults();
+    if (version > 3) return v;
     // ---- hatching: one stroke draws a bundle of lines
     {
         BrushSettings b; b.name = "Hatching"; b.iconKey = "hatching"; b.group = "Hatching";
@@ -336,7 +344,86 @@ QVector<BrushSettings> BrushSettings::defaultsSince(int version) {
     return v;
 }
 
-QStringList BrushSettings::groups() { return {"Basic", "Paint", "Hatching", "Effects", "Erasers"}; }
+QVector<BrushSettings> BrushSettings::decorDefaults() {
+    QVector<BrushSettings> v;
+    // ---- ribbons: a pattern along the stroke, as wide as the brush
+    auto ribbon = [&](const char* name, const char* pattern, double size, double length) {
+        BrushSettings b; b.name = name; b.iconKey = "ribbon"; b.group = "Decor";
+        b.size = size; b.minSize = 0.85; b.hardness = 1.0; b.spacing = 0.04; b.ribbon = pattern; b.ribbonLength = length;
+        v << b;
+    };
+    ribbon("Lace", "Lace", 40, 1.0);
+    ribbon("Chain", "Chain", 26, 1.0);
+    ribbon("Fishnet", "Fishnet", 60, 1.0);
+    ribbon("Stitches", "Stitches", 14, 1.0);
+    ribbon("Beads", "Beads", 18, 1.0);
+    ribbon("Rope", "Rope", 20, 1.0);
+    ribbon("Bricks", "Bricks", 50, 1.0);
+    ribbon("Roof tiles", "Roof tiles", 50, 1.0);
+    // ---- stamps: every dab is one of the pictures of the set, with its own size, turn and shade
+    auto stamp = [&](const char* name, const char* set, double size, double spacing, double scatter, double sizeJ, double angleJ, double hueJ,
+                     double sub) {
+        BrushSettings b; b.name = name; b.iconKey = "stamp"; b.group = "Decor"; b.engine = BrushEngine::Mix;
+        b.size = size; b.sizePressure = false; b.hardness = 1.0; b.blending = 0.0; b.persistence = 0.0;
+        b.spacing = spacing; b.scatter = scatter; b.sizeJitter = sizeJ; b.angleJitter = angleJ; b.hueJitter = hueJ;
+        b.valueJitter = hueJ > 0 ? 0.15 : 0.0; b.subColorShare = sub; b.stampSet = set;
+        v << b;
+        return &v.last();
+    };
+    stamp("Leaves", "Leaves", 50, 0.9, 0.8, 0.5, 1.0, 0.06, 0.0);
+    stamp("Flowers", "Flowers", 46, 1.3, 0.9, 0.5, 1.0, 0.08, 0.25);
+    stamp("Stars", "Stars", 36, 1.5, 1.2, 0.7, 0.3, 0.0, 0.3);
+    stamp("Clouds", "Clouds", 120, 0.6, 0.4, 0.4, 0.05, 0.0, 0.0);
+    stamp("Grass", "Grass", 60, 0.35, 0.15, 0.4, 0.05, 0.05, 0.0);
+    stamp("Snowflakes", "Snowflakes", 30, 1.6, 1.5, 0.7, 1.0, 0.0, 0.0);
+    stamp("Bubbles", "Bubbles", 40, 1.4, 1.2, 0.7, 0.0, 0.0, 0.0);
+    // ---- for backgrounds
+    {
+        BrushSettings* b = stamp("Foliage", "Leaves", 60, 0.25, 1.4, 0.6, 1.0, 0.1, 0.3);
+        b->name = "Foliage"; b->group = "Backgrounds"; b->iconKey = "leaf";
+    }
+    {
+        BrushSettings* b = stamp("Bush", "Bush", 110, 0.4, 0.6, 0.4, 1.0, 0.08, 0.35);
+        b->group = "Backgrounds"; b->iconKey = "leaf";
+    }
+    {
+        BrushSettings* b = stamp("Rain", "Rain", 70, 0.5, 2.5, 0.6, 0.0, 0.0, 0.0);
+        b->group = "Backgrounds"; b->iconKey = "rain"; b->angle = -20;
+    }
+    {
+        BrushSettings* b = stamp("Snow", "Snowflakes", 22, 0.8, 3.0, 0.8, 1.0, 0.0, 0.0);
+        b->group = "Backgrounds"; b->iconKey = "snow";
+    }
+    {
+        BrushSettings b; b.name = "Fur"; b.iconKey = "fur"; b.group = "Backgrounds";
+        b.size = 40; b.minSize = 0.5; b.hardness = 0.8; b.spacing = 0.4;
+        b.bundleLines = 12; b.bundleThickness = 0.35; b.bundleThicknessJitter = 0.6; b.bundleWobble = 0.5; b.bundleLengthJitter = 1.0;
+        b.taperIn = 6; b.taperOut = 30; b.subColorShare = 0.15;
+        v << b;
+    }
+    {
+        BrushSettings b; b.name = "Hair strands"; b.iconKey = "fur"; b.group = "Backgrounds";
+        b.size = 24; b.minSize = 0.3; b.hardness = 0.9; b.spacing = 0.35;
+        b.bundleLines = 5; b.bundleThickness = 0.45; b.bundleThicknessJitter = 0.5; b.bundleWobble = 0.25; b.bundleLengthJitter = 0.6;
+        b.taperIn = 30; b.taperOut = 80;
+        v << b;
+    }
+    {
+        BrushSettings b; b.name = "Dust"; b.iconKey = "stipple"; b.group = "Backgrounds";
+        b.size = 90; b.sizePressure = false; b.hardness = 0.3; b.spacing = 0.3; b.particles = 5; b.particleSize = 0.05;
+        b.sizeJitter = 0.9; b.density = 0.6; b.opacityJitter = 0.6; b.densityPressure = true; b.minDensity = 0.1;
+        v << b;
+    }
+    {
+        // a brick wall in one stroke, also as a background brush
+        BrushSettings b; b.name = "Brick wall"; b.iconKey = "ribbon"; b.group = "Backgrounds";
+        b.size = 120; b.sizePressure = false; b.hardness = 1.0; b.spacing = 0.04; b.ribbon = "Bricks"; b.ribbonLength = 1.0;
+        v << b;
+    }
+    return v;
+}
+
+QStringList BrushSettings::groups() { return {"Basic", "Paint", "Hatching", "Effects", "Decor", "Backgrounds", "Erasers"}; }
 
 QString BrushSettings::defaultGroupFor(const QString& name) {
     static const QHash<QString, QString> map = {
@@ -347,7 +434,12 @@ QString BrushSettings::defaultGroupFor(const QString& name) {
         {"Hatching with white", "Hatching"}, {"Hatching blender", "Hatching"}, {"Textured hatching", "Hatching"},
         {"Stipple", "Hatching"},   {"Glitter", "Effects"}, {"Glow", "Effects"},       {"Hair highlight", "Effects"},
         {"Droplets", "Effects"},   {"Eraser", "Erasers"},  {"Soft Eraser", "Erasers"}, {"Blur", "Erasers"},
-        {"Smudge", "Erasers"}};
+        {"Smudge", "Erasers"},     {"Lace", "Decor"},      {"Chain", "Decor"},        {"Fishnet", "Decor"},
+        {"Stitches", "Decor"},     {"Beads", "Decor"},     {"Rope", "Decor"},         {"Bricks", "Decor"},
+        {"Roof tiles", "Decor"},   {"Leaves", "Decor"},    {"Flowers", "Decor"},      {"Stars", "Decor"},
+        {"Clouds", "Decor"},       {"Grass", "Decor"},     {"Snowflakes", "Decor"},   {"Bubbles", "Decor"},
+        {"Foliage", "Backgrounds"}, {"Bush", "Backgrounds"}, {"Rain", "Backgrounds"},  {"Snow", "Backgrounds"},
+        {"Fur", "Backgrounds"},    {"Hair strands", "Backgrounds"}, {"Dust", "Backgrounds"}, {"Brick wall", "Backgrounds"}};
     return map.value(name, "Basic");
 }
 

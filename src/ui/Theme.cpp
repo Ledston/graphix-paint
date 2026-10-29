@@ -392,6 +392,50 @@ void drawIcon(QPainter& p, const QString& n, const QColor& col, const QColor& ac
         p.drawEllipse(QPointF(9.5, 15), 1.6, 2.4);
         p.setBrush(Qt::NoBrush);
         p.setPen(pen);
+    } else if (n == "ribbon") {
+        // a band with a pattern along it
+        QPainterPath b;
+        b.moveTo(3, 15);
+        b.cubicTo(8, 7, 15, 19, 21, 9);
+        p.setPen(QPen(col, 6, Qt::SolidLine, Qt::RoundCap));
+        p.drawPath(b);
+        p.setPen(QPen(acc, 1.4, Qt::DotLine, Qt::RoundCap));
+        p.drawPath(b);
+        p.setPen(pen);
+    } else if (n == "stamp") {
+        poly({{8, 4}, {16, 4}, {14, 11}, {10, 11}});
+        p.drawRoundedRect(QRectF(5, 11, 14, 4), 1, 1);
+        p.setPen(Qt::NoPen);
+        p.setBrush(acc);
+        p.drawPath([] { QPainterPath s; s.addPolygon(QPolygonF({QPointF(12, 16.5), QPointF(13.3, 19.2), QPointF(16, 19.5), QPointF(14, 21.3), QPointF(14.6, 23.5), QPointF(12, 22.2), QPointF(9.4, 23.5), QPointF(10, 21.3), QPointF(8, 19.5), QPointF(10.7, 19.2)})); return s; }());
+        p.setBrush(Qt::NoBrush);
+        p.setPen(pen);
+    } else if (n == "leaf") {
+        QPainterPath l;
+        l.moveTo(4, 20);
+        l.cubicTo(4, 9, 11, 4, 20, 4);
+        l.cubicTo(20, 13, 15, 20, 4, 20);
+        path(l, true, acc);
+        line(4, 20, 14, 10);
+    } else if (n == "rain") {
+        p.setPen(QPen(acc, 1.6, Qt::SolidLine, Qt::RoundCap));
+        for (auto q : {QLineF(6, 4, 4, 10), QLineF(13, 6, 11, 12), QLineF(19, 3, 17, 9), QLineF(8, 13, 6, 19), QLineF(16, 14, 14, 20)}) p.drawLine(q);
+        p.setPen(pen);
+    } else if (n == "snow") {
+        for (int k = 0; k < 3; ++k) {
+            const double a = k * M_PI / 3;
+            line(12 - std::cos(a) * 8, 12 - std::sin(a) * 8, 12 + std::cos(a) * 8, 12 + std::sin(a) * 8);
+        }
+        circle(12, 12, 1.6, true, acc);
+    } else if (n == "fur") {
+        for (int k = 0; k < 6; ++k) {
+            QPainterPath f;
+            f.moveTo(4 + k * 3, 21);
+            f.quadTo(5 + k * 3, 12, 8 + k * 3 + (k % 2) * 2, 4 + (k % 3));
+            p.setPen(QPen(k % 3 == 1 ? acc : col, 1.3, Qt::SolidLine, Qt::RoundCap));
+            p.drawPath(f);
+        }
+        p.setPen(pen);
     } else if (n == "select-rect") {
         dashed(true);
         p.drawRect(QRectF(4, 5, 16, 14));

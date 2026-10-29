@@ -562,6 +562,60 @@ static void testNewBrushes() {
     }
 }
 
+static void testDecorBrushes() {
+    auto& lib = TextureLibrary::instance();
+    CHECK(lib.stampSets().contains("Leaves") && lib.stampSets().contains("Stars"));
+    CHECK(lib.names(TextureKind::Ribbon).contains("Bricks") && lib.names(TextureKind::Ribbon).contains("Lace"));
+    auto draw = [](const QString& name, Document& doc, RasterLayer* l) {
+        BrushSettings b;
+        for (const BrushSettings& d : BrushSettings::defaults())
+            if (d.name == name) b = d;
+        StrokeContext ctx;
+        ctx.doc = &doc;
+        ctx.layer = l;
+        ctx.brush = b;
+        ctx.color = Qt::black;
+        PressureCurve curve;
+        ctx.pressureCurve = &curve;
+        BrushStroke s(ctx);
+        for (int i = 0; i <= 100; ++i) {
+            InputSample p;
+            p.pos = QPointF(20 + i * 5.6, 100);
+            p.pressure = 1;
+            if (i == 0) s.begin(p);
+            else s.add(p);
+        }
+        s.end();
+    };
+    {   // a brick ribbon: bricks with mortar gaps between them, all across the band
+        Document doc(QSize(600, 200));
+        auto* l = ops::addRasterLayer(doc);
+        draw("Bricks", doc, l);
+        QImage img = surfaceToImage(l->pixels, QRect(100, 100 - 10, 400, 1));
+        int gaps = 0, ink = 0;
+        bool in = false;
+        for (int x = 0; x < img.width(); ++x) {
+            const bool on = qAlpha(img.pixel(x, 0)) > 128;
+            ink += on;
+            if (!on && in) ++gaps;
+            in = on;
+        }
+        CHECK(ink > 200 && gaps >= 3);
+    }
+    {   // stamps: separate pictures, not one line
+        Document doc(QSize(600, 200));
+        auto* l = ops::addRasterLayer(doc);
+        draw("Stars", doc, l);
+        const QRect eb = l->pixels.exactBounds();
+        CHECK(eb.width() > 300);
+        QImage img = surfaceToImage(l->pixels, doc.bounds());
+        int ink = 0;
+        for (int y = 0; y < img.height(); ++y)
+            for (int x = 0; x < img.width(); ++x) ink += qAlpha(img.pixel(x, y)) > 128;
+        CHECK(ink > 200 && ink < 600 * 200 / 4);
+    }
+}
+
 int main(int argc, char** argv) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
@@ -581,6 +635,7 @@ int main(int argc, char** argv) {
     testLineartColoring();
     testMultiLayerOps();
     testNewBrushes();
+    testDecorBrushes();
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

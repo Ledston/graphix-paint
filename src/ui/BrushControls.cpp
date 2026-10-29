@@ -238,6 +238,39 @@ QList<BrushControls::Page> BrushControls::build(QWidget* parent, bool compact) {
         v->addWidget(hint(w, T("The second color is the back color of the color panel (X swaps the colors).")));
         pages << Page{"lines", T("Lines and dots"), "hatching", w, always};
     }
+    // ---- decor: stamps and ribbons
+    {
+        QVBoxLayout* v;
+        QWidget* w = page(parent, &v);
+        v->addWidget(hint(w, T("Stamps: every dab is a random picture of the set. Ribbons: a pattern runs along the stroke, as wide as the brush.")));
+        auto* stamps = new QComboBox(w);
+        stamps->setToolTip(T("Stamp set"));
+        m_stampCombos << stamps;
+        v->addWidget(stamps);
+        connect(stamps, &QComboBox::activated, this, [this, stamps](int i) {
+            settings.stampSet = stamps->itemData(i).toString();
+            if (!settings.stampSet.isEmpty()) settings.ribbon.clear();
+            changed();
+            load(settings);
+        });
+        m_loaders << [this, stamps] { stamps->setCurrentIndex(std::max(0, stamps->findData(settings.stampSet))); };
+        auto* ribbon = new QComboBox(w);
+        ribbon->setToolTip(T("Ribbon pattern"));
+        m_ribbonCombos << ribbon;
+        v->addWidget(ribbon);
+        connect(ribbon, &QComboBox::activated, this, [this, ribbon](int i) {
+            settings.ribbon = ribbon->itemData(i).toString();
+            if (!settings.ribbon.isEmpty()) settings.stampSet.clear();
+            changed();
+            load(settings);
+        });
+        m_loaders << [this, ribbon] { ribbon->setCurrentIndex(std::max(0, ribbon->findData(settings.ribbon))); };
+        auto* len = bar(w, T("Pattern length"), 0.1, 10, 2, &s.ribbonLength, 100, "%", true, T("Stretches the ribbon pattern along the stroke"));
+        v->addWidget(len);
+        m_loaders << [this, len] { len->setEnabled(!settings.ribbon.isEmpty()); };
+        v->addWidget(hint(w, T("Your own stamps: a folder of pictures in textures/stamps. Your own ribbons: pictures in textures/ribbons.")));
+        pages << Page{"decor", T("Stamps and ribbons"), "stamp", w, always};
+    }
     // ---- tip shape
     {
         QVBoxLayout* v;
@@ -348,6 +381,22 @@ void BrushControls::refreshLists() {
         for (const QString& n : lib.names(TextureKind::Shape)) {
             auto t = lib.get(TextureKind::Shape, n);
             shape->addItem(QIcon(QPixmap::fromImage(t->preview)), T(n), n);
+        }
+    }
+    for (QComboBox* st : m_stampCombos) {
+        st->clear();
+        st->addItem(T("No stamps"), QString());
+        for (const QString& n : lib.stampSets()) {
+            const auto& pics = lib.stampSet(n);
+            st->addItem(pics.empty() ? QIcon() : QIcon(QPixmap::fromImage(pics.front()->preview)), T(n), n);
+        }
+    }
+    for (QComboBox* rb : m_ribbonCombos) {
+        rb->clear();
+        rb->addItem(T("No ribbon"), QString());
+        for (const QString& n : lib.names(TextureKind::Ribbon)) {
+            auto t = lib.get(TextureKind::Ribbon, n);
+            rb->addItem(QIcon(QPixmap::fromImage(t->preview)), T(n), n);
         }
     }
     for (QComboBox* tex : m_textureCombos) {

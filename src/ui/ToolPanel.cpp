@@ -304,7 +304,7 @@ void BrushSlots::menu(int i, const QPoint& global) {
         QMenu* icon = m.addMenu(T("Icon"));
         for (const char* k : {"pen", "ink", "pencil", "airbrush", "brush", "watercolor", "marker", "chalk", "bristle", "binary",
                               "eraser", "softeraser", "blur", "smudge", "hatching", "stipple", "charcoal", "blender", "glow",
-                              "highlight", "droplet"})
+                              "highlight", "droplet", "ribbon", "stamp", "leaf", "rain", "snow", "fur"})
             icon->addAction(Theme::icon(k), QString(), this, [lib, i, k] {
                 BrushSettings s = lib->at(i);
                 s.iconKey = k;
@@ -425,7 +425,8 @@ void BrushSettingsWidget::load() {
     m_title->setText(T(b.name));
     // the texture lists only change when textures are added or reloaded
     auto& tl = TextureLibrary::instance();
-    const qsizetype n = tl.names(TextureKind::Shape).size() * 1000 + tl.names(TextureKind::Brush).size() * 31 + tl.names(TextureKind::Paper).size();
+    const qsizetype n = tl.names(TextureKind::Shape).size() * 1000 + tl.names(TextureKind::Brush).size() * 31 + tl.names(TextureKind::Paper).size() +
+                        tl.names(TextureKind::Ribbon).size() * 100000 + tl.stampSets().size() * 10000000;
     if (n != m_textureCount) {
         m_textureCount = n;
         m_controls->refreshLists();

@@ -1120,3 +1120,36 @@ Sparkle	Искра
 Droplet	Капля
 This part of the lines, dots or dabs is painted with the second color (the back color of the color panel), for example white lines in hatching.	Эта часть линий, точек или отпечатков рисуется вторым цветом (задний цвет на панели «Цвет»), например белые линии в штриховке.
 Double-click for all settings	Двойной щелчок — все настройки
+Decor	Декор
+Backgrounds	Фоны
+Lace	Кружево
+Chain	Цепочка
+Fishnet	Сетка
+Stitches	Шов
+Beads	Бусы
+Bricks	Кирпич
+Roof tiles	Черепица
+Leaves	Листья
+Flowers	Цветы
+Stars	Звёзды
+Clouds	Облака
+Grass	Трава
+Snowflakes	Снежинки
+Bubbles	Пузыри
+Foliage	Листва
+Bush	Куст
+Rain	Дождь
+Snow	Снег
+Fur	Мех
+Hair strands	Пряди волос
+Dust	Пыль
+Brick wall	Кирпичная стена
+Stamps and ribbons	Штампы и ленты
+Stamps: every dab is a random picture of the set. Ribbons: a pattern runs along the stroke, as wide as the brush.	Штампы: каждый отпечаток — случайная картинка из набора. Ленты: узор тянется вдоль мазка во всю ширину кисти.
+Stamp set	Набор штампов
+Ribbon pattern	Узор ленты
+Pattern length	Длина узора
+Stretches the ribbon pattern along the stroke	Растягивает узор ленты вдоль мазка
+Your own stamps: a folder of pictures in textures/stamps. Your own ribbons: pictures in textures/ribbons.	Свои штампы: папка с картинками в textures/stamps. Свои ленты: картинки в textures/ribbons.
+No stamps	Без штампов
+No ribbon	Без ленты

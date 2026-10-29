@@ -62,6 +62,12 @@ private:
         Carry carry;
         std::vector<Carry> lineCarry;  // one per line of a bundle
         QPointF lastDir{1, 0};
+        QPointF smoothDir{0, 0};  // the direction, smoothed over about half a brush (ribbons)
+        double smoothAt = -1;     // where along the stroke it was last updated
+        // the previous dab (ribbons are mapped onto the line between dab centers)
+        bool hasDab = false;
+        QPointF dabC;
+        double dabAlong = 0, dabDiam = 0;
     };
     // one line of a hatching bundle, chosen when the stroke starts
     struct Line {
@@ -75,6 +81,9 @@ private:
     struct TexFrame {
         bool on = false;
         double cx = 0, cy = 0, dx = 1, dy = 0, along = 0, across = 0;
+        // ribbons: the previous dab center, so a pixel finds its place on the stroke's center line
+        double px = 0, py = 0, palong = 0, pdiam = 0;
+        bool hasPrev = false;
     };
 
     void feedPath(const PathPoint& p);
@@ -90,6 +99,7 @@ private:
     float mapPressure(double p) const;
     float textureAt(int x, int y) const;
     float textureAlong(int x, int y, const TexFrame& tf) const;
+    float ribbonAt(int x, int y, const TexFrame& tf, double diameter, float* dist) const;
     float textureValue(float raw) const;
     void jitterColor(float* rgb);
 
@@ -104,6 +114,7 @@ private:
 
     FloatSurface m_mask{0.f};          // stroke coverage (buffered engines)
     FloatSurface m_mask2{0.f};         // coverage of the second color
+    FloatSurface m_ribbonDist{1e9f};   // ribbons: how far along the stroke the dab that painted a pixel was
     bool m_useSub = false;             // something was painted with the second color
     std::vector<Line> m_lines;
     float m_sub[3] = {1, 1, 1};
@@ -111,7 +122,9 @@ private:
     QRect m_previewDirty;              // stroke mask changed, preview not rebuilt yet
     QRect m_bounds;
     float m_color[3] = {0, 0, 0};      // straight color for this stroke
-    TexturePtr m_texture, m_shape;
+    TexturePtr m_texture, m_shape, m_ribbon;
+    std::vector<TexturePtr> m_stamps;
+    double m_ribbonRepeat = 1;  // px along the stroke for one repeat of the ribbon pattern
     std::mt19937 m_rng;
     std::uniform_real_distribution<double> m_uni{0.0, 1.0};
     bool m_useSelection = false;

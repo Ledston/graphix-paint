@@ -86,6 +86,11 @@ struct BrushSettings {
     // Second color (the background color of the color panel): this part of the lines,
     // dots or dabs is painted with it (white lines in hatching, highlights)
     double subColorShare = 0.0;
+    // Decor: every dab is a random picture of a stamp set (leaves, stars...), or a pattern
+    // runs along the stroke as wide as the brush (lace, chain...)
+    QString stampSet;
+    QString ribbon;
+    double ribbonLength = 1.0;  // stretches the pattern along the stroke
 
     // Paint behaviour
     bool keepOpacity = false;   // only paint where the layer already has paint
@@ -100,6 +105,7 @@ struct BrushSettings {
     static QVector<BrushSettings> defaults();
     // brushes added in later versions (given to existing brush palettes once)
     static QVector<BrushSettings> defaultsSince(int version);
+    static QVector<BrushSettings> decorDefaults();
     static QStringList groups();                       // the built-in palette tabs, in order
     static QString defaultGroupFor(const QString& name);  // for palettes saved before tabs existed
 };

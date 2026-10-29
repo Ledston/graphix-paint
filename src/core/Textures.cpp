@@ -34,6 +34,21 @@ float Texture::sampleClamped(float u, float vv) const {
     return (px(x0, y0) * (1 - fx) + px(x0 + 1, y0) * fx) * (1 - fy) + (px(x0, y0 + 1) * (1 - fx) + px(x0 + 1, y0 + 1) * fx) * fy;
 }
 
+float Texture::sampleRibbon(float u, float vv) const {
+    if (w <= 0 || h <= 0 || vv < 0.f || vv > 1.f) return 0.f;
+    u -= std::floor(u);
+    float x = u * w - 0.5f, y = vv * h - 0.5f;
+    int x0 = int(std::floor(x)), y0 = int(std::floor(y));
+    float fx = x - x0, fy = y - y0;
+    auto px = [&](int xx, int yy) -> float {
+        xx %= w;
+        if (xx < 0) xx += w;
+        if (yy < 0 || yy >= h) return 0.f;
+        return v[size_t(yy) * w + xx];
+    };
+    return (px(x0, y0) * (1 - fx) + px(x0 + 1, y0) * fx) * (1 - fy) + (px(x0, y0 + 1) * (1 - fx) + px(x0 + 1, y0 + 1) * fx) * fy;
+}
+
 TextureLibrary& TextureLibrary::instance() {
     static TextureLibrary lib;
     return lib;
@@ -41,7 +56,8 @@ TextureLibrary& TextureLibrary::instance() {
 
 void TextureLibrary::setRoot(const QString& root) {
     m_root = root;
-    for (TextureKind k : {TextureKind::Paper, TextureKind::Brush, TextureKind::Shape}) QDir().mkpath(folder(k));
+    for (TextureKind k : {TextureKind::Paper, TextureKind::Brush, TextureKind::Shape, TextureKind::Ribbon}) QDir().mkpath(folder(k));
+    QDir().mkpath(root + "/stamps");
     generateDefaults(root);
     reload();
 }
@@ -51,6 +67,7 @@ QString TextureLibrary::folder(TextureKind k) const {
     case TextureKind::Paper: return m_root + "/paper";
     case TextureKind::Brush: return m_root + "/brush";
     case TextureKind::Shape: return m_root + "/shapes";
+    case TextureKind::Ribbon: return m_root + "/ribbons";
     }
     return m_root;
 }
@@ -97,7 +114,20 @@ TexturePtr TextureLibrary::load(const QString& path) {
 void TextureLibrary::reload() {
     m_tex.clear();
     m_order.clear();
-    for (TextureKind k : {TextureKind::Paper, TextureKind::Brush, TextureKind::Shape}) {
+    m_stamps.clear();
+    m_stampOrder.clear();
+    // stamp sets: one folder per set
+    const QStringList filters = {"*.png", "*.bmp", "*.jpg", "*.jpeg", "*.tif", "*.tiff", "*.webp"};
+    for (const QString& set : QDir(m_root + "/stamps").entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+        QDir d(m_root + "/stamps/" + set);
+        std::vector<TexturePtr> pics;
+        for (const QString& f : d.entryList(filters, QDir::Files, QDir::Name))
+            if (TexturePtr t = load(d.filePath(f))) pics.push_back(t);
+        if (pics.empty()) continue;
+        m_stamps.insert(set, pics);
+        m_stampOrder << set;
+    }
+    for (TextureKind k : {TextureKind::Paper, TextureKind::Brush, TextureKind::Shape, TextureKind::Ribbon}) {
         QDir d(folder(k));
         QStringList files = d.entryList({"*.png", "*.bmp", "*.jpg", "*.jpeg", "*.tif", "*.tiff", "*.webp"}, QDir::Files, QDir::Name);
         for (const QString& f : files) {
@@ -111,6 +141,14 @@ void TextureLibrary::reload() {
 }
 
 QStringList TextureLibrary::names(TextureKind k) const { return m_order.value(int(k)); }
+
+QStringList TextureLibrary::stampSets() const { return m_stampOrder; }
+
+const std::vector<TexturePtr>& TextureLibrary::stampSet(const QString& name) const {
+    static const std::vector<TexturePtr> none;
+    auto it = m_stamps.constFind(name);
+    return it == m_stamps.cend() ? none : it.value();
+}
 
 TexturePtr TextureLibrary::get(TextureKind k, const QString& name) const {
     if (name.isEmpty()) return nullptr;
@@ -184,6 +222,265 @@ QImage makeAlpha(int size, const std::function<float(int, int)>& f) {
 float contrast(float v, float c, float mid = 0.5f) { return std::clamp((v - mid) * c + mid, 0.f, 1.f); }
 
 }  // namespace
+
+namespace {
+QImage canvasRGBA(int w, int h) {
+    QImage img(w, h, QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::transparent);
+    return img;
+}
+
+QPainterPath leafPath(double len, double width, double bend) {
+    QPainterPath p;
+    p.moveTo(0, 0);
+    p.cubicTo(len * 0.3, -width + bend, len * 0.7, -width * 0.8 + bend, len, bend * 0.5);
+    p.cubicTo(len * 0.7, width * 0.8 + bend, len * 0.3, width + bend, 0, 0);
+    return p;
+}
+
+QPainterPath starPath(int points, double outer, double inner) {
+    QPainterPath p;
+    for (int i = 0; i < points * 2; ++i) {
+        const double a = -M_PI / 2 + i * M_PI / points;
+        const double r = i % 2 ? inner : outer;
+        const QPointF pt(std::cos(a) * r, std::sin(a) * r);
+        if (i == 0) p.moveTo(pt);
+        else p.lineTo(pt);
+    }
+    p.closeSubpath();
+    return p;
+}
+}  // namespace
+
+// Ribbons (patterns along the stroke) and stamp sets for the "Decor" brushes.
+void TextureLibrary::generateDecor(const QString& root) {
+    const QString ribbons = root + "/ribbons", stamps = root + "/stamps";
+    QDir().mkpath(ribbons);
+    if (QFileInfo::exists(ribbons + "/.defaults3_written")) return;
+    auto save = [](const QString& dir, const QString& name, const QImage& img) {
+        QDir().mkpath(dir);
+        const QString path = dir + "/" + name + ".png";
+        if (!QFileInfo::exists(path)) img.save(path);
+    };
+    const QColor ink(0, 0, 0);
+    auto painter = [](QImage& img) {
+        auto* p = new QPainter(&img);
+        p->setRenderHint(QPainter::Antialiasing);
+        return p;
+    };
+    // ---- ribbons: x runs along the stroke (repeats), y across it (the brush width)
+    {
+        QImage img = canvasRGBA(64, 64);
+        QPainter* p = painter(img);
+        p->setPen(QPen(ink, 3));
+        p->drawLine(QPointF(0, 6), QPointF(64, 6));                      // the edge
+        p->drawArc(QRectF(0, 26, 32, 32), 180 * 16, 180 * 16);           // scallops
+        p->drawArc(QRectF(32, 26, 32, 32), 180 * 16, 180 * 16);
+        p->setPen(QPen(ink, 2));
+        for (double x : {16.0, 48.0}) p->drawEllipse(QPointF(x, 24), 7, 7);  // little rings
+        for (double x : {0.0, 32.0, 64.0}) p->drawEllipse(QPointF(x, 30), 3, 3);
+        p->setPen(QPen(ink, 1.5));
+        for (double x = 0; x < 64; x += 8) p->drawLine(QPointF(x, 6), QPointF(x + 4, 14));
+        delete p;
+        save(ribbons, "Lace", img);
+    }
+    {
+        QImage img = canvasRGBA(96, 48);
+        QPainter* p = painter(img);
+        p->setPen(QPen(ink, 7));
+        p->drawEllipse(QRectF(6, 10, 46, 28));       // a flat link
+        p->setPen(QPen(ink, 9, Qt::SolidLine, Qt::RoundCap));
+        p->drawLine(QPointF(44, 24), QPointF(100, 24));  // a link seen from the side
+        p->drawLine(QPointF(-4, 24), QPointF(14, 24));
+        delete p;
+        save(ribbons, "Chain", img);
+    }
+    {
+        QImage img = canvasRGBA(32, 32);
+        QPainter* p = painter(img);
+        p->setPen(QPen(ink, 2.2));
+        for (int k = -1; k <= 1; ++k) {
+            p->drawLine(QPointF(k * 32, 0), QPointF(k * 32 + 32, 32));
+            p->drawLine(QPointF(k * 32 + 32, 0), QPointF(k * 32, 32));
+        }
+        delete p;
+        save(ribbons, "Fishnet", img);
+    }
+    {
+        QImage img = canvasRGBA(24, 24);
+        QPainter* p = painter(img);
+        p->setPen(QPen(ink, 3, Qt::SolidLine, Qt::RoundCap));
+        p->drawLine(QPointF(6, 6), QPointF(16, 18));
+        delete p;
+        save(ribbons, "Stitches", img);
+    }
+    {
+        QImage img = canvasRGBA(32, 32);
+        QPainter* p = painter(img);
+        p->setPen(Qt::NoPen);
+        p->setBrush(ink);
+        p->drawEllipse(QPointF(16, 16), 13, 13);
+        p->setCompositionMode(QPainter::CompositionMode_Clear);
+        p->drawEllipse(QPointF(11, 11), 3.5, 3.5);  // the shine
+        delete p;
+        save(ribbons, "Beads", img);
+    }
+    {
+        QImage img = canvasRGBA(32, 32);
+        QPainter* p = painter(img);
+        p->setPen(QPen(ink, 2));
+        for (int k = -1; k <= 2; ++k) {
+            QPainterPath s;
+            s.moveTo(k * 16 - 6, 30);
+            s.cubicTo(k * 16 + 2, 22, k * 16 + 10, 10, k * 16 + 18, 2);
+            p->drawPath(s);
+        }
+        p->drawLine(QPointF(0, 1), QPointF(32, 1));
+        p->drawLine(QPointF(0, 31), QPointF(32, 31));
+        delete p;
+        save(ribbons, "Rope", img);
+    }
+    {
+        QImage img = canvasRGBA(64, 32);
+        QPainter* p = painter(img);
+        p->setPen(Qt::NoPen);
+        p->setBrush(ink);
+        // two rows of bricks with mortar gaps, the second row shifted by half a brick
+        for (int x : {1, 33}) p->drawRect(QRectF(x, 1, 30, 13));
+        for (int x : {-15, 17, 49}) p->drawRect(QRectF(x, 17, 30, 13));
+        delete p;
+        save(ribbons, "Bricks", img);
+    }
+    {
+        QImage img = canvasRGBA(32, 32);
+        QPainter* p = painter(img);
+        p->setPen(QPen(ink, 2.5));
+        p->drawArc(QRectF(0, -14, 32, 30), 180 * 16, 180 * 16);
+        p->drawArc(QRectF(-16, 2, 32, 30), 180 * 16, 180 * 16);
+        p->drawArc(QRectF(16, 2, 32, 30), 180 * 16, 180 * 16);
+        delete p;
+        save(ribbons, "Roof tiles", img);
+    }
+    // ---- stamp sets (every picture fits in the circle of the brush)
+    const int S = 128;
+    auto stamp = [&](const QString& set, const QString& name, const std::function<void(QPainter&)>& draw) {
+        QImage img = canvasRGBA(S, S);
+        QPainter p(&img);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.translate(S / 2.0, S / 2.0);
+        p.setPen(Qt::NoPen);
+        p.setBrush(ink);
+        draw(p);
+        p.end();
+        save(stamps + "/" + set, name, img);
+    };
+    for (int i = 0; i < 5; ++i) {
+        stamp("Leaves", QString("leaf %1").arg(i + 1), [i](QPainter& p) {
+            const double len = 92 - i * 6, wid = 18 + (i % 3) * 6, bend = (i - 2) * 4.0;
+            p.rotate(-30 + i * 17);
+            p.translate(-len / 2, 0);
+            p.drawPath(leafPath(len, wid, bend));
+            p.setCompositionMode(QPainter::CompositionMode_Clear);
+            p.setPen(QPen(Qt::black, 2.5));
+            p.drawLine(QPointF(4, bend * 0.2), QPointF(len * 0.85, bend * 0.45));  // the vein
+        });
+    }
+    for (int i = 0; i < 4; ++i) {
+        stamp("Flowers", QString("flower %1").arg(i + 1), [i](QPainter& p) {
+            const int petals = 4 + i * 2;
+            const double len = 50 - i * 2, wid = 24 - i * 3;
+            for (int k = 0; k < petals; ++k) {
+                p.save();
+                p.rotate(k * 360.0 / petals + i * 11);
+                p.drawEllipse(QRectF(8, -wid / 2, len, wid));
+                p.restore();
+            }
+            p.setCompositionMode(QPainter::CompositionMode_Clear);
+            p.drawEllipse(QPointF(0, 0), 13, 13);
+            p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+            p.drawEllipse(QPointF(0, 0), 8, 8);
+        });
+    }
+    for (int i = 0; i < 4; ++i) {
+        stamp("Stars", QString("star %1").arg(i + 1), [i](QPainter& p) {
+            const int points = 4 + i;
+            p.drawPath(starPath(points, 58, i == 0 ? 12 : 24));
+        });
+    }
+    for (int i = 0; i < 4; ++i) {
+        stamp("Clouds", QString("cloud %1").arg(i + 1), [i](QPainter& p) {
+            std::mt19937 rng(100 + i);
+            std::uniform_real_distribution<double> U(0, 1);
+            for (int k = 0; k < 7; ++k) {
+                const double x = -38 + U(rng) * 76, y = -6 + U(rng) * 22 - std::cos(x / 40.0) * 18, r = 16 + U(rng) * 14;
+                p.drawEllipse(QPointF(x, y), r, r * 0.85);
+            }
+            p.drawRect(QRectF(-44, 10, 88, 14));
+        });
+    }
+    for (int i = 0; i < 4; ++i) {
+        stamp("Grass", QString("grass %1").arg(i + 1), [i](QPainter& p) {
+            std::mt19937 rng(200 + i);
+            std::uniform_real_distribution<double> U(0, 1);
+            for (int k = 0; k < 7; ++k) {
+                const double x = -34 + k * 11 + U(rng) * 6, h = 50 + U(rng) * 30, lean = (U(rng) - 0.5) * 40, w = 4 + U(rng) * 4;
+                QPainterPath b;
+                b.moveTo(x - w, 56);
+                b.quadTo(x - w * 0.3 + lean * 0.3, 56 - h * 0.6, x + lean, 56 - h);
+                b.quadTo(x + w * 0.3 + lean * 0.3, 56 - h * 0.6, x + w, 56);
+                b.closeSubpath();
+                p.drawPath(b);
+            }
+        });
+    }
+    for (int i = 0; i < 3; ++i) {
+        stamp("Snowflakes", QString("snowflake %1").arg(i + 1), [i](QPainter& p) {
+            p.setPen(QPen(Qt::black, 5 - i, Qt::SolidLine, Qt::RoundCap));
+            for (int k = 0; k < 6; ++k) {
+                p.save();
+                p.rotate(k * 60);
+                p.drawLine(QPointF(0, 0), QPointF(0, -54));
+                const double b = 18 + i * 8;
+                p.drawLine(QPointF(0, -b), QPointF(-12, -b - 12));
+                p.drawLine(QPointF(0, -b), QPointF(12, -b - 12));
+                p.drawLine(QPointF(0, -b - 18), QPointF(-8, -b - 26));
+                p.drawLine(QPointF(0, -b - 18), QPointF(8, -b - 26));
+                p.restore();
+            }
+        });
+    }
+    for (int i = 0; i < 3; ++i) {
+        stamp("Bubbles", QString("bubble %1").arg(i + 1), [i](QPainter& p) {
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(Qt::black, 4 + i));
+            p.drawEllipse(QPointF(0, 0), 54, 54);
+            p.setPen(QPen(Qt::black, 6, Qt::SolidLine, Qt::RoundCap));
+            p.drawArc(QRectF(-38, -38, 76, 76), 100 * 16, 50 * 16);  // the shine
+        });
+    }
+    for (int i = 0; i < 3; ++i) {
+        stamp("Rain", QString("drop %1").arg(i + 1), [i](QPainter& p) {
+            p.setPen(QPen(Qt::black, 2.5 + i, Qt::SolidLine, Qt::RoundCap));
+            p.drawLine(QPointF(-6 - i * 2, -50 + i * 8), QPointF(6 + i * 2, 50 - i * 8));
+        });
+    }
+    for (int i = 0; i < 3; ++i) {
+        stamp("Bush", QString("bush %1").arg(i + 1), [i](QPainter& p) {
+            std::mt19937 rng(300 + i);
+            std::uniform_real_distribution<double> U(0, 1);
+            for (int k = 0; k < 16; ++k) {
+                const double a = U(rng) * 2 * M_PI, r = std::sqrt(U(rng)) * 34;
+                p.save();
+                p.translate(std::cos(a) * r, std::sin(a) * r);
+                p.rotate(U(rng) * 360);
+                p.drawPath(leafPath(30, 9, (U(rng) - 0.5) * 6));
+                p.restore();
+            }
+        });
+    }
+    QFile f(ribbons + "/.defaults3_written");
+    if (f.open(QIODevice::WriteOnly)) f.write("Delete this file to regenerate the default ribbons and stamps.\n");
+}
 
 void TextureLibrary::generateDefaults(const QString& root) {
     const int S = 512;
@@ -408,6 +705,7 @@ void TextureLibrary::generateDefaults(const QString& root) {
             return std::clamp((1.f - rr) * 30.f, 0.f, 1.f);
         });
     });
+    generateDecor(root);
     for (const QString& d : {paper, brush, shapes}) {
         QFile f(d + "/.defaults2_written");
         if (!f.exists() && f.open(QIODevice::WriteOnly)) f.write("Delete this file to regenerate the second set of default textures.\n");
