@@ -331,4 +331,59 @@ void renderEffectsTile(const Layer& l, const QRect& tr, quint32* out) {
         for (int x = 0; x < TILE; ++x) out[y * TILE + x] = pack(&o[(size_t(y + m) * W + size_t(x + m)) * 4]);
 }
 
+RasterSurface bakeEffects(const Layer& layer, const LayerEffects& fx, const QRect& area, const MaskSurface* selection) {
+    const RasterSurface* src = layer.isRaster() ? &static_cast<const RasterLayer&>(layer).pixels : nullptr;
+    RasterSurface out = src ? *src : RasterSurface();  // shares the tiles: only changed tiles are copied
+    if (!src || area.isEmpty()) return out;
+    auto tmp = std::make_shared<RasterLayer>();
+    tmp->pixels = *src;
+    tmp->fx = fx;
+    tmp->hasMask = false;
+    TileRange tr = tileRangeFor(area);
+    QVector<qint64> keys;
+    for (int ty = tr.y0; ty <= tr.y1; ++ty)
+        for (int tx = tr.x0; tx <= tr.x1; ++tx) keys << tileKey(tx, ty);
+    QHash<qint64, RasterSurface::Ptr> results;
+    QMutex mutex;
+    parallelForTiles(keys, [&](qint64 k) {
+        const QRect trc = tileRectForKey(k);
+        auto t = std::make_shared<Tile<quint32>>();
+        t->px.reset(new quint32[TILE_PIXELS]);
+        renderEffectsTile(*tmp, trc, t->px.get());
+        // outside the area (and the selection) the pixels stay as they were
+        const QRect inside = trc & area;
+        std::vector<quint32> orig(TILE_PIXELS);
+        src->readRect(trc, orig.data(), TILE);
+        std::vector<float> sel;
+        if (selection) {
+            sel.resize(TILE_PIXELS);
+            readMask(*selection, trc, sel.data());
+        }
+        bool empty = true;
+        for (int y = 0; y < TILE; ++y)
+            for (int x = 0; x < TILE; ++x) {
+                const int i = y * TILE + x;
+                const bool in = inside.contains(trc.left() + x, trc.top() + y);
+                quint32 v = in ? t->px[i] : orig[size_t(i)];
+                if (in && selection) {
+                    const float w = sel[size_t(i)];
+                    if (w <= 0.f) v = orig[size_t(i)];
+                    else if (w < 1.f) {
+                        float a[4], b[4];
+                        unpack(orig[size_t(i)], a);
+                        unpack(v, b);
+                        for (int c = 0; c < 4; ++c) a[c] += (b[c] - a[c]) * w;
+                        v = pack(a);
+                    }
+                }
+                t->px[i] = v;
+                if (v) empty = false;
+            }
+        QMutexLocker lock(&mutex);
+        results.insert(k, empty ? nullptr : t);
+    });
+    for (auto it = results.begin(); it != results.end(); ++it) out.setTile(it.key(), it.value());
+    return out;
+}
+
 }  // namespace gx

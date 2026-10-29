@@ -57,6 +57,33 @@ BrushStroke::BrushStroke(const StrokeContext& ctx) : m_ctx(ctx), m_rng(std::rand
     m_color[1] = float(ctx.color.greenF());
     m_color[2] = float(ctx.color.blueF());
     jitterColor(m_color);
+    m_sub[0] = float(ctx.subColor.redF());
+    m_sub[1] = float(ctx.subColor.greenF());
+    m_sub[2] = float(ctx.subColor.blueF());
+
+    // Hatching: the lines of the bundle get their place, width and start once per stroke,
+    // so every stroke looks a little different, like drawn by hand.
+    const BrushSettings& b = ctx.brush;
+    if (b.bundleLines > 1) {
+        const int N = b.bundleLines;
+        m_lines.resize(size_t(N));
+        for (int i = 0; i < N; ++i) {
+            Line& L = m_lines[size_t(i)];
+            L.offset = (i + 0.5) / N - 0.5 + (m_uni(m_rng) - 0.5) * 0.3 / N;
+            L.widthK = 1.0 - b.bundleThicknessJitter * 0.8 * m_uni(m_rng);
+            L.startPx = m_uni(m_rng) * b.bundleLengthJitter * b.size * 2.5;
+            L.phase = m_uni(m_rng) * 2 * M_PI;
+            L.freq = 2 * M_PI / std::max(4.0, b.size * (2.0 + m_uni(m_rng) * 4.0));
+        }
+        // exactly this share of the lines gets the second color (picked at random)
+        int subs = int(std::lround(N * b.subColorShare));
+        if (b.subColorShare > 0.02 && subs == 0) subs = 1;
+        std::vector<int> idx(static_cast<size_t>(N), 0);
+        for (int i = 0; i < N; ++i) idx[size_t(i)] = i;
+        std::shuffle(idx.begin(), idx.end(), m_rng);
+        for (int k = 0; k < std::min(subs, N); ++k) m_lines[size_t(idx[size_t(k)])].sub = true;
+        for (auto& e : m_emitters) e.lineCarry.resize(size_t(N));
+    }
 
     m_useSelection = ctx.doc->hasSelection();
     m_alphaLock = !ctx.targetMask && (ctx.layer->alphaLock || ctx.brush.keepOpacity);
@@ -110,14 +137,29 @@ void BrushStroke::jitterColor(float* rgb) {
     rgb[2] = float(c.blueF());
 }
 
-float BrushStroke::textureAt(int x, int y) const {
-    if (!m_texture) return 1.f;
+float BrushStroke::textureValue(float v) const {
     const BrushSettings& b = m_ctx.brush;
-    float sc = float(std::max(0.05, b.textureScale));
-    float v = m_texture->sample((x + 0.5f) / sc, (y + 0.5f) / sc);
     if (b.textureInvert) v = 1.f - v;
+    // density: lower = only the high grain takes paint, higher = the grain fills in
+    v = clamp01(v + (float(b.textureDensity) - 0.5f) * 2.f);
     float s = float(b.textureStrength);
     return 1.f - s + s * v;
+}
+
+float BrushStroke::textureAt(int x, int y) const {
+    if (!m_texture) return 1.f;
+    float sc = float(std::max(0.05, m_ctx.brush.textureScale));
+    return textureValue(m_texture->sample((x + 0.5f) / sc, (y + 0.5f) / sc));
+}
+
+float BrushStroke::textureAlong(int x, int y, const TexFrame& tf) const {
+    if (!m_texture) return 1.f;
+    // texture coordinates that move with the stroke: u along it, v across it
+    const double rx = x + 0.5 - tf.cx, ry = y + 0.5 - tf.cy;
+    const double u = tf.along + rx * tf.dx + ry * tf.dy;
+    const double v = tf.across - rx * tf.dy + ry * tf.dx;
+    float sc = float(std::max(0.05, m_ctx.brush.textureScale));
+    return textureValue(m_texture->sample(float(u) / sc, float(v) / sc));
 }
 
 void BrushStroke::begin(const InputSample& s) {
@@ -186,7 +228,8 @@ void BrushStroke::emitTo(Emitter& e, const PathPoint& p0) {
         double t = pos / L;
         double pr = mapPressure(e.last.s.pressure + (p.s.pressure - e.last.s.pressure) * t);
         double taper = e.last.taper + (p.taper - e.last.taper) * t;
-        double step = std::max(0.25, diameterFor(pr, taper) * spacing);
+        double step = stepFor(pr, taper) * spacing;
+        step = std::max(0.25, step);
         if (L / step > 20000) step = L / 20000;  // a huge jump must not hang the program
         double need = step - e.residual;
         if (pos + need > L) {
@@ -211,7 +254,7 @@ void BrushStroke::dab(Emitter& e, const PathPoint& p, const QPointF& dir) {
     float pr = mapPressure(p.s.pressure);
     double taperIn = b.taperIn > 0 ? std::clamp(e.traveled / b.taperIn, 0.08, 1.0) : 1.0;
     double diameter = diameterFor(pr, p.taper * taperIn);
-    if (b.sizeJitter > 0) diameter *= 1.0 - b.sizeJitter * m_uni(m_rng);
+    if (b.sizeJitter > 0 && b.particles <= 0) diameter *= 1.0 - b.sizeJitter * m_uni(m_rng);  // particles jitter one by one
     if (diameter < 0.05) return;
 
     double ang = b.angle;
@@ -247,23 +290,91 @@ void BrushStroke::dab(Emitter& e, const PathPoint& p, const QPointF& dir) {
     d.shapeAsTip = b.shapeAsTip;
     d.fringe = b.fringe;
 
-    if (m_engine == BrushEngine::Paint || m_engine == BrushEngine::Erase) bufferedDab(d, float(density));
-    else directDab(e, d, float(density), pr);
+    TexFrame tf;
+    tf.on = m_texture && b.textureFollowsStroke;
+    tf.dx = dir.x();
+    tf.dy = dir.y();
+    tf.along = e.traveled;
+
+    if (!m_lines.empty()) {
+        // a bundle of parallel lines across the brush (hatching)
+        const QPointF n(-dir.y(), dir.x());
+        const double gap = diameter / double(m_lines.size());
+        for (size_t i = 0; i < m_lines.size(); ++i) {
+            const Line& L = m_lines[i];
+            const double grown = e.traveled - L.startPx;
+            if (grown < 0) continue;
+            const double k = std::clamp(grown / std::max(1.0, b.size * 0.5), 0.15, 1.0);  // every line tapers in
+            const double off = L.offset * diameter + b.bundleWobble * 0.45 * gap * std::sin(e.traveled * L.freq + L.phase);
+            DabParams ld = d;
+            const QPointF lc = c + n * off;
+            ld.cx = lc.x();
+            ld.cy = lc.y();
+            ld.diameter = gap * b.bundleThickness * L.widthK * k;
+            if (ld.diameter < 0.05) continue;
+            TexFrame ltf = tf;
+            ltf.cx = ld.cx;
+            ltf.cy = ld.cy;
+            ltf.across = off;
+            put(ld, float(density), L.sub, ltf, e.lineCarry[i], pr);
+        }
+        return;
+    }
+    if (b.particles > 0) {
+        // stipple: dots scattered inside the brush; light pressure = fewer dots
+        double want = b.particles * (b.densityPressure ? b.minDensity + (1.0 - b.minDensity) * pr : 1.0);
+        int count = int(want);
+        if (m_uni(m_rng) < want - count) ++count;
+        for (int k = 0; k < count; ++k) {
+            const double a = m_uni(m_rng) * 2 * M_PI, r = std::sqrt(m_uni(m_rng)) * diameter * 0.5;
+            DabParams pd = d;
+            pd.cx = c.x() + std::cos(a) * r;
+            pd.cy = c.y() + std::sin(a) * r;
+            pd.diameter = diameter * b.particleSize * (1.0 - 0.6 * b.sizeJitter * m_uni(m_rng));
+            if (pd.diameter < 0.05) continue;
+            const bool sub = b.subColorShare > 0 && m_uni(m_rng) < b.subColorShare;
+            TexFrame ptf = tf;
+            ptf.cx = pd.cx;
+            ptf.cy = pd.cy;
+            // the particle density is used as is: the dots are what the pressure changes
+            put(pd, float(b.density), sub, ptf, e.carry, pr);
+        }
+        return;
+    }
+    const bool sub = b.subColorShare > 0 && m_uni(m_rng) < b.subColorShare;
+    tf.cx = d.cx;
+    tf.cy = d.cy;
+    put(d, float(density), sub, tf, e.carry, pr);
 }
 
-void BrushStroke::bufferedDab(const DabParams& d, float density) {
+double BrushStroke::stepFor(double pr, double taper) const {
+    const BrushSettings& b = m_ctx.brush;
+    double dia = diameterFor(pr, taper);
+    if (b.bundleLines > 1) dia = dia / b.bundleLines * b.bundleThickness;  // spaced by the width of one line
+    return dia;
+}
+
+void BrushStroke::put(const DabParams& d, float density, bool sub, const TexFrame& tf, Carry& carry, float pr) {
+    if (sub) m_useSub = true;
+    if (m_engine == BrushEngine::Paint || m_engine == BrushEngine::Erase) bufferedDab(d, density, sub, tf);
+    else directDab(carry, sub ? m_sub : m_color, d, density, pr, tf);
+}
+
+void BrushStroke::bufferedDab(const DabParams& d, float density, bool sub, const TexFrame& tf) {
     QRect box = dabBounds(d) & m_ctx.doc->bounds();
     if (box.isEmpty()) return;
     const size_t n = size_t(box.width()) * box.height();
     if (tlCov.size() < n) tlCov.resize(n);
     if (!rasterizeDab(d, box, tlCov.data())) return;
-    const bool eachDab = m_texture && m_ctx.brush.textureEachDab;
+    const bool along = m_texture && tf.on;
+    const bool eachDab = m_texture && (m_ctx.brush.textureEachDab || along);
     const bool buildup = m_ctx.brush.buildup;
+    FloatSurface& mask = sub ? m_mask2 : m_mask;
     TileRange tr = tileRangeFor(box);
     for (int ty = tr.y0; ty <= tr.y1; ++ty)
         for (int tx = tr.x0; tx <= tr.x1; ++tx) {
             QRect ir = tileRect(tx, ty) & box;
-            float* tm = m_mask.writable(tx, ty);
+            float* tm = mask.writable(tx, ty);
             for (int y = ir.top(); y <= ir.bottom(); ++y) {
                 float* mrow = tm + ((y & (TILE - 1)) << TILE_SHIFT);
                 const float* crow = tlCov.data() + size_t(y - box.top()) * box.width() - box.left();
@@ -271,7 +382,7 @@ void BrushStroke::bufferedDab(const DabParams& d, float density) {
                     float v = crow[x];
                     if (v <= 0.f) continue;
                     v *= density;
-                    if (eachDab) v *= textureAt(x, y);
+                    if (eachDab) v *= along ? textureAlong(x, y, tf) : textureAt(x, y);
                     float& a = mrow[x & (TILE - 1)];
                     if (buildup) a = a + v * (1.f - a);
                     else if (v > a) a = v;
@@ -288,8 +399,10 @@ void BrushStroke::flushPreview() {
     m_previewDirty = {};
     const BrushSettings& b = m_ctx.brush;
     const float opacity = float(b.opacity);
-    const bool strokeTex = m_texture && !b.textureEachDab;
+    const bool strokeTex = m_texture && !b.textureEachDab && !b.textureFollowsStroke;
     const bool erase = m_engine == BrushEngine::Erase;
+    const bool two = m_useSub;
+    thread_local std::vector<float> tlMask2;
     TileRange tr = tileRangeFor(dirty);
     for (int ty = tr.y0; ty <= tr.y1; ++ty)
         for (int tx = tr.x0; tx <= tr.x1; ++tx) {
@@ -297,16 +410,26 @@ void BrushStroke::flushPreview() {
             const size_t n = size_t(r.width()) * r.height();
             if (tlMask.size() < n) tlMask.resize(n);
             m_mask.readRect(r, tlMask.data(), r.width());
+            if (two) {
+                if (tlMask2.size() < n) tlMask2.resize(n);
+                m_mask2.readRect(r, tlMask2.data(), r.width());
+            }
             if (m_useSelection) {
                 if (tlSel.size() < n) tlSel.resize(n);
                 readMask(m_ctx.doc->selection(), r, tlSel.data());
                 for (size_t i = 0; i < n; ++i) tlMask[i] *= tlSel[i];
+                if (two)
+                    for (size_t i = 0; i < n; ++i) tlMask2[i] *= tlSel[i];
             }
             for (int y = 0; y < r.height(); ++y)
                 for (int x = 0; x < r.width(); ++x) {
-                    float& m = tlMask[size_t(y) * r.width() + x];
+                    const size_t i = size_t(y) * r.width() + x;
+                    float& m = tlMask[i];
                     m *= opacity;
-                    if (strokeTex && m > 0) m *= textureAt(r.left() + x, r.top() + y);
+                    float t = 1.f;
+                    if (strokeTex && (m > 0 || (two && tlMask2[i] > 0))) t = textureAt(r.left() + x, r.top() + y);
+                    m *= t;
+                    if (two) tlMask2[i] *= opacity * t;
                 }
 
             if (m_ctx.targetMask) {
@@ -314,9 +437,11 @@ void BrushStroke::flushPreview() {
                 if (tlMaskU8.size() < n) tlMaskU8.resize(n);
                 l->mask.readRect(r, tlMaskU8.data(), r.width());
                 float pv = erase ? 0.f : luminance(m_color[0], m_color[1], m_color[2]);
+                float sv = erase ? 0.f : luminance(m_sub[0], m_sub[1], m_sub[2]);
                 for (size_t i = 0; i < n; ++i) {
                     float v = tlMaskU8[i] * kInv255;
                     v += (pv - v) * tlMask[i];
+                    if (two) v += (sv - v) * tlMask2[i];
                     tlMaskU8[i] = quint8(std::clamp(int(v * 255.f + 0.5f), 0, 255));
                 }
                 l->previewMask->writeRect(r, tlMaskU8.data(), r.width());
@@ -328,7 +453,8 @@ void BrushStroke::flushPreview() {
             readFloat(rl->pixels, r, tlDst.data());
             if (erase) {
                 for (size_t i = 0; i < n; ++i) {
-                    float k = 1.f - tlMask[i];
+                    const float m2 = two ? tlMask2[i] : 0.f;
+                    float k = (1.f - tlMask[i]) * (1.f - m2);
                     float* p = &tlDst[i * 4];
                     p[0] *= k; p[1] *= k; p[2] *= k; p[3] *= k;
                 }
@@ -338,6 +464,14 @@ void BrushStroke::flushPreview() {
                     float m = tlMask[i];
                     float* s = &tlAux[i * 4];
                     s[0] = m_color[0] * m; s[1] = m_color[1] * m; s[2] = m_color[2] * m; s[3] = m;
+                    if (two && tlMask2[i] > 0) {
+                        // the second color lies on top of the first (premultiplied "over")
+                        const float m2 = tlMask2[i], k = 1.f - m2;
+                        s[0] = m_sub[0] * m2 + s[0] * k;
+                        s[1] = m_sub[1] * m2 + s[1] * k;
+                        s[2] = m_sub[2] * m2 + s[2] * k;
+                        s[3] = m2 + s[3] * k;
+                    }
                 }
                 if (m_alphaLock) blendRowAtop(b.paintMode, tlDst.data(), tlAux.data(), int(n));
                 else blendRow(b.paintMode, tlDst.data(), tlAux.data(), int(n));
@@ -347,7 +481,7 @@ void BrushStroke::flushPreview() {
     m_dirty |= dirty;
 }
 
-void BrushStroke::directDab(Emitter& e, const DabParams& d, float density, float pr) {
+void BrushStroke::directDab(Carry& carry, const float* base, const DabParams& d, float density, float pr, const TexFrame& tf) {
     if (!m_ctx.layer->isRaster() || m_ctx.targetMask) return;
     auto* rl = static_cast<RasterLayer*>(m_ctx.layer);
     QRect box = dabBounds(d) & m_ctx.doc->bounds();
@@ -357,7 +491,8 @@ void BrushStroke::directDab(Emitter& e, const DabParams& d, float density, float
     if (!rasterizeDab(d, box, tlCov.data())) return;
     if (m_texture)
         for (int y = 0; y < box.height(); ++y)
-            for (int x = 0; x < box.width(); ++x) tlCov[size_t(y) * box.width() + x] *= textureAt(box.left() + x, box.top() + y);
+            for (int x = 0; x < box.width(); ++x)
+                tlCov[size_t(y) * box.width() + x] *= tf.on ? textureAlong(box.left() + x, box.top() + y, tf) : textureAt(box.left() + x, box.top() + y);
     if (m_useSelection) {
         if (tlSel.size() < n) tlSel.resize(n);
         readMask(m_ctx.doc->selection(), box, tlSel.data());
@@ -396,7 +531,7 @@ void BrushStroke::directDab(Emitter& e, const DabParams& d, float density, float
             float M[4];
             if (m_ctx.transparentColor) { M[0] = M[1] = M[2] = M[3] = 0; }
             else {
-                float c[3] = {m_color[0], m_color[1], m_color[2]};
+                float c[3] = {base[0], base[1], base[2]};
                 jitterColor(c);
                 M[0] = c[0]; M[1] = c[1]; M[2] = c[2]; M[3] = 1;
             }
@@ -405,23 +540,23 @@ void BrushStroke::directDab(Emitter& e, const DabParams& d, float density, float
             float target[4];
             for (int k = 0; k < 4; ++k) target[k] = M[k] * (1 - bl) + s[k] * bl;
             float pers = float(b.persistence);
-            if (!e.hasCarried) {
-                std::copy(target, target + 4, e.carried);
-                e.hasCarried = true;
+            if (!carry.has) {
+                std::copy(target, target + 4, carry.c);
+                carry.has = true;
             } else {
-                for (int k = 0; k < 4; ++k) e.carried[k] = target[k] * (1 - pers) + e.carried[k] * pers;
+                for (int k = 0; k < 4; ++k) carry.c[k] = target[k] * (1 - pers) + carry.c[k] * pers;
             }
             float dil = 1.f - float(b.dilution);
-            for (int k = 0; k < 4; ++k) paint[k] = e.carried[k] * dil;
+            for (int k = 0; k < 4; ++k) paint[k] = carry.c[k] * dil;
         } else {  // Smudge
             float pers = float(b.persistence);
-            if (!e.hasCarried) {
-                std::copy(s, s + 4, e.carried);
-                e.hasCarried = true;
+            if (!carry.has) {
+                std::copy(s, s + 4, carry.c);
+                carry.has = true;
                 usePaint = false;
             } else {
-                std::copy(e.carried, e.carried + 4, paint);
-                for (int k = 0; k < 4; ++k) e.carried[k] = s[k] * (1 - pers) + e.carried[k] * pers;
+                std::copy(carry.c, carry.c + 4, paint);
+                for (int k = 0; k < 4; ++k) carry.c[k] = s[k] * (1 - pers) + carry.c[k] * pers;
             }
         }
         if (!usePaint) return;

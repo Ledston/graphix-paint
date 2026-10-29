@@ -3,6 +3,9 @@
 #include <QElapsedTimer>
 #include <QPainterPath>
 #include <QGuiApplication>
+#include "app/BrushLibrary.h"
+#include <QJsonDocument>
+#include <QJsonArray>
 #include <QTemporaryDir>
 #include <cmath>
 #include <cstdio>
@@ -501,6 +504,64 @@ static void testMultiLayerOps() {
     CHECK(order() == "L1,L2,L3,L4");
 }
 
+static void testNewBrushes() {
+    // every default brush draws something and keeps to its settings when saved and loaded
+    for (const BrushSettings& d : BrushSettings::defaults()) {
+        BrushSettings back = BrushSettings::fromJson(d.toJson());
+        CHECK(back.bundleLines == d.bundleLines && back.particles == d.particles && back.group == d.group &&
+              std::abs(back.subColorShare - d.subColorShare) < 1e-9 && back.textureFollowsStroke == d.textureFollowsStroke);
+        CHECK(!d.group.isEmpty());
+        Document doc(QSize(300, 120));
+        auto* l = ops::addRasterLayer(doc);
+        l->pixels.fillRect(QRect(150, 0, 150, 120), premulFromColor(QColor(200, 60, 60)));  // something to mix, blur or erase
+        StrokeContext ctx;
+        ctx.doc = &doc;
+        ctx.layer = l;
+        ctx.brush = d;
+        ctx.brush.size = std::min(d.size, 40.0);
+        ctx.color = Qt::black;
+        ctx.subColor = Qt::white;
+        PressureCurve curve;
+        ctx.pressureCurve = &curve;
+        const QImage before = surfaceToImage(l->pixels, doc.bounds());
+        {
+            BrushStroke s(ctx);
+            for (int i = 0; i <= 80; ++i) {
+                InputSample p;
+                p.pos = QPointF(20 + i * 3.3, 60 + std::sin(i * 0.1) * 15);
+                p.pressure = 0.4 + 0.6 * std::sin(i / 80.0 * M_PI);
+                if (i == 0) s.begin(p);
+                else s.add(p);
+            }
+            s.end();
+        }
+        const QImage after = surfaceToImage(l->pixels, doc.bounds());
+        CHECK(after != before);
+        if (after == before) std::fprintf(stderr, "  brush '%s' changed nothing\n", qPrintable(d.name));
+    }
+    // a palette saved by an older version gets the new brushes once
+    QTemporaryDir dir;
+    const QString file = dir.path() + "/brushes.json";
+    {
+        QFile f(file);
+        f.open(QIODevice::WriteOnly);
+        QJsonArray arr;
+        BrushSettings pen = BrushSettings::defaults()[0];
+        pen.name = "My pen";
+        arr.append(pen.toJson());
+        f.write(QJsonDocument(QJsonObject{{"version", 1}, {"brushes", arr}}).toJson());
+    }
+    {
+        BrushLibrary lib(file);
+        CHECK(lib.indexOfName("My pen") == 0);
+        CHECK(lib.indexOfName("Hatching") > 0 && lib.indexOfName("Stipple") > 0);
+        const int n = lib.count();
+        lib.save();
+        BrushLibrary again(file);
+        CHECK(again.count() == n);  // only once
+    }
+}
+
 int main(int argc, char** argv) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
@@ -519,6 +580,7 @@ int main(int argc, char** argv) {
     testChannels();
     testLineartColoring();
     testMultiLayerOps();
+    testNewBrushes();
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

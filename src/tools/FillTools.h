@@ -35,6 +35,11 @@ public:
     bool antialias = true;
     bool eraseMode = false;
     double opacity = 1.0;
+    // 0 = fill the whole shape, 1 = fill only the closed areas of the line art inside the shape
+    int mode = 0;
+    int source = 2;    // FillSource: lines from all visible layers, the current layer or the reference layers
+    int gapClose = 3;  // px
+    int under = 2;     // the fill goes this far under the lines
 
 protected:
     void apply(CanvasView* v, const QPolygonF& poly, Qt::KeyboardModifiers mods) override;

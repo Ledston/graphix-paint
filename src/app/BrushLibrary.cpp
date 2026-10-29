@@ -86,7 +86,7 @@ void BrushLibrary::resetSlot(int i) {
 void BrushLibrary::save() const {
     QJsonArray arr;
     for (const auto& s : m_slots) arr.append(s.toJson());
-    QJsonObject o{{"version", 1}, {"current", m_current}, {"brushes", arr}};
+    QJsonObject o{{"version", 2}, {"current", m_current}, {"brushes", arr}};
     QSaveFile f(m_file);
     if (f.open(QIODevice::WriteOnly)) {
         f.write(QJsonDocument(o).toJson());
@@ -101,6 +101,11 @@ void BrushLibrary::load() {
         QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
         for (const auto& v : o.value("brushes").toArray()) m_slots.push_back(BrushSettings::fromJson(v.toObject()));
         m_current = o.value("current").toInt(0);
+        // brushes added by newer versions are given to an existing palette once
+        const int version = o.value("version").toInt(1);
+        if (!m_slots.isEmpty() && version < 2)
+            for (const BrushSettings& b : BrushSettings::defaultsSince(2))
+                if (indexOfName(b.name) < 0) m_slots.push_back(b);
     }
     if (m_slots.isEmpty()) m_slots = BrushSettings::defaults();
     m_current = std::clamp(m_current, 0, count() - 1);

@@ -290,6 +290,128 @@ void TextureLibrary::generateDefaults(const QString& root) {
         QFile f(d + "/.defaults_written");
         if (!f.exists() && f.open(QIODevice::WriteOnly)) f.write("Delete this file to regenerate the default textures.\n");
     }
+
+    // ---- second set (version 1.1): written once into existing folders too
+    auto saveNew = [](const QString& dir, const QString& name, const std::function<QImage()>& make) {
+        QDir().mkpath(dir);
+        QString path = dir + "/" + name + ".png";
+        if (QFileInfo::exists(dir + "/.defaults2_written") || QFileInfo::exists(path)) return;
+        make().save(path);
+    };
+    saveNew(paper, "Cold press paper", [&] {
+        Noise n(131), m(7);
+        return makeGray(S, [&](int x, int y) {
+            float bumps = n.fbm(x / 10.f, y / 10.f, S / 10 + 1, 4);
+            float fine = m.fbm(x / 2.f, y / 2.f, S / 2, 2);
+            return contrast(0.72f + (bumps - 0.5f) * 0.9f + (fine - 0.5f) * 0.25f, 1.8f, 0.62f);
+        });
+    });
+    saveNew(paper, "Kraft fibers", [&] {
+        QImage img(S, S, QImage::Format_RGB32);
+        img.fill(QColor::fromRgbF(0.85, 0.85, 0.85));
+        QPainter p(&img);
+        p.setRenderHint(QPainter::Antialiasing);
+        std::mt19937 rng(77);
+        std::uniform_real_distribution<float> U(0, 1);
+        for (int i = 0; i < 900; ++i) {
+            QPointF a(U(rng) * S, U(rng) * S);
+            float ang = U(rng) * 6.2832f, len = 6 + U(rng) * 30;
+            QPointF d(std::cos(ang) * len, std::sin(ang) * len);
+            p.setPen(QPen(QColor::fromRgbF(0.45 + U(rng) * 0.3, 0.45 + U(rng) * 0.3, 0.45 + U(rng) * 0.3), 0.6 + U(rng) * 0.9));
+            // drawn three times shifted, so the texture tiles
+            for (int ox : {-S, 0, S})
+                for (int oy : {-S, 0, S}) p.drawLine(a + QPointF(ox, oy), a + d + QPointF(ox, oy));
+        }
+        p.end();
+        return img.convertToFormat(QImage::Format_Grayscale8);
+    });
+    saveNew(paper, "Toothy paper", [&] {
+        Noise n(313);
+        return makeGray(S, [&](int x, int y) { return contrast(n.fbm(x / 4.f, y / 4.f, S / 4, 3), 2.8f, 0.42f); });
+    });
+    saveNew(brush, "Pencil grain", [&] {
+        Noise n(17), m(29);
+        return makeGray(S, [&](int x, int y) {
+            float g = n.fbm(x / 1.6f, y / 2.4f, int(S / 1.6f), 2) * 0.7f + m.fbm(x / 6.f, y / 6.f, S / 6 + 1, 3) * 0.3f;
+            return contrast(g, 3.2f, 0.47f);
+        });
+    });
+    saveNew(brush, "Charcoal", [&] {
+        Noise n(53), m(61);
+        return makeGray(S, [&](int x, int y) {
+            float streak = m.fbm(x / 30.f, y / 1.5f, S / 30 + 1, 3);
+            float grain = n.fbm(x / 2.f, y / 2.f, S / 2, 3);
+            return contrast(grain * 0.6f + streak * 0.4f, 3.5f, 0.5f);
+        });
+    });
+    saveNew(brush, "Hatch lines", [&] {
+        // lines along x: with "Texture follows the stroke" they run along the stroke
+        Noise n(101);
+        return makeGray(S, [&](int x, int y) {
+            const int period = 8;
+            float d = std::fabs(float(y % period) + 0.5f - period / 2.f);
+            float line = std::clamp(2.2f - d, 0.f, 1.f);
+            float breaks = n.fbm(x / 24.f, y / float(period), S / 24 + 1, 2) > 0.27f ? 1.f : 0.f;
+            return line * breaks;
+        });
+    });
+    saveNew(brush, "Crosshatch", [&] {
+        return makeGray(S, [&](int x, int y) {
+            const int period = 12;
+            auto l = [&](int v) {
+                float d = std::fabs(float(((v % period) + period) % period) + 0.5f - period / 2.f);
+                return std::clamp(1.8f - d, 0.f, 1.f);
+            };
+            return std::max(l(x + y), l(x - y + S));
+        });
+    });
+    saveNew(brush, "Halftone dots", [&] {
+        return makeGray(S, [&](int x, int y) {
+            const float cell = 8.f;
+            float fx = std::fmod(float(x) + 0.5f, cell) - cell / 2, fy = std::fmod(float(y) + 0.5f, cell) - cell / 2;
+            float r = std::sqrt(fx * fx + fy * fy);
+            return std::clamp(2.6f - r, 0.f, 1.f);
+        });
+    });
+    saveNew(brush, "Dry brush", [&] {
+        Noise n(211);
+        return makeGray(S, [&](int x, int y) { return contrast(n.fbm(x / 60.f, y / 1.2f, S / 60 + 1, 3), 3.f, 0.5f); });
+    });
+    saveNew(brush, "Sand", [&] {
+        Noise n(401);
+        return makeGray(S, [&](int x, int y) { return n.hash(x, y) > 0.82f ? 1.f : 0.1f + n.fbm(x / 8.f, y / 8.f, S / 8, 2) * 0.2f; });
+    });
+    saveNew(shapes, "Pencil tip", [&] {
+        Noise n(23);
+        return makeAlpha(T, [&](int x, int y) {
+            float dx = (x + 0.5f) / T * 2 - 1, dy = (y + 0.5f) / T * 2 - 1;
+            float r = std::sqrt(dx * dx + dy * dy);
+            if (r >= 1) return 0.f;
+            float grain = n.value(x / 1.5f, y / 1.5f, 1000);
+            return std::clamp((1 - r) * 6.f, 0.f, 1.f) * (grain > 0.3f ? 1.f : 0.35f);
+        });
+    });
+    saveNew(shapes, "Sparkle", [&] {
+        return makeAlpha(T, [&](int x, int y) {
+            float dx = std::fabs((x + 0.5f) / T * 2 - 1), dy = std::fabs((y + 0.5f) / T * 2 - 1);
+            float star = std::max(1.f - (dx * 7.f + dy) , 1.f - (dy * 7.f + dx));
+            float core = 1.f - std::sqrt(dx * dx + dy * dy) * 3.f;
+            return std::clamp(std::max(star, core) * 1.5f, 0.f, 1.f);
+        });
+    });
+    saveNew(shapes, "Droplet", [&] {
+        // a drop: round bottom, pointed top
+        return makeAlpha(T, [&](int x, int y) {
+            float dx = (x + 0.5f) / T * 2 - 1, dy = (y + 0.5f) / T * 2 - 1;
+            float rr = dy > 0.f ? std::sqrt(dx * dx + dy * dy) / 0.62f : std::fabs(dx) / (0.62f * (1.f + dy * 0.95f)) + std::max(0.f, -dy - 0.95f) * 20.f;
+            if (dy > 0.62f) rr = 2.f;
+            return std::clamp((1.f - rr) * 30.f, 0.f, 1.f);
+        });
+    });
+    for (const QString& d : {paper, brush, shapes}) {
+        QFile f(d + "/.defaults2_written");
+        if (!f.exists() && f.open(QIODevice::WriteOnly)) f.write("Delete this file to regenerate the second set of default textures.\n");
+    }
 }
 
 }  // namespace gx

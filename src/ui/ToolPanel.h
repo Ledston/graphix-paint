@@ -19,9 +19,11 @@ namespace gx {
 
 class Tool;
 class ValueBar;
+class BrushControls;
 class Section;
 
-// Grid of brush slots, like SAI's custom tool palette.
+// Grid of brush slots, like SAI's custom tool palette, sorted into tabs
+// (Basic, Paint, Hatching, Effects, Erase and the user's own).
 class BrushSlots : public QWidget {
     Q_OBJECT
 public:
@@ -29,18 +31,33 @@ public:
     int heightForWidth(int w) const override;
     bool hasHeightForWidth() const override { return true; }
     QSize sizeHint() const override { return QSize(220, heightForWidth(220)); }
+    QString currentGroup() const { return m_group; }
+    void setGroup(const QString& g);
 protected:
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent* e) override;
     void mouseDoubleClickEvent(QMouseEvent* e) override;
+    void resizeEvent(QResizeEvent*) override;
 private:
-    int cols() const;
-    int indexAt(const QPoint& p) const;
-    QRect cell(int i) const;
+    struct Layout {
+        QList<QPair<QString, QRect>> tabs;
+        QList<int> cells;  // brush indices shown, in order
+        int top = 0;       // where the cells start
+        int height = 0;
+    };
+    Layout layoutFor(int w) const;
+    QStringList groupsShown() const;
+    int cols(int w) const;
+    QRect cell(const Layout& l, int pos, int w) const;
+    int indexAt(const QPoint& p, bool* addCell, QString* tab) const;
     void menu(int index, const QPoint& global);
+    QImage strokePreview(const BrushSettings& b, const QSize& size);
+    QString m_group;
+    QHash<QByteArray, QImage> m_previews;
 };
 
-// Every setting of the current brush slot.
+// The settings of the current brush slot: the main ones, then the rest in sections
+// that fold away. "All settings" opens the brush settings window with a preview.
 class BrushSettingsWidget : public QWidget {
     Q_OBJECT
 public:
@@ -49,20 +66,11 @@ private:
     void load();
     void store();
     void updateVisibility();
-    ValueBar* bar(QWidget* parent, const QString& label, double min, double max, int dec, double* field,
-                  double scale = 1, const QString& suffix = {}, bool log = false);
-    QCheckBox* check(QWidget* parent, const QString& label, bool* field);
-
-    BrushSettings m_s;
-    bool m_loading = false;
-    QList<std::function<void()>> m_loaders;
-    QComboBox* m_engine;
-    QComboBox* m_mode;
-    QComboBox* m_shape;
-    QComboBox* m_texture;
-    Section* m_mixSection;
-    QWidget* m_sizesRow;
+    BrushControls* m_controls;
+    QList<QPair<QWidget*, std::function<bool(const BrushSettings&)>>> m_sections;
     QLabel* m_title;
+    bool m_storing = false;
+    qsizetype m_textureCount = -1;
 };
 
 class ToolPanel : public QWidget {

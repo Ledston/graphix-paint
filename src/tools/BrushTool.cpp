@@ -71,6 +71,7 @@ void BrushTool::press(const PointerEvent& e) {
     ctx.targetMask = maskTarget;
     ctx.brush = m_usingEraser ? lib->at(lib->eraserIndex()) : lib->current();
     ctx.color = app()->foreground();
+    ctx.subColor = app()->background();
     ctx.transparentColor = app()->transparentColor();
     ctx.pressureCurve = &app()->pressureCurve();
     if (doc->symmetry.isOn()) ctx.symmetry = doc->symmetry.transforms();

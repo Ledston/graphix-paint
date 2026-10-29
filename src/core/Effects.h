@@ -16,4 +16,9 @@ void invalidateEffects(Layer& l, const QRect& canvasRect);
 // Renders one tile (layer space rect) of the layer with its effects.
 void renderEffectsTile(const Layer& l, const QRect& tileRect, quint32* out);
 
+// Effects as a filter: the pixels of a layer with 'fx' burned in, inside 'area'
+// (and the selection, if given). The layer's own mask and effects are not used.
+// Thread safe: works on a copy of the layer.
+RasterSurface bakeEffects(const Layer& layer, const LayerEffects& fx, const QRect& area, const MaskSurface* selection);
+
 }  // namespace gx

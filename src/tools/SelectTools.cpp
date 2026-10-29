@@ -212,19 +212,14 @@ MaskSurface floodFill(Document* doc, const QPoint& seed, int tol, bool merged, b
     return floodFillEx(doc, seed, tol, merged ? FillSource::AllVisible : FillSource::CurrentLayer, contiguous, layer, 0, error);
 }
 
-MaskSurface floodFillEx(Document* doc, const QPoint& seed, int tol, FillSource source, bool contiguous, const Layer* layer, int gapClose,
-                        QString* error) {
-    const bool merged = source == FillSource::AllVisible;
-    MaskSurface out(0);
-    QRect area = doc->hasSelection() ? doc->selectionBounds() : doc->bounds();
-    if (!area.contains(seed)) return out;
+bool readFillSource(Document* doc, const QRect& area, FillSource source, const Layer* layer, std::vector<quint32>& px, QString* error) {
     const qint64 W = area.width(), H = area.height();
     if (W * H > 400ll * 1000 * 1000) {
         if (error) *error = "The area is too large to fill at once. Select a smaller area first.";
-        return out;
+        return false;
     }
-    std::vector<quint32> px(size_t(W * H));
-    if (merged) {
+    px.assign(size_t(W * H), 0u);
+    if (source == FillSource::AllVisible) {
         // Use the projection (the image exactly as shown)
         Projection* pr = doc->projection();
         TileRange tr = tileRangeFor(area);
@@ -254,13 +249,24 @@ MaskSurface floodFillEx(Document* doc, const QPoint& seed, int tol, FillSource s
         });
         if (refs.empty()) {
             if (error) *error = "No reference layer yet: right-click the line art layer and choose \"Reference layer\".";
-            return out;
+            return false;
         }
         RasterSurface rs = ops::renderLayers(*doc, refs, area);
         rs.readRect(area, px.data(), int(W));
     } else if (layer && layer->displaySurface()) {
         layer->displaySurface()->readRect(area.translated(-layer->previewOffset), px.data(), int(W));
     }
+    return true;
+}
+
+MaskSurface floodFillEx(Document* doc, const QPoint& seed, int tol, FillSource source, bool contiguous, const Layer* layer, int gapClose,
+                        QString* error) {
+    MaskSurface out(0);
+    QRect area = doc->hasSelection() ? doc->selectionBounds() : doc->bounds();
+    if (!area.contains(seed)) return out;
+    const qint64 W = area.width(), H = area.height();
+    std::vector<quint32> px;
+    if (!readFillSource(doc, area, source, layer, px, error)) return out;
     const quint32 ref = px[size_t(seed.y() - area.top()) * W + (seed.x() - area.left())];
     auto match = [&](quint32 c) {
         if (c == ref) return true;

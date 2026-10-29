@@ -1043,3 +1043,79 @@ Open the recordings folder	Открыть папку с записями
 Record only the canvas	Записывать только холст
 Record the program window	Записывать окно программы
  s	 с
+A sample stroke: light, full, then light pressure. Big brushes are shown smaller.	Пробный мазок: слабый, полный и снова слабый нажим. Большие кисти показаны меньше.
+All settings	Все настройки
+All settings of this brush, with a preview (or double-click the brush)	Все настройки этой кисти с превью (или двойной щелчок по кисти)
+Basic	Основные
+Erasers	Ластики
+Blender	Блендер
+Brush settings	Настройки кисти
+Brush settings...	Настройки кисти...
+Brush tab	Вкладка
+Brushes. Click a tab to see its brushes. Double-click a brush for all its settings, right-click for more.	Кисти. Щелчок по вкладке показывает её кисти. Двойной щелчок по кисти открывает все настройки, правый щелчок — ещё.
+Clear the sheet	Очистить лист
+Closed areas: draw roughly around the parts to color; every area of the line art that is mostly inside is filled up to the lines, without gaps under them.	Замкнутые области: примерно обведите то, что нужно залить. Каждая область лайнарта, которая в основном внутри, зальётся до линий, без щелей под ними.
+Darker edges, like watercolor	Тёмные края, как у акварели
+Density with the lightest pressure	Плотность при самом слабом нажиме
+Different lengths	Разная длина
+Done	Готово
+Dot size	Размер точек
+Dot size compared to the brush size	Размер точек относительно размера кисти
+Droplets	Капли
+Dry brush	Сухая кисть
+Fill the closed areas inside	Залить замкнутые области внутри
+Fill the whole shape	Залить всю фигуру
+Find a command, filter or setting...	Найти команду, фильтр или настройку...
+Find a command...	Найти команду...
+Glitter	Блёстки
+Hair highlight	Блики на волосах
+Hatching	Штриховка
+Hatching blender	Штриховка-смешиватель
+Hatching with white	Штриховка с белым
+Textured hatching	Текстурная штриховка
+How long the picked up color stays in the brush	Как долго подхваченный цвет остаётся в кисти
+How much of the colors under the brush it picks up. 0 = a plain brush.	Сколько цвета под кистью она подхватывает. 0 — обычная кисть.
+Line thickness	Толщина линий
+Lines and dots	Линии и точки
+Lines in one stroke (hatching). 1 = an ordinary brush.	Сколько линий в одном мазке (штриховка). 1 — обычная кисть.
+Lines: all visible layers	Линии: все видимые слои
+Lines: current layer	Линии: текущий слой
+Lines: reference layers	Линии: опорные слои
+Lower: only the high grain takes paint. Higher: the grain fills in.	Меньше — краска ложится только на выступы зерна. Больше — зерно заполняется.
+Move to tab	Переложить во вкладку
+New tab	Новая вкладка
+New tab...	Новая вкладка...
+No closed area inside the shape. Enclose the area more fully or raise "Close gaps".	Внутри фигуры нет замкнутой области. Обведите область полнее или увеличьте «Закрывать щели».
+Second color	Второй цвет
+Size with the lightest pressure	Размер при самом слабом нажиме
+Soft brush	Мягкая кисть
+Soft pencil	Мягкий карандаш
+Stipple	Точки
+Stipple: every dab scatters this many dots inside the brush. 0 = off.	Пунктир: каждый отпечаток рассыпает столько точек внутри кисти. 0 — выключено.
+Texture density	Плотность текстуры
+Texture follows the stroke	Текстура идёт вдоль мазка
+Texture size	Размер текстуры
+The effect is drawn into the pixels of the layer. To keep it changeable, use Layer > Effects instead.	Эффект рисуется прямо в пиксели слоя. Чтобы его можно было менять потом, используйте «Слой → Эффекты».
+The lines drift a little, like drawn by hand	Линии немного гуляют, как нарисованные от руки
+The lines start at different places	Линии начинаются в разных местах
+The second color is the back color of the color panel (X swaps the colors).	Второй цвет — задний цвет на панели «Цвет» (X меняет цвета местами).
+The settings this brush came with	Настройки, с которыми кисть была изначально
+The texture runs along the stroke (hatching lines, bristles) instead of lying still on the paper	Текстура тянется вдоль мазка (линии штриховки, щетина), а не лежит на бумаге
+Thickness variation	Разная толщина
+Try it here	Попробуйте здесь
+Try the brush here with the pen or the mouse.	Попробуйте кисть пером или мышью.
+Water: makes the paint transparent	Вода: делает краску прозрачнее
+Width of each line compared to the space between the lines	Ширина линии относительно расстояния между линиями
+Working...	Считаю...
+Cold press paper	Бумага «холодное прессование»
+Kraft fibers	Крафт с волокнами
+Toothy paper	Шероховатая бумага
+Pencil grain	Карандашное зерно
+Hatch lines	Штрихи
+Crosshatch	Перекрёстная штриховка
+Halftone dots	Растровые точки
+Sand	Песок
+Pencil tip	Кончик-карандаш
+Sparkle	Искра
+Droplet	Капля
+This part of the lines, dots or dabs is painted with the second color (the back color of the color panel), for example white lines in hatching.	Эта часть линий, точек или отпечатков рисуется вторым цветом (задний цвет на панели «Цвет»), например белые линии в штриховке.

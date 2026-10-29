@@ -126,6 +126,8 @@ MaskSurface floodFill(Document* doc, const QPoint& seed, int tolerance, bool sam
 // Where the fill looks for borders.
 enum class FillSource { AllVisible = 0, CurrentLayer = 1, ReferenceLayers = 2 };
 // gapClose: breaks in the borders up to this many px are treated as closed.
+// The pixels the fill looks at (premultiplied ARGB, area.width() per row). False on error.
+bool readFillSource(Document* doc, const QRect& area, FillSource source, const Layer* layer, std::vector<quint32>& px, QString* error);
 MaskSurface floodFillEx(Document* doc, const QPoint& seed, int tolerance, FillSource source, bool contiguous, const Layer* layer,
                         int gapClose, QString* error);
 

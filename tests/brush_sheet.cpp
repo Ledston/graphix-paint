@@ -16,6 +16,7 @@ using namespace gx;
 
 int main(int argc, char** argv) {
     QGuiApplication a(argc, argv);
+    QDir(QDir::tempPath() + "/gx-sheet-textures").removeRecursively();  // always the newest default textures
     TextureLibrary::instance().setRoot(QDir::tempPath() + "/gx-sheet-textures");
     const auto brushes = BrushSettings::defaults();
     const int rowH = 110, W = 1400;
@@ -43,6 +44,7 @@ int main(int argc, char** argv) {
         ctx.layer = layer.get();
         ctx.brush = b;
         ctx.color = QColor(30, 30, 40);
+        ctx.subColor = QColor(255, 220, 90);  // a visible second color on white paper
         ctx.pressureCurve = &curve;
         BrushStroke st(ctx);
         const double y0 = 10 + i * rowH + rowH / 2.0;

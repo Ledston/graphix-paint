@@ -67,6 +67,8 @@
 #include "ui/CanvasView.h"
 #include "ui/ColorPanel.h"
 #include "ui/Dialogs.h"
+#include "ui/CommandPalette.h"
+#include "ui/EffectFilterDialog.h"
 #include "ui/EffectsDialog.h"
 #include "ui/HistoryPanel.h"
 #include "ui/LayerPanel.h"
@@ -230,6 +232,7 @@ QAction* MainWindow::act(const QString& id, const QString& text, const QString& 
     QString label = T(text);
     if (label == text && text.endsWith("...")) label = T(text.chopped(3)) + "...";  // "Curves..." from "Curves"
     auto* a = new QAction(label, this);
+    a->setProperty("en", text);
     if (!icon.isEmpty()) a->setIcon(Theme::icon(icon));
     connect(a, &QAction::triggered, this, [fn] { fn(); });
     Shortcuts::instance().registerAction(a, id, category, key);
@@ -464,6 +467,13 @@ void MainWindow::createActions() {
         QString id = f.first;
         act("filter." + id, f.second + "...", "Filters", {}, [this, id] { filter(id); });
     }
+    // layer effects as filters: set up with sliders, then drawn into the pixels
+    for (const char* key : {"chromatic", "outline", "shadow", "outerGlow", "innerShadow", "innerGlow", "overlay", "gradient", "texture"}) {
+        QString k = key, name;
+        for (const auto& e : effectKeys())
+            if (e.first == k) name = e.second;
+        act("filter.fx." + k, name + "...", "Filters", {}, [this, k] { effectFilter(k); });
+    }
     act("filter.lineart", "Make line art...", "Filters", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L), [this] {
         Document* d = activeDocument();
         if (!d) return;
@@ -596,6 +606,7 @@ void MainWindow::createActions() {
     }, {}, false);
     act("help.data", "Open settings folder", "Help", {}, [] { QDesktopServices::openUrl(QUrl::fromLocalFile(app()->dataDir())); }, {}, false);
     act("help.about", "About GraphiX Paint", "Help", {}, [this] { about(); }, {}, false);
+    act("help.commands", "Find a command...", "Help", QKeySequence(Qt::CTRL | Qt::Key_F), [this] { commandPalette(); }, "zoom", false);
 }
 
 void MainWindow::createMenus() {
@@ -674,6 +685,13 @@ void MainWindow::createMenus() {
     filt->addSeparator();
     QMenu* adjM = filt->addMenu(Theme::icon("adjustment"), T("Adjustments"));
     for (int t = 0; t < int(AdjustmentType::Count); ++t) add(adjM, QStringLiteral("adjust.%1").arg(t));
+    QMenu* fxM = filt->addMenu(Theme::icon("fx"), T("Effects"));
+    fxM->setToolTipsVisible(true);
+    for (const char* id : {"filter.fx.chromatic", "", "filter.fx.outline", "filter.fx.shadow", "filter.fx.outerGlow", "", "filter.fx.innerShadow",
+                           "filter.fx.innerGlow", "", "filter.fx.overlay", "filter.fx.gradient", "filter.fx.texture"}) {
+        if (!*id) fxM->addSeparator();
+        else add(fxM, id);
+    }
     filt->addSeparator();
     for (const char* id : {"filter.gaussian", "filter.motion", "", "filter.unsharp", "filter.sharpen", "", "filter.noise",
                            "filter.pixelate", "filter.screentone", "", "filter.glow"}) {
@@ -749,7 +767,7 @@ void MainWindow::createMenus() {
     }
 
     QMenu* help = mb->addMenu(T("&Help"));
-    for (const char* id : {"help.textures", "help.reloadtextures", "help.data", "", "help.about"}) {
+    for (const char* id : {"help.commands", "", "help.textures", "help.reloadtextures", "help.data", "", "help.about"}) {
         if (!*id) help->addSeparator();
         else add(help, id);
     }
@@ -1301,6 +1319,25 @@ void MainWindow::filter(const QString& id) {
         return;
     }
     AdjustmentDialog dlg(d, l->id, id, this);
+    dlg.exec();
+}
+
+void MainWindow::commandPalette() {
+    auto* p = new CommandPalette(menuBar(), m_actions, this);
+    p->setAttribute(Qt::WA_DeleteOnClose);
+    p->show();
+}
+
+void MainWindow::effectFilter(const QString& key) {
+    Document* d = activeDocument();
+    if (!d) return;
+    app()->tools()->commitPending();
+    Layer* l = d->currentLayer();
+    if (!l || !l->isRaster()) {
+        app()->showStatus(T("Filters work on pixel layers."));
+        return;
+    }
+    EffectFilterDialog dlg(d, l->id, key, this);
     dlg.exec();
 }
 

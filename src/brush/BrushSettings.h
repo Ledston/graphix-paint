@@ -23,6 +23,7 @@ QString brushEngineName(BrushEngine e);
 struct BrushSettings {
     QString name = "Pen";
     QString iconKey = "pen";  // which icon the tool palette shows
+    QString group;            // tab of the brush palette ("Basic", "Paint", "Hatching", "Effects", "Erase")
     BrushEngine engine = BrushEngine::Paint;
 
     // Size
@@ -57,6 +58,8 @@ struct BrushSettings {
     double textureScale = 1.0;
     bool textureInvert = false;
     bool textureEachDab = false;  // apply per dab (darker overlaps) instead of per stroke
+    double textureDensity = 0.5;  // 0 = only the brightest grain takes paint, 1 = the grain fills in (0.5 = as drawn)
+    bool textureFollowsStroke = false;  // the texture runs along the stroke (hatching, bristles) instead of lying on the paper
 
     // Mixing (Mix and Smudge engines)
     double blending = 0.0;      // how much of the canvas color is picked up
@@ -71,6 +74,19 @@ struct BrushSettings {
     double taperIn = 0.0;       // pixels over which a stroke grows from zero
     double taperOut = 0.0;      // pixels over which a stroke ends thin (applied with the stabilizer tail)
 
+    // Line bundle (hatching): one stroke draws several parallel lines across the brush size
+    int bundleLines = 1;               // 1 = an ordinary brush
+    double bundleThickness = 0.4;      // line width as a part of the space between lines
+    double bundleThicknessJitter = 0.3;
+    double bundleWobble = 0.15;        // lines drift a little, like drawn by hand
+    double bundleLengthJitter = 0.4;   // lines start at different places
+    // Particles (stipple): every dab scatters this many dots inside the brush size
+    int particles = 0;                 // 0 = off
+    double particleSize = 0.1;         // dot size as a part of the brush size
+    // Second color (the background color of the color panel): this part of the lines,
+    // dots or dabs is painted with it (white lines in hatching, highlights)
+    double subColorShare = 0.0;
+
     // Paint behaviour
     bool keepOpacity = false;   // only paint where the layer already has paint
     BlendMode paintMode = BlendMode::Normal;
@@ -82,6 +98,10 @@ struct BrushSettings {
     QJsonObject toJson() const;
     static BrushSettings fromJson(const QJsonObject& o);
     static QVector<BrushSettings> defaults();
+    // brushes added in later versions (given to existing brush palettes once)
+    static QVector<BrushSettings> defaultsSince(int version);
+    static QStringList groups();                       // the built-in palette tabs, in order
+    static QString defaultGroupFor(const QString& name);  // for palettes saved before tabs existed
 };
 
 class PressureCurve {

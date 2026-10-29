@@ -63,6 +63,9 @@ public:
     Section(const QString& title, QWidget* parent = nullptr, bool open = true);
     QVBoxLayout* body() const { return m_body; }
     void setOpen(bool on);
+    bool isOpen() const;
+    // remembers open / closed between runs under this key
+    void setStateKey(const QString& key);
 
 private:
     QToolButton* m_head;

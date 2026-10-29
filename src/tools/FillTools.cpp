@@ -4,6 +4,7 @@
 #include <QComboBox>
 #include <QFormLayout>
 #include <QLabel>
+#include <QPainter>
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QtMath>
@@ -165,14 +166,120 @@ LassoFillTool::LassoFillTool(QObject* p) : LassoSelectTool(p) {
     m_icon = "lasso-fill";
 }
 
+// "Enclose and fill": the closed areas of the line art that lie (mostly) inside the shape are
+// filled whole, also where they reach a little outside it, and the fill goes under the lines.
+static MaskSurface enclosedAreas(Document* d, const QPolygonF& poly, FillSource source, const Layer* layer, int gapClose, int under, QString* error) {
+    MaskSurface out(0);
+    const QRect pb = poly.boundingRect().toAlignedRect();
+    const int margin = std::max(16, std::max(pb.width(), pb.height()) / 4);  // to see how far an area reaches outside
+    QRect area = pb.adjusted(-margin, -margin, margin, margin) & d->bounds();
+    if (d->hasSelection()) area &= d->selectionBounds().adjusted(-margin, -margin, margin, margin);
+    if (area.isEmpty()) return out;
+    const int W = area.width(), H = area.height();
+    std::vector<quint32> px;
+    if (!readFillSource(d, area, source, layer, px, error)) return out;
+    const size_t N = size_t(W) * size_t(H);
+    // the lines: opaque pixels of line layers; dark pixels when looking at the whole picture
+    std::vector<uint8_t> line(N);
+    for (size_t i = 0; i < N; ++i) {
+        const quint32 c = px[i];
+        const int a = int(c >> 24);
+        if (source == FillSource::AllVisible) {
+            // over white paper: luminance of the shown color
+            const int r = int((c >> 16) & 255) + (255 - a), g = int((c >> 8) & 255) + (255 - a), b = int(c & 255) + (255 - a);
+            line[i] = (r * 3 + g * 6 + b) / 10 < 110 ? 1 : 0;
+        } else {
+            line[i] = a > 110 ? 1 : 0;
+        }
+    }
+    // gaps up to gapClose px count as closed
+    std::vector<uint8_t> wall = line;
+    if (gapClose > 0) {
+        std::vector<float> d2;
+        distanceTransform(line, W, H, d2);
+        const float r2 = float(gapClose) * float(gapClose) * 0.25f;
+        for (size_t i = 0; i < N; ++i) wall[i] = d2[i] <= r2 ? 1 : 0;
+    }
+    // the shape itself
+    QImage shape(W, H, QImage::Format_Grayscale8);
+    shape.fill(0);
+    {
+        QPainter sp(&shape);
+        sp.setPen(Qt::NoPen);
+        sp.setBrush(Qt::white);
+        sp.drawPolygon(poly.translated(-area.left(), -area.top()));
+    }
+    // the open areas, one by one
+    std::vector<int> label(N, -1);
+    std::vector<uint8_t> fill(N, 0);
+    std::vector<int> stack;
+    std::vector<int> members;
+    for (size_t start = 0; start < N; ++start) {
+        if (wall[start] || label[start] >= 0) continue;
+        members.clear();
+        stack.clear();
+        stack.push_back(int(start));
+        label[start] = 1;
+        qint64 total = 0, inside = 0;
+        bool touchesEdge = false;
+        while (!stack.empty()) {
+            const int i = stack.back();
+            stack.pop_back();
+            members.push_back(i);
+            const int x = i % W, y = i / W;
+            ++total;
+            if (shape.constScanLine(y)[x]) ++inside;
+            if (x == 0 || y == 0 || x == W - 1 || y == H - 1) touchesEdge = true;
+            const int nb[4] = {x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, y > 0 ? i - W : -1, y < H - 1 ? i + W : -1};
+            for (int j : nb)
+                if (j >= 0 && !wall[size_t(j)] && label[size_t(j)] < 0) {
+                    label[size_t(j)] = 1;
+                    stack.push_back(j);
+                }
+        }
+        // mostly inside the shape (an area running off the searched area is the background)
+        const bool keep = inside > 0 && inside * 10 >= total * 6 && !(touchesEdge && inside * 10 < total * 9);
+        if (keep)
+            for (int i : members) fill[size_t(i)] = 1;
+    }
+    // grow back into the thickened lines and under the lines
+    const int grow = (gapClose + 1) / 2 + std::max(0, under);
+    if (grow > 0) {
+        std::vector<float> d2;
+        distanceTransform(fill, W, H, d2);
+        const float r2 = float(grow) * float(grow);
+        for (size_t i = 0; i < N; ++i)
+            if (!fill[i] && wall[i] && d2[i] <= r2) fill[i] = 1;
+    }
+    std::vector<quint8> m(N);
+    for (size_t i = 0; i < N; ++i) m[i] = fill[i] ? 255 : 0;
+    out.writeRect(area, m.data(), W);
+    out.optimize();
+    return out;
+}
+
 void LassoFillTool::apply(CanvasView* v, const QPolygonF& poly, Qt::KeyboardModifiers mods) {
     Document* d = v->doc();
     RasterLayer* l = paintableLayer(d);
     if (!l) return;
-    QPainterPath p;
-    p.addPolygon(poly);
-    p.closeSubpath();
-    MaskSurface m = ops::rasterizePath(p, d->bounds(), antialias);
+    MaskSurface m(0);
+    if (mode == 1) {
+        QString err;
+        m = enclosedAreas(d, poly, FillSource(source), l, gapClose, under, &err);
+        if (!err.isEmpty()) {
+            app()->showStatus(T(err), 5000);
+            return;
+        }
+        if (m.exactBounds().isEmpty()) {
+            app()->showStatus(T("No closed area inside the shape. Enclose the area more fully or raise \"Close gaps\"."), 5000);
+            return;
+        }
+    } else {
+        QPainterPath p;
+        p.addPolygon(poly);
+        p.closeSubpath();
+        m = ops::rasterizePath(p, d->bounds(), antialias);
+    }
     bool erase = eraseMode || (mods & Qt::AltModifier) || app()->transparentColor();
     paintThroughMask(d, l, m, app()->foreground(), opacity, erase, erase ? T("Lasso erase") : T("Lasso fill"));
 }
@@ -192,6 +299,40 @@ QWidget* LassoFillTool::createOptions(QWidget* parent) {
     auto* er = new QCheckBox(T("Erase instead of filling"), w);
     er->setChecked(eraseMode);
     connect(er, &QCheckBox::toggled, this, [this](bool on) { eraseMode = on; });
+    auto* modeBox = new QComboBox(w);
+    modeBox->addItem(T("Fill the whole shape"), 0);
+    modeBox->addItem(T("Fill the closed areas inside"), 1);
+    modeBox->setCurrentIndex(mode);
+    modeBox->setToolTip(T("Closed areas: draw roughly around the parts to color; every area of the line art that is mostly inside is filled up to the lines, without gaps under them."));
+    f->addWidget(modeBox);
+    auto* enclosed = new QWidget(w);
+    auto* ef = new QVBoxLayout(enclosed);
+    ef->setContentsMargins(0, 0, 0, 0);
+    auto* src = new QComboBox(enclosed);
+    src->addItem(T("Lines: reference layers"), int(FillSource::ReferenceLayers));
+    src->addItem(T("Lines: current layer"), int(FillSource::CurrentLayer));
+    src->addItem(T("Lines: all visible layers"), int(FillSource::AllVisible));
+    src->setCurrentIndex(std::max(0, src->findData(source)));
+    connect(src, &QComboBox::activated, this, [this, src](int i) { source = src->itemData(i).toInt(); });
+    ef->addWidget(src);
+    auto* gap = new ValueBar(T("Close gaps"), 0, 30, 0, enclosed);
+    gap->setSuffix(" px");
+    gap->setValue(gapClose);
+    connect(gap, &ValueBar::valueChanged, this, [this](double v) { gapClose = int(v); });
+    ef->addWidget(gap);
+    auto* und = new ValueBar(T("Go under the lines"), 0, 10, 0, enclosed);
+    und->setSuffix(" px");
+    und->setValue(under);
+    connect(und, &ValueBar::valueChanged, this, [this](double v) { under = int(v); });
+    ef->addWidget(und);
+    enclosed->setVisible(mode == 1);
+    connect(modeBox, &QComboBox::activated, this, [this, modeBox, enclosed, aa](int i) {
+        mode = modeBox->itemData(i).toInt();
+        enclosed->setVisible(mode == 1);
+        aa->setVisible(mode == 0);
+    });
+    aa->setVisible(mode == 0);
+    f->addWidget(enclosed);
     f->addWidget(op);
     f->addWidget(aa);
     f->addWidget(er);

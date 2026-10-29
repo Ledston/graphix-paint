@@ -320,6 +320,78 @@ void drawIcon(QPainter& p, const QString& n, const QColor& col, const QColor& ac
         p.setPen(q);
         p.drawPath(s);
         p.setPen(pen);
+    } else if (n == "hatching") {
+        // a bundle of lines, one of them in the second color
+        for (int i = 0; i < 5; ++i) {
+            p.setPen(QPen(i == 3 ? acc : col, 1.3, Qt::SolidLine, Qt::RoundCap));
+            line(4 + i * 3.2, 20, 9 + i * 3.2, 4);
+        }
+        p.setPen(pen);
+    } else if (n == "stipple") {
+        p.setPen(Qt::NoPen);
+        const QPointF pts[] = {{6, 6}, {11, 5}, {17, 7}, {8, 11}, {14, 11}, {19, 13}, {5, 16}, {11, 16}, {16, 18}, {8, 20}, {13, 21}};
+        int i = 0;
+        for (const QPointF& pt : pts) {
+            p.setBrush(i % 4 == 2 ? acc : col);
+            p.drawEllipse(pt, 1.2 + (i % 3) * 0.35, 1.2 + (i % 3) * 0.35);
+            ++i;
+        }
+        p.setBrush(Qt::NoBrush);
+        p.setPen(pen);
+    } else if (n == "charcoal") {
+        poly({{5, 16}, {15, 6}, {18.5, 9.5}, {8.5, 19.5}}, true, col);
+        p.setPen(QPen(acc, 1.0));
+        for (int i = 0; i < 4; ++i) line(3 + i * 1.6, 21 - i * 0.4, 6.5 + i * 1.6, 20.5 - i * 0.4);
+        p.setPen(pen);
+    } else if (n == "blender") {
+        QPainterPath f;
+        f.addRoundedRect(QRectF(13, 3, 6, 11), 3, 3);
+        path(f);
+        QLinearGradient g(QPointF(3, 18), QPointF(20, 18));
+        g.setColorAt(0, acc);
+        g.setColorAt(1, col);
+        p.setPen(QPen(QBrush(g), 3.0, Qt::SolidLine, Qt::RoundCap));
+        line(4, 18.5, 19, 18.5);
+        p.setPen(pen);
+    } else if (n == "glow") {
+        QRadialGradient g(QPointF(12, 12), 9);
+        QColor a1 = acc;
+        g.setColorAt(0, a1);
+        a1.setAlpha(0);
+        g.setColorAt(1, a1);
+        p.setPen(Qt::NoPen);
+        p.setBrush(g);
+        p.drawEllipse(QPointF(12, 12), 9, 9);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(pen);
+        line(12, 3, 12, 6);
+        line(12, 18, 12, 21);
+        line(3, 12, 6, 12);
+        line(18, 12, 21, 12);
+    } else if (n == "highlight") {
+        QPainterPath h;
+        h.moveTo(4, 18);
+        h.cubicTo(8, 8, 14, 6, 20, 6);
+        path(h);
+        p.setPen(QPen(acc, 1.6, Qt::SolidLine, Qt::RoundCap));
+        QPainterPath h2;
+        h2.moveTo(7, 19);
+        h2.cubicTo(10, 12, 15, 10, 20, 10);
+        p.drawPath(h2);
+        p.setPen(pen);
+    } else if (n == "droplet") {
+        QPainterPath d;
+        d.moveTo(12, 3);
+        d.cubicTo(12, 3, 5.5, 11, 5.5, 15);
+        d.cubicTo(5.5, 18.8, 8.5, 21.5, 12, 21.5);
+        d.cubicTo(15.5, 21.5, 18.5, 18.8, 18.5, 15);
+        d.cubicTo(18.5, 11, 12, 3, 12, 3);
+        path(d);
+        p.setPen(Qt::NoPen);
+        p.setBrush(acc);
+        p.drawEllipse(QPointF(9.5, 15), 1.6, 2.4);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(pen);
     } else if (n == "select-rect") {
         dashed(true);
         p.drawRect(QRectF(4, 5, 16, 14));

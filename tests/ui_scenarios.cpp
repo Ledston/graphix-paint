@@ -24,6 +24,16 @@
 #include <QToolButton>
 #include "ui/MainWindow.h"
 #include "ui/ReferenceOverlay.h"
+#include "ui/CommandPalette.h"
+#include <QMenuBar>
+#include "tools/FillTools.h"
+#include <QPainterPath>
+#include "ui/EffectFilterDialog.h"
+#include "ui/BrushEditor.h"
+#include "ui/BrushPreview.h"
+#include "ui/ToolPanel.h"
+#include "ui/Widgets.h"
+#include "app/BrushLibrary.h"
 #include "ui/ReferencePanel.h"
 #include "app/I18n.h"
 #include "app/Recorder.h"
@@ -562,6 +572,234 @@ int main(int argc, char** argv) {
         }
         Recorder::instance().setNewMode(Recorder::Mode::Canvas);
     }
+
+    scenario("brushes: hatching, stipple, two colors, settings window", [](MainWindow& w) {
+        Document* d = view()->doc();
+        BrushLibrary* lib = app()->brushes();
+        const int hatch = lib->indexOfName("Hatching");
+        const int white = lib->indexOfName("Hatching with white");
+        const int stip = lib->indexOfName("Stipple");
+        CHECK(hatch >= 0 && white >= 0 && stip >= 0);
+        if (hatch < 0 || white < 0 || stip < 0) return;
+        // hatching: one stroke makes several separate lines across the stroke
+        app()->tools()->selectBrushSlot(hatch);
+        pump(250);  // a new view ignores the mouse for a moment (pen events come first)
+        app()->setForeground(Qt::black);
+        app()->setBackground(Qt::white);
+        dragCanvas(QPointF(100, 300), QPointF(700, 300), Qt::NoModifier, 60);
+        Layer* l = d->currentLayer();
+        {
+            QRect eb = l->displaySurface() ? l->displaySurface()->exactBounds() : QRect();
+            std::fprintf(stderr, "INFO hatching stroke bounds %d,%d %dx%d, brush %s lines %d\n", eb.x(), eb.y(), eb.width(), eb.height(),
+                         qPrintable(app()->brushes()->current().name), app()->brushes()->current().bundleLines);
+        }
+        int runs = 0;
+        {
+            QImage img = surfaceToImage(*l->displaySurface(), QRect(400, 250, 1, 100));
+            bool in = false;
+            for (int y = 0; y < img.height(); ++y) {
+                const bool ink = qAlpha(img.pixel(0, y)) > 100;
+                if (ink && !in) ++runs;
+                in = ink;
+            }
+        }
+        std::fprintf(stderr, "INFO hatching lines across: %d\n", runs);
+        CHECK(runs >= 4);
+        // the second color: white lines over a black block
+        auto* r = static_cast<RasterLayer*>(l);
+        r->pixels.fillRect(QRect(0, 400, 800, 120), 0xff000000u);
+        d->pixelsChanged(QRect(0, 400, 800, 120), l);
+        app()->tools()->selectBrushSlot(white);
+        dragCanvas(QPointF(100, 460), QPointF(700, 460), Qt::NoModifier, 60);
+        {
+            QImage img = surfaceToImage(*l->displaySurface(), QRect(100, 400, 600, 120));
+            int whites = 0;
+            for (int y = 0; y < img.height(); ++y)
+                for (int x = 0; x < img.width(); ++x) whites += qGray(img.pixel(x, y)) > 120 && qAlpha(img.pixel(x, y)) > 200;
+            std::fprintf(stderr, "INFO white pixels from the second color: %d\n", whites);
+            CHECK(whites > 150);
+        }
+        // stipple: separate dots
+        app()->tools()->selectBrushSlot(stip);
+        dragCanvas(QPointF(100, 150), QPointF(700, 150), Qt::NoModifier, 60);
+        {
+            QImage img = surfaceToImage(*l->displaySurface(), QRect(100, 100, 600, 100));
+            int ink = 0;
+            for (int y = 0; y < img.height(); ++y)
+                for (int x = 0; x < img.width(); ++x) ink += qAlpha(img.pixel(x, y)) > 128;
+            const double share = double(ink) / (img.width() * img.height());
+            std::fprintf(stderr, "INFO stipple covers %.3f\n", share);
+            CHECK(share > 0.005 && share < 0.4);
+        }
+        // the settings window: a change applies to the brush, Cancel brings it back
+        const BrushSettings before = lib->at(hatch);
+        {
+            BrushEditorDialog dlg(hatch, &w);
+            dlg.show();
+            pump(150);
+            auto* pad = dlg.findChild<BrushTestPad*>();
+            CHECK(pad != nullptr);
+            if (pad) {
+                auto send = [pad](QEvent::Type t, QPointF p, Qt::MouseButtons bs) {
+                    QMouseEvent e(t, p, pad->mapToGlobal(p), Qt::LeftButton, bs, Qt::NoModifier);
+                    QCoreApplication::sendEvent(pad, &e);
+                };
+                send(QEvent::MouseButtonPress, QPointF(30, 100), Qt::LeftButton);
+                for (int i = 1; i <= 30; ++i) send(QEvent::MouseMove, QPointF(30 + i * 10, 100 + std::sin(i * 0.3) * 30), Qt::LeftButton);
+                send(QEvent::MouseButtonRelease, QPointF(330, 100), Qt::NoButton);
+                pump(120);
+            }
+            const QList<ValueBar*> bars = dlg.findChildren<ValueBar*>();
+            ValueBar* linesBar = nullptr;
+            for (ValueBar* b : bars)
+                if (b->toolTip() == T("Lines in one stroke (hatching). 1 = an ordinary brush.")) linesBar = b;
+            CHECK(linesBar != nullptr);
+            if (linesBar) {
+                linesBar->setValue(12);
+                Q_EMIT linesBar->valueChanged(12);
+            }
+            pump(150);
+            CHECK(lib->at(hatch).bundleLines == 12);
+            if (qEnvironmentVariableIsSet("GX_SHOTS")) dlg.grab().save(qEnvironmentVariable("GX_SHOTS") + "/brush_editor.png");
+            dlg.reject();
+        }
+        CHECK(lib->at(hatch).bundleLines == before.bundleLines);
+        // the preview draws something
+        QImage pv = renderBrushPreview(lib->at(hatch), QSize(200, 60), Qt::black, Qt::white, true);
+        int dark = 0;
+        for (int y = 0; y < pv.height(); ++y)
+            for (int x = 0; x < pv.width() / 2; ++x) dark += qGray(pv.pixel(x, y)) < 100;
+        CHECK(dark > 30);
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) {
+            if (auto* tp = w.findChild<ToolPanel*>()) tp->grab().save(qEnvironmentVariable("GX_SHOTS") + "/tool_panel.png");
+        }
+        app()->tools()->selectBrushSlot(0);
+    }, w);
+
+    scenario("effects as filters: preview, apply, cancel, undo", [](MainWindow& w) {
+        Document* d = view()->doc();
+        auto* l = static_cast<RasterLayer*>(d->currentLayer());
+        l->pixels.fillRect(QRect(300, 200, 200, 150), 0xff2050c0u);
+        d->pixelsChanged(QRect(300, 200, 200, 150), l);
+        const long long before = opaquePixels(l);
+        auto waitPreview = [](EffectFilterDialog&) {
+            QThreadPool::globalInstance()->waitForDone(5000);
+            pump(400);
+            QThreadPool::globalInstance()->waitForDone(5000);
+            pump(200);
+        };
+        {   // outline: more pixels around the shape
+            EffectFilterDialog dlg(d, l->id, "outline", &w);
+            dlg.show();
+            waitPreview(dlg);
+            CHECK(l->preview != nullptr);  // the canvas shows the result before OK
+            CHECK(opaquePixels(l) > before);
+            dlg.accept();
+        }
+        CHECK(!l->preview);
+        const long long withOutline = opaquePixels(l);
+        CHECK(withOutline > before);
+        d->undo();
+        l = static_cast<RasterLayer*>(d->currentLayer());
+        CHECK(opaquePixels(l) == before);
+        {   // cancel: nothing changes
+            EffectFilterDialog dlg(d, l->id, "chromatic", &w);
+            dlg.show();
+            waitPreview(dlg);
+            dlg.reject();
+        }
+        CHECK(!l->preview && opaquePixels(l) == before);
+        {   // chromatic aberration: the edges get colored fringes
+            EffectFilterDialog dlg(d, l->id, "chromatic", &w);
+            dlg.show();
+            waitPreview(dlg);
+            dlg.accept();
+        }
+        QImage img = surfaceToImage(l->pixels, QRect(290, 190, 220, 170));
+        bool fringe = false;
+        for (int y = 0; y < img.height() && !fringe; ++y)
+            for (int x = 0; x < img.width(); ++x) {
+                QColor c = QColor::fromRgba(img.pixel(x, y));
+                if (c.alpha() > 40 && c.red() > c.blue() + 40) { fringe = true; break; }
+            }
+        CHECK(fringe);
+    }, w);
+
+    scenario("lasso fill: closed areas inside the shape", [](MainWindow&) {
+        Document* d = view()->doc();
+        pump(250);
+        // line art on a reference layer: a circle with a small gap, and a line through the background
+        auto lines = std::make_shared<RasterLayer>();
+        lines->id = d->newLayerId();
+        lines->name = "Lines";
+        lines->reference = true;
+        {
+            QImage img(800, 600, QImage::Format_ARGB32_Premultiplied);
+            img.fill(Qt::transparent);
+            QPainter p(&img);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setPen(QPen(Qt::black, 4));
+            p.drawArc(QRectF(250, 150, 300, 300), 5 * 16, 350 * 16);  // a gap of about 10 degrees (~25 px)... too wide
+            p.drawEllipse(QRectF(270, 170, 260, 260));                 // inner closed circle
+            p.drawLine(QPointF(0, 520), QPointF(800, 520));
+            p.end();
+            imageToSurface(img, lines->pixels, QPoint(0, 0));
+        }
+        d->root()->insert(2, lines);
+        d->structureChanged();
+        Layer* fillLayer = d->currentLayer();  // "Layer 1", under the lines
+        auto* lf = static_cast<LassoFillTool*>(app()->tools()->tool("lasso-fill"));
+        CHECK(lf != nullptr);
+        if (!lf) return;
+        lf->mode = 1;
+        lf->source = int(FillSource::ReferenceLayers);
+        lf->gapClose = 3;
+        lf->under = 2;
+        app()->tools()->setCurrent("lasso-fill");
+        app()->setForeground(QColor(220, 60, 60));
+        // a rough loop around the inner circle (it also cuts through the ring between the circles)
+        QVector<QPointF> loop;
+        for (int i = 0; i <= 48; ++i) {
+            const double a = i * 2 * M_PI / 48;
+            loop << QPointF(400 + std::cos(a) * 145, 300 + std::sin(a) * 145);
+        }
+        mouse(QEvent::MouseButtonPress, loop.first(), Qt::LeftButton);
+        for (const QPointF& p : loop) mouse(QEvent::MouseMove, p, Qt::LeftButton);
+        mouse(QEvent::MouseButtonRelease, loop.last(), Qt::NoButton);
+        pump(100);
+        auto at = [&](int x, int y) { return QColor::fromRgba(surfaceToImage(*fillLayer->displaySurface(), QRect(x, y, 1, 1)).pixel(0, 0)); };
+        CHECK(at(400, 300).alpha() > 200 && at(400, 300).red() > 180);  // the middle of the closed circle
+        CHECK(at(400, 172).alpha() > 200);                               // under the line of the circle
+        CHECK(at(400, 100).alpha() == 0);                                // the background stays empty
+        CHECK(at(100, 300).alpha() == 0);
+        app()->tools()->setCurrent("brush");
+    }, w);
+
+    scenario("find a command", [](MainWindow& w) {
+        QHash<QString, QAction*> acts;
+        for (QAction* a : w.findChildren<QAction*>())
+            if (!a->property("en").toString().isEmpty()) acts.insert(a->property("en").toString(), a);
+        CommandPalette pal(w.menuBar(), acts, &w);
+        pal.show();
+        pump(50);
+        CHECK(pal.resultCount() > 50);  // everything when nothing is typed
+        pal.setFilterText("chromatic");
+        pump(20);
+        CHECK(pal.resultCount() >= 1);
+        pal.setFilterText("zzzz-nothing");
+        pump(20);
+        CHECK(pal.resultCount() == 0);
+        // running a command: "Rule of thirds" turns the guide on
+        const bool thirds = app()->prefs().showThirds;
+        pal.setFilterText("Rule of thirds");
+        pump(20);
+        CHECK(pal.resultCount() >= 1);
+        CHECK(pal.runCurrent());
+        pump(50);
+        CHECK(app()->prefs().showThirds != thirds);
+        app()->prefs().showThirds = thirds;
+        app()->preferencesChanged();
+    }, w);
 
     scenario("reference over everything", [](MainWindow& w) {
         auto* panel = w.findChild<ReferencePanel*>();

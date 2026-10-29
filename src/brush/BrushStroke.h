@@ -23,6 +23,7 @@ struct StrokeContext {
     bool targetMask = false;      // paint into the layer mask instead of the pixels
     BrushSettings brush;
     QColor color = Qt::black;
+    QColor subColor = Qt::white;  // the second color (lines / dots / dabs given to it by subColorShare)
     bool transparentColor = false;  // SAI style "transparent" color: paints transparency
     const PressureCurve* pressureCurve = nullptr;
     QVector<QTransform> symmetry;  // extra mirrored copies
@@ -47,27 +48,49 @@ private:
         double taper = 1.0;
         double cum = 0;  // path length up to here
     };
+    // paint picked up by the brush (mixing engines)
+    struct Carry {
+        float c[4] = {0, 0, 0, 0};
+        bool has = false;
+    };
     struct Emitter {
         QTransform xf;
         PathPoint last;
         bool started = false;
         double residual = 0;
         double traveled = 0;
-        float carried[4] = {0, 0, 0, 0};
-        bool hasCarried = false;
+        Carry carry;
+        std::vector<Carry> lineCarry;  // one per line of a bundle
         QPointF lastDir{1, 0};
+    };
+    // one line of a hatching bundle, chosen when the stroke starts
+    struct Line {
+        double offset = 0;   // across the brush, -0.5..0.5 of the size
+        double widthK = 1;
+        double startPx = 0;  // starts this far into the stroke
+        double phase = 0, freq = 0;
+        bool sub = false;    // painted with the second color
+    };
+    // where a dab sits on the stroke, for textures that run along it
+    struct TexFrame {
+        bool on = false;
+        double cx = 0, cy = 0, dx = 1, dy = 0, along = 0, across = 0;
     };
 
     void feedPath(const PathPoint& p);
     void emitTo(Emitter& e, const PathPoint& p);
     void dab(Emitter& e, const PathPoint& p, const QPointF& dir);
-    void bufferedDab(const DabParams& d, float density);
-    void directDab(Emitter& e, const DabParams& d, float density, float pressure);
+    void put(const DabParams& d, float density, bool sub, const TexFrame& tf, Carry& carry, float pressure);
+    void bufferedDab(const DabParams& d, float density, bool sub, const TexFrame& tf);
+    void directDab(Carry& carry, const float* base, const DabParams& d, float density, float pressure, const TexFrame& tf);
+    double stepFor(double pressure, double taper) const;
     void flushPreview();
     void notify();
     double diameterFor(double pressure, double taper) const;
     float mapPressure(double p) const;
     float textureAt(int x, int y) const;
+    float textureAlong(int x, int y, const TexFrame& tf) const;
+    float textureValue(float raw) const;
     void jitterColor(float* rgb);
 
     StrokeContext m_ctx;
@@ -80,6 +103,10 @@ private:
     bool m_hasLast = false;
 
     FloatSurface m_mask{0.f};          // stroke coverage (buffered engines)
+    FloatSurface m_mask2{0.f};         // coverage of the second color
+    bool m_useSub = false;             // something was painted with the second color
+    std::vector<Line> m_lines;
+    float m_sub[3] = {1, 1, 1};
     QRect m_dirty;                     // since last notify
     QRect m_previewDirty;              // stroke mask changed, preview not rebuilt yet
     QRect m_bounds;

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "app/App.h"
 #include "app/I18n.h"
 #include "core/Adjustments.h"
 #include "ui/Theme.h"
@@ -191,6 +192,15 @@ void Section::setOpen(bool on) {
     m_head->setChecked(on);
     m_head->setArrowType(on ? Qt::DownArrow : Qt::RightArrow);
     m_content->setVisible(on);
+    const QString key = property("stateKey").toString();
+    if (!key.isEmpty() && app()) app()->settings().setValue("ui/sections/" + key, on);
+}
+
+bool Section::isOpen() const { return m_head->isChecked(); }
+
+void Section::setStateKey(const QString& key) {
+    setProperty("stateKey", key);
+    if (app() && app()->settings().contains("ui/sections/" + key)) setOpen(app()->settings().value("ui/sections/" + key).toBool());
 }
 
 // ============================================================================ ColorButton
