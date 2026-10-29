@@ -4,6 +4,7 @@
 #include <QComboBox>
 #include <QFormLayout>
 #include <QLabel>
+#include <QPainterPathStroker>
 #include <QPushButton>
 #include <QtMath>
 #include <cmath>
@@ -33,6 +34,19 @@ void RulerTool::press(const PointerEvent& e) {
             double dist = QLineF(e.view->toWidget(d->perspective.vp[i]), e.widgetPos).length();
             if (dist < best) { best = dist; m_drag = i; m_off = d->perspective.vp[i] - e.pos; }
         }
+    if (d->ruler.isOn()) {
+        const QVector<QPointF> hs = d->ruler.handles();
+        for (int i = 0; i < hs.size(); ++i) {
+            const double dist = QLineF(e.view->toWidget(hs[i]), e.widgetPos).length();
+            if (dist < best) { best = dist; m_drag = 20 + i; m_off = hs[i] - e.pos; }
+        }
+        // dragging the line of a straight / parallel ruler moves it whole
+        if (m_drag < 0 && (d->ruler.kind == Ruler::Straight || d->ruler.kind == Ruler::Parallel || d->ruler.kind == Ruler::Curve)) {
+            QPainterPathStroker st;
+            st.setWidth(12 / e.view->zoom());
+            if (st.createStroke(d->ruler.mainPath()).contains(e.pos)) { m_drag = 30; m_off = e.pos; }
+        }
+    }
     if (d->symmetry.isOn()) {
         double dc = QLineF(e.view->toWidget(d->symmetry.center), e.widgetPos).length();
         if (dc < best) { best = dc; m_drag = 10; m_off = d->symmetry.center - e.pos; }
@@ -44,7 +58,14 @@ void RulerTool::press(const PointerEvent& e) {
 void RulerTool::move(const PointerEvent& e) {
     if (m_drag < 0 || !m_view) return;
     Document* d = m_view->doc();
-    if (m_drag <= 2) d->perspective.vp[m_drag] = e.pos + m_off;
+    if (m_drag >= 20 && m_drag < 30) d->ruler.setHandle(m_drag - 20, e.pos + m_off, e.mods & Qt::ShiftModifier);
+    else if (m_drag == 30) {
+        const QPointF dd = e.pos - m_off;
+        d->ruler.a += dd;
+        d->ruler.b += dd;
+        d->ruler.c += dd;
+        m_off = e.pos;
+    } else if (m_drag <= 2) d->perspective.vp[m_drag] = e.pos + m_off;
     else if (m_drag == 10) d->symmetry.center = e.pos + m_off;
     else if (m_drag == 11) {
         QPointF v = e.pos - d->symmetry.center;
@@ -71,6 +92,15 @@ void RulerTool::drawOverlay(QPainter& p, CanvasView* v) {
             p.drawText(QRectF(w.x() - 7, w.y() - 7, 14, 14), Qt::AlignCenter, QString::number(i + 1));
         }
     }
+    if (d->ruler.isOn()) {
+        const QVector<QPointF> hs = d->ruler.handles();
+        for (int i = 0; i < hs.size(); ++i) {
+            const QPointF w = v->toWidget(hs[i]);
+            p.setPen(QPen(Qt::black, 1.5));
+            p.setBrush(i == 0 ? d->ruler.color : QColor(Qt::white));
+            p.drawRect(QRectF(w.x() - 5, w.y() - 5, 10, 10));
+        }
+    }
     if (d->symmetry.isOn()) {
         QPointF c = v->toWidget(d->symmetry.center), h = v->toWidget(symHandle(d->symmetry, v->zoom()));
         p.setPen(QPen(QColor(255, 80, 160), 1.5));
@@ -88,6 +118,16 @@ QWidget* RulerTool::createOptions(QWidget* parent) {
     m_opts = w;
     auto* f = new QFormLayout(w);
     f->setContentsMargins(6, 6, 6, 6);
+    auto* rt = new QLabel(T("Ruler"), w);
+    rt->setObjectName("sectionTitle");
+    f->addRow(rt);
+    auto* kind = new QComboBox(w);
+    for (const QString& k : Ruler::kindNames()) kind->addItem(T(k));
+    auto* rsnap = new QCheckBox(T("Snap strokes to the ruler"), w);
+    auto* rreset = new QPushButton(T("Put the ruler in the middle"), w);
+    f->addRow(T("Kind"), kind);
+    f->addRow(rsnap);
+    f->addRow(rreset);
     auto* title = new QLabel(T("Perspective"), w);
     title->setObjectName("sectionTitle");
     f->addRow(title);
@@ -112,7 +152,8 @@ QWidget* RulerTool::createOptions(QWidget* parent) {
     f->addRow(count);
     f->addRow(mirror);
     f->addRow(center);
-    auto* hint = new QLabel(T("Drag the numbered points to place vanishing points. Drag the pink dot to move the symmetry center, "
+    auto* hint = new QLabel(T("Drag the square handles to shape the ruler (Shift: steps of 45° / a circle), the line itself to move it. "
+                              "Drag the numbered points to place vanishing points. Drag the pink dot to move the symmetry center, "
                               "the white dot to rotate the axis (Shift: 15° steps)."), w);
     hint->setWordWrap(true);
     hint->setObjectName("sectionTitle");
@@ -122,7 +163,11 @@ QWidget* RulerTool::createOptions(QWidget* parent) {
         Document* d = app()->activeDocument();
         w->setEnabled(d != nullptr);
         if (!d) return;
-        QSignalBlocker b1(on), b2(snap), b3(pts), b4(sym), b6(mirror);
+        QSignalBlocker b1(on), b2(snap), b3(pts), b4(sym), b6(mirror), b7(kind), b8(rsnap);
+        kind->setCurrentIndex(d->ruler.kind);
+        rsnap->setChecked(d->ruler.snap);
+        rsnap->setEnabled(d->ruler.isOn());
+        rreset->setEnabled(d->ruler.isOn());
         on->setChecked(d->perspective.enabled);
         snap->setChecked(d->perspective.snap);
         pts->setCurrentIndex(d->perspective.points - 1);
@@ -136,6 +181,15 @@ QWidget* RulerTool::createOptions(QWidget* parent) {
             d->guidesModified();
         }
     };
+    connect(kind, &QComboBox::currentIndexChanged, w, [edit](int i) {
+        edit([i](Document* d) {
+            d->ruler.kind = i;
+            d->ruler.snap = true;
+            d->ruler.resetFor(d->size());
+        });
+    });
+    connect(rsnap, &QCheckBox::toggled, w, [edit](bool x) { edit([x](Document* d) { d->ruler.snap = x; }); });
+    connect(rreset, &QPushButton::clicked, w, [edit] { edit([](Document* d) { d->ruler.resetFor(d->size()); }); });
     connect(on, &QCheckBox::toggled, w, [edit](bool x) { edit([x](Document* d) { d->perspective.enabled = x; }); });
     connect(snap, &QCheckBox::toggled, w, [edit](bool x) { edit([x](Document* d) { d->perspective.snap = x; }); });
     connect(pts, &QComboBox::currentIndexChanged, w, [edit](int i) {

@@ -63,6 +63,7 @@
 #include "tools/MoveTool.h"
 #include "tools/NavTools.h"
 #include "tools/RulerTool.h"
+#include "tools/FocusLinesTool.h"
 #include "tools/SelectTools.h"
 #include "tools/TextTool.h"
 #include "tools/ToolManager.h"
@@ -219,6 +220,8 @@ void MainWindow::createTools() {
     tm->addTool(new VectorColorTool);
     tm->addTool(new VectorEraserTool);
     tm->addTool(new RulerTool);
+    tm->addTool(new FocusLinesTool(FocusLines::Focus));
+    tm->addTool(new FocusLinesTool(FocusLines::Speed));
     for (const char* id : {"select-rect", "select-ellipse", "lasso", "magic-wand", "transform", "warp", "gradient", "vedit",
                            "vpressure", "vweight", "ruler", "curve", "liquify", "text", "select-brush"})
         tm->setModifierTool(id, true);
@@ -851,6 +854,43 @@ void MainWindow::createToolbar() {
             d->guidesModified();
         }
     });
+    // special ruler: the button turns snapping on and off, its menu chooses the ruler
+    m_rulerBtn = new QToolButton(tb);
+    m_rulerBtn->setIcon(Theme::icon("ruler"));
+    m_rulerBtn->setCheckable(true);
+    m_rulerBtn->setPopupMode(QToolButton::MenuButtonPopup);
+    m_rulerBtn->setToolTip(T("Snap strokes to the ruler. The arrow chooses the ruler: straight, curve, ellipse, concentric, parallel, fan "
+                             "(shape it with the Ruler tool, U)"));
+    auto* rulerMenu = new QMenu(m_rulerBtn);
+    auto* rulerGroup = new QActionGroup(rulerMenu);
+    const QStringList kinds = Ruler::kindNames();
+    for (int i = 0; i < kinds.size(); ++i) {
+        QAction* a = rulerMenu->addAction(T(kinds[i]));
+        a->setCheckable(true);
+        a->setData(i);
+        rulerGroup->addAction(a);
+        connect(a, &QAction::triggered, this, [this, i] {
+            Document* d = activeDocument();
+            if (!d) return;
+            d->ruler.kind = i;
+            d->ruler.snap = true;
+            d->ruler.resetFor(d->size());
+            d->guidesModified();
+            if (i != Ruler::None) app()->tools()->setCurrent("ruler");
+        });
+    }
+    m_rulerBtn->setMenu(rulerMenu);
+    tb->addWidget(m_rulerBtn);
+    connect(m_rulerBtn, &QToolButton::toggled, this, [this](bool on) {
+        Document* d = activeDocument();
+        if (!d) return;
+        if (on && !d->ruler.isOn()) {
+            d->ruler.kind = Ruler::Straight;
+            d->ruler.resetFor(d->size());
+        }
+        d->ruler.snap = on;
+        d->guidesModified();
+    });
     m_symBox = new QComboBox(tb);
     m_symBox->addItem(Theme::icon("symmetry"), T("No symmetry"), int(Symmetry::Off));
     m_symBox->addItem(Theme::icon("symmetry"), T("Mirror left/right"), int(Symmetry::Vertical));
@@ -871,7 +911,19 @@ void MainWindow::createToolbar() {
         QSignalBlocker b1(m_snapBtn), b2(m_symBox);
         m_snapBtn->setChecked(d && d->perspective.enabled);
         m_symBox->setCurrentIndex(d ? std::max(0, m_symBox->findData(d->symmetry.mode)) : 0);
+        syncGuides();
+        if (d) connect(d, &Document::guidesChanged, this, &MainWindow::syncGuides, Qt::UniqueConnection);
     });
+}
+
+void MainWindow::syncGuides() {
+    Document* d = activeDocument();
+    if (!m_rulerBtn) return;
+    QSignalBlocker b1(m_snapBtn), b2(m_symBox), b3(m_rulerBtn);
+    m_snapBtn->setChecked(d && d->perspective.enabled);
+    m_symBox->setCurrentIndex(d ? std::max(0, m_symBox->findData(d->symmetry.mode)) : 0);
+    m_rulerBtn->setChecked(d && d->ruler.snaps());
+    for (QAction* a : m_rulerBtn->menu()->actions()) a->setChecked(d ? a->data().toInt() == d->ruler.kind : a->data().toInt() == 0);
 }
 
 void MainWindow::createDocks() {

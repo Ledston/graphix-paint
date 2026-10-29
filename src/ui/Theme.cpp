@@ -633,6 +633,26 @@ void drawIcon(QPainter& p, const QString& n, const QColor& col, const QColor& ac
         line(2, 9, 22, 9);
         for (double x : {3.0, 9.0, 15.0, 21.0}) line(12, 9, x, 21);
         circle(12, 9, 1.8, true, acc);
+    } else if (n == "ruler") {
+        // a ruler with ticks and a pen line along it
+        poly({{3, 15}, {15, 3}, {21, 9}, {9, 21}});
+        for (int i = 1; i <= 4; ++i) line(3 + i * 2.4 + 1, 15 - i * 2.4 + 1, 3 + i * 2.4 + (i % 2 ? 3.5 : 2.3), 15 - i * 2.4 + (i % 2 ? 3.5 : 2.3));
+        QPen pp = p.pen();
+        p.setPen(QPen(acc, 1.8, Qt::SolidLine, Qt::RoundCap));
+        line(2, 13, 13, 2);
+        p.setPen(pp);
+    } else if (n == "focuslines") {
+        for (int k = 0; k < 16; ++k) {
+            const double a = 2 * M_PI * k / 16, r1 = (k % 2 ? 5.5 : 7.5), r2 = 12;
+            line(12 + std::cos(a) * r1, 12 + std::sin(a) * r1, 12 + std::cos(a) * r2, 12 + std::sin(a) * r2);
+        }
+        circle(12, 12, 2, true, acc);
+    } else if (n == "speedlines") {
+        for (int k = 0; k < 6; ++k) {
+            const double y = 4 + k * 3.2, x0 = 2 + (k * 5) % 7, x1 = 16 + (k * 3) % 6;
+            line(x0, y, x1, y);
+        }
+        poly({{17, 9}, {22, 12}, {17, 15}}, true, acc);
     } else if (n == "symmetry") {
         dashed(true);
         line(12, 2, 12, 22);

@@ -201,6 +201,10 @@ public:
 
     RasterSurface pixels;
     std::shared_ptr<RasterSurface> preview;  // tool preview (strokes, transforms, filters)
+    // Settings of generated content (focus / speed lines) that can be changed later.
+    QJsonObject generator;
+    quint64 generatorVersion = 0;  // runtime: `version` right after generating; differs once painted on
+    bool generatorEditable() const { return !generator.isEmpty() && version == generatorVersion; }
 };
 
 class VectorLayer : public Layer {

@@ -81,12 +81,14 @@ void BrushTool::press(const PointerEvent& e) {
     m_stroke = std::make_unique<BrushStroke>(ctx);
 
     InputSample s = toSample(e);
-    m_snap = doc->perspective.enabled && doc->perspective.snap;
+    m_rulerSnap = doc->ruler.snaps();
+    m_snap = !m_rulerSnap && doc->perspective.enabled && doc->perspective.snap;
     m_snapTarget = -1;
     m_snapStart = s.pos;
     m_snapHold.clear();
+    if (m_rulerSnap) s.pos = doc->ruler.constrain(m_snapStart, s.pos);
 
-    if ((e.mods & Qt::ShiftModifier) && m_hasLastEnd && m_lastDoc == doc) {
+    if ((e.mods & Qt::ShiftModifier) && m_hasLastEnd && m_lastDoc == doc && !m_rulerSnap) {
         // Straight line from the end of the previous stroke
         InputSample a = s;
         a.pos = m_lastEnd;
@@ -101,6 +103,10 @@ void BrushTool::press(const PointerEvent& e) {
 }
 
 bool BrushTool::constrain(InputSample& s) {
+    if (m_rulerSnap && m_view) {
+        s.pos = m_view->doc()->ruler.constrain(m_snapStart, s.pos);
+        return true;
+    }
     if (!m_snap || !m_view) return true;
     const Perspective& ps = m_view->doc()->perspective;
     if (m_snapTarget < 0) {
@@ -116,6 +122,8 @@ void BrushTool::feed(const std::vector<InputSample>& v) {
     if (!m_stroke) return;
     for (const auto& s0 : v) {
         InputSample s = s0;
+        // after the stabilizer too: its averaging would cut corners off curved rulers
+        if (m_rulerSnap && m_view) s.pos = m_view->doc()->ruler.constrain(m_snapStart, s.pos);
         m_stroke->add(s);
     }
 }
@@ -140,7 +148,7 @@ void BrushTool::release(const PointerEvent& e) {
     m_stroke->end();
     if (m_view) {
         m_lastEnd = m_view->toCanvas(e.widgetPos);
-        if (m_snap && m_snapTarget >= 0) {
+        if (m_rulerSnap || (m_snap && m_snapTarget >= 0)) {
             InputSample s = toSample(e);
             constrain(s);
             m_lastEnd = s.pos;

@@ -15,6 +15,8 @@
 #include "brush/BrushStroke.h"
 #include "core/Compositor.h"
 #include "core/Document.h"
+#include "core/FocusLines.h"
+#include "core/Guides.h"
 #include "core/ImageOps.h"
 #include "core/LayerOps.h"
 #include "core/Pixel.h"
@@ -718,6 +720,118 @@ static void testMaterials() {
     }
 }
 
+static void testRulersAndLines() {
+    auto near = [](QPointF a, QPointF b, double tol = 0.6) { return std::hypot(a.x() - b.x(), a.y() - b.y()) <= tol; };
+    Ruler r;
+    r.kind = Ruler::Straight;
+    r.a = QPointF(0, 100);
+    r.b = QPointF(200, 100);
+    CHECK(near(r.constrain({}, QPointF(50, 140)), QPointF(50, 100)));
+    r.kind = Ruler::Parallel;  // parallel to a-b through where the stroke started
+    CHECK(near(r.constrain(QPointF(10, 300), QPointF(90, 320)), QPointF(90, 300)));
+    r.kind = Ruler::Fan;
+    r.a = QPointF(0, 0);
+    CHECK(near(r.constrain(QPointF(100, 100), QPointF(200, 180)), QPointF(190, 190)));
+    r.kind = Ruler::Ellipse;
+    r.a = QPointF(500, 400);
+    r.rx = 200;
+    r.ry = 100;
+    r.angle = 30;
+    for (QPointF p : {QPointF(900, 400), QPointF(500, 410), QPointF(320, 250), QPointF(505, 380)}) {
+        const QPointF q = r.constrain({}, p) - r.a;
+        const double an = -30 * M_PI / 180;
+        const double x = q.x() * std::cos(an) - q.y() * std::sin(an), y = q.x() * std::sin(an) + q.y() * std::cos(an);
+        CHECK(std::abs(std::hypot(x / 200, y / 100) - 1) < 1e-6);
+    }
+    r.kind = Ruler::Concentric;  // the ellipse through the start point
+    {
+        const QPointF start = r.a + QPointF(std::cos(M_PI / 6), std::sin(M_PI / 6)) * 100;  // on the axis, half of rx
+        const QPointF q = r.constrain(start, r.a + QPointF(0, 300)) - r.a;
+        const double an = -30 * M_PI / 180;
+        const double x = q.x() * std::cos(an) - q.y() * std::sin(an), y = q.x() * std::sin(an) + q.y() * std::cos(an);
+        CHECK(std::abs(std::hypot(x / 200, y / 100) - 0.5) < 1e-6);
+    }
+    r.kind = Ruler::Curve;
+    r.a = QPointF(0, 0);
+    r.b = QPointF(100, 100);
+    r.c = QPointF(200, 0);
+    CHECK(near(r.constrain({}, QPointF(100, 160)), QPointF(100, 100)));  // the curve goes through b
+    CHECK(near(r.constrain({}, QPointF(-50, -20)), QPointF(0, 0)));
+    // handles: dragging the second handle of an ellipse sets its size and angle
+    r.kind = Ruler::Ellipse;
+    r.a = QPointF(0, 0);
+    r.setHandle(1, QPointF(0, 150), false);
+    CHECK(std::abs(r.rx - 150) < 1e-6 && std::abs(r.angle - 90) < 1e-6);
+    const Ruler back = Ruler::fromJson(r.toJson());
+    CHECK(back.kind == r.kind && near(back.a, r.a) && std::abs(back.rx - r.rx) < 1e-9 && std::abs(back.angle - r.angle) < 1e-9);
+    r.transform(QTransform::fromTranslate(10, 20));
+    CHECK(near(r.a, QPointF(10, 20)) && std::abs(r.rx - 150) < 1e-6);
+
+    // focus lines: empty in the middle, dense at the edges, the same every time
+    Document doc(QSize(400, 300));
+    auto* l = ops::addRasterLayer(doc);
+    FocusLines f;
+    f.area = doc.bounds();
+    f.center = QPointF(200, 150);
+    f.rx = 80;
+    f.ry = 50;
+    f.count = 90;
+    f.width = 8;
+    f.gaps = 0;
+    CHECK(f.shapes().size() == 90 && f.shapes() == f.shapes());
+    f.renderInto(doc, *l);
+    auto alpha = [&](int x, int y) { return int(l->pixels.pixel(x, y) >> 24); };
+    int middle = 0, edge = 0;
+    for (int y = 120; y < 180; ++y)
+        for (int x = 160; x < 240; ++x) middle += alpha(x, y) > 0;
+    for (int y = 0; y < 300; ++y) edge += alpha(2, y) > 128;
+    CHECK(middle == 0);
+    CHECK(edge > 40 && edge < 280);
+    CHECK(l->generatorEditable() && FocusLines::isFocusLines(l->generator));
+    const FocusLines g = FocusLines::fromJson(l->generator);
+    CHECK(g.count == 90 && g.center == f.center && g.shapes() == f.shapes());
+    // painting on the layer fixes the lines
+    doc.pixelsChanged(QRect(0, 0, 1, 1), l);
+    CHECK(!l->generatorEditable());
+    // speed lines inside a selection, along the x axis
+    QPainterPath sel;
+    sel.addRect(50, 50, 200, 100);
+    ops::selectPath(doc, sel, ops::SelectMode::Replace, false, "sel");
+    auto* l2 = ops::addRasterLayer(doc);
+    FocusLines s;
+    s.kind = FocusLines::Speed;
+    s.area = doc.selectionBounds();
+    s.count = 40;
+    s.width = 3;
+    s.length = 0.8;
+    s.gaps = 0;
+    s.renderInto(doc, *l2);
+    const QRect eb = l2->pixels.exactBounds();
+    CHECK(!eb.isEmpty() && QRect(50, 50, 200, 100).contains(eb));
+    int rows = 0;
+    for (int y = 50; y < 150; ++y) {
+        bool any = false;
+        for (int x = 50; x < 250 && !any; ++x) any = (l2->pixels.pixel(x, y) >> 24) > 100;
+        rows += any;
+    }
+    CHECK(rows > 40);
+    // the ruler and the lines settings are saved in the picture
+    doc.ruler.kind = Ruler::Concentric;
+    doc.ruler.a = QPointF(12, 34);
+    QTemporaryDir dir;
+    const QString file = dir.filePath("lines.gxp");
+    QString err;
+    CHECK(saveNative(takeSnapshot(doc), file, &err));
+    auto loaded = loadNative(file, &err);
+    CHECK(loaded && loaded->ruler.kind == Ruler::Concentric && loaded->ruler.a == QPointF(12, 34));
+    if (loaded) {
+        auto* ll = dynamic_cast<RasterLayer*>(loaded->layer(l2->id));
+        CHECK(ll && ll->generatorEditable() && FocusLines::fromJson(ll->generator).kind == FocusLines::Speed);
+        auto* l1 = dynamic_cast<RasterLayer*>(loaded->layer(l->id));
+        CHECK(l1 && l1->generator.isEmpty());  // painted on: kept as plain pixels
+    }
+}
+
 int main(int argc, char** argv) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
@@ -739,6 +853,7 @@ int main(int argc, char** argv) {
     testNewBrushes();
     testDecorBrushes();
     testMaterials();
+    testRulersAndLines();
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

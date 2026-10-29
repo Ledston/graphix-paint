@@ -1241,3 +1241,33 @@ Warm evening	Тёплый вечер
 Waves	Волны
 Width:	Ширина:
 Zigzag	Зигзаг
+Another random arrangement of the same lines	Другое случайное расположение тех же линий
+Change lines	Изменить линии
+Changing the lines of "%1". Select another layer to make new lines.	Меняются линии слоя «%1». Чтобы сделать новые, выберите другой слой.
+Concentric	Концентрическая
+Direction	Направление
+Drag from the center outward: the ellipse stays empty (Shift: a circle). Inside a selection the lines fill only the selection.	Тяните от центра наружу: овал останется пустым (Shift — круг). При выделении линии рисуются только внутри него.
+Drag in the direction of motion (Shift: steps of 15°). Inside a selection the lines fill only the selection.	Тяните в сторону движения (Shift — шаг 15°). При выделении линии рисуются только внутри него.
+Drag on the canvas to make focus lines on a new layer.	Потяните по холсту — линии концентрации появятся на новом слое.
+Drag on the canvas to make speed lines on a new layer.	Потяните по холсту — линии скорости появятся на новом слое.
+Drag the square handles to shape the ruler (Shift: steps of 45° / a circle), the line itself to move it. Drag the numbered points to place vanishing points. Drag the pink dot to move the symmetry center, the white dot to rotate the axis (Shift: 15° steps).	Квадратные ручки меняют форму линейки (Shift — шаг 45° / круг), за саму линию её можно двигать. Номерные точки — точки схода перспективы. Розовая точка — центр симметрии, белая поворачивает ось (Shift — шаг 15°).
+Ellipse	Эллипс
+Empty middle, height	Пустая середина, высота
+Empty middle, width	Пустая середина, ширина
+Fan (lines from a point)	Веер (лучи из точки)
+Focus lines	Линии концентрации
+Gaps	Просветы
+Kind	Вид
+Line length	Длина линий
+No ruler	Без линейки
+Paint the lines with the main color	Покрасить линии основным цветом
+Parallel lines	Параллельные линии
+Put the ruler in the middle	Поставить линейку в середину
+Ruler	Линейка
+Shuffle	Перемешать
+Snap strokes to the ruler	Вести мазки по линейке
+Snap strokes to the ruler. The arrow chooses the ruler: straight, curve, ellipse, concentric, parallel, fan (shape it with the Ruler tool, U)	Вести мазки по линейке. Стрелка выбирает линейку: прямая, кривая, эллипс, концентрическая, параллельная, веер (форма — инструментом «Линейки», U)
+Speed lines	Линии скорости
+Straight	Прямая
+Uneven ends	Неровные концы
+Uneven spacing	Неровные промежутки

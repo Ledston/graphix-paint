@@ -103,6 +103,7 @@ public:
     // ---- non-layer document data (saved, not undoable) ----
     Perspective perspective;
     Symmetry symmetry;
+    Ruler ruler;  // special ruler (straight, curve, ellipse...)
 
     // Bounds of a layer's visible content in canvas space.
     QRect layerBounds(const Layer* l) const;

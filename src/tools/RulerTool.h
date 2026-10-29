@@ -18,7 +18,7 @@ public:
     bool isBusy() const override { return m_drag >= 0; }
 
 private:
-    int m_drag = -1;  // 0..2 vanishing points, 10 symmetry center, 11 symmetry angle
+    int m_drag = -1;  // 0..2 vanishing points, 10 symmetry center, 11 symmetry angle, 20+ ruler handles, 30 ruler line
     QPointF m_off;
     QPointer<CanvasView> m_view;
     QPointer<QWidget> m_opts;

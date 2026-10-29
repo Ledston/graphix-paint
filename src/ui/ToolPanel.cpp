@@ -460,7 +460,7 @@ ToolPanel::ToolPanel(QWidget* parent) : QWidget(parent) {
     m_group->setExclusive(true);
     const QStringList order = {"select-rect", "select-ellipse", "lasso", "magic-wand", "select-brush", "move", "transform",
                                "warp", "liquify", "fill", "lasso-fill", "gradient", "eyedropper", "hand", "zoom", "rotate",
-                               "text", "vpen", "curve", "vedit", "vpressure", "vweight", "vcolor", "veraser", "ruler"};
+                               "text", "focuslines", "speedlines", "vpen", "curve", "vedit", "vpressure", "vweight", "vcolor", "veraser", "ruler"};
     int i = 0;
     for (const QString& id : order) {
         Tool* t = app()->tools()->tool(id);

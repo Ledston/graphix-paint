@@ -118,6 +118,8 @@ private:
     QSpinBox* m_pressSmooth = nullptr;
     QToolButton* m_snapBtn = nullptr;
     QComboBox* m_symBox = nullptr;
+    QToolButton* m_rulerBtn = nullptr;
+    void syncGuides();  // toolbar buttons follow the rulers of the active picture
 };
 
 }  // namespace gx

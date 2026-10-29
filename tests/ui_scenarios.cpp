@@ -45,6 +45,9 @@
 #include <QThreadPool>
 #include "ui/Theme.h"
 #include "ui/MaterialsPanel.h"
+#include "tools/FocusLinesTool.h"
+#include "core/FocusLines.h"
+#include <QMenu>
 #include "app/Materials.h"
 #include <QDialog>
 #include <QDockWidget>
@@ -902,6 +905,121 @@ int main(int argc, char** argv) {
             }
             w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/materials_window.png");
         }
+    }, w);
+
+    scenario("rulers lead the brush; focus and speed lines", [](MainWindow& w) {
+        Document* d = view()->doc();
+        Layer* l = d->currentLayer();
+        app()->tools()->setCurrent("brush");
+        pump(250);
+        // a wobbly stroke along a straight ruler stays on the ruler line
+        d->ruler.kind = Ruler::Straight;
+        d->ruler.snap = true;
+        d->ruler.a = QPointF(100, 300);
+        d->ruler.b = QPointF(700, 300);
+        d->guidesModified();
+        mouse(QEvent::MouseButtonPress, QPointF(150, 320), Qt::LeftButton);
+        for (int i = 1; i <= 40; ++i) mouse(QEvent::MouseMove, QPointF(150 + i * 12, 300 + ((i % 2) ? 25 : -25)), Qt::LeftButton);
+        mouse(QEvent::MouseButtonRelease, QPointF(630, 300), Qt::NoButton);
+        pump(30);
+        QRect eb = px(d, l->id);
+        std::fprintf(stderr, "INFO straight ruler stroke %d,%d %dx%d\n", eb.x(), eb.y(), eb.width(), eb.height());
+        CHECK(eb.width() > 400 && eb.height() < 30 && std::abs(eb.center().y() - 300) < 4);
+        // around an ellipse: every painted pixel is close to the ellipse
+        d->undo();
+        d->ruler.kind = Ruler::Ellipse;
+        d->ruler.a = QPointF(400, 300);
+        d->ruler.rx = 200;
+        d->ruler.ry = 120;
+        d->ruler.angle = 0;
+        mouse(QEvent::MouseButtonPress, QPointF(620, 300), Qt::LeftButton);
+        for (int i = 1; i <= 60; ++i) {
+            const double t = i * 2 * M_PI / 60, k = (i % 3) ? 0.85 : 1.15;
+            mouse(QEvent::MouseMove, QPointF(400 + 200 * k * std::cos(t), 300 + 120 * k * std::sin(t)), Qt::LeftButton);
+        }
+        mouse(QEvent::MouseButtonRelease, QPointF(600, 300), Qt::NoButton);
+        pump(30);
+        {
+            auto* rl = static_cast<RasterLayer*>(d->currentLayer());
+            int far = 0, inked = 0;
+            for (int y = 150; y < 450; y += 2)
+                for (int x = 180; x < 620; x += 2)
+                    if ((rl->pixels.pixel(x, y) >> 24) > 128) {
+                        ++inked;
+                        const double e = std::hypot((x - 400) / 200.0, (y - 300) / 120.0);
+                        far += std::abs(e - 1) > 0.06;
+                    }
+            std::fprintf(stderr, "INFO ellipse ruler: %d inked, %d off the ellipse\n", inked, far);
+            CHECK(inked > 200 && far == 0);
+        }
+        d->undo();
+        // the toolbar button turns snapping off; the menu chooses the ruler
+        QToolButton* rb = nullptr;
+        for (QToolButton* b : w.findChildren<QToolButton*>())
+            if (b->menu() && b->menu()->actions().size() == 7) rb = b;
+        CHECK(rb && rb->isChecked());
+        if (rb) {
+            rb->click();
+            pump(20);
+            CHECK(!d->ruler.snap && d->ruler.isOn());
+            rb->menu()->actions()[Ruler::Fan]->trigger();
+            pump(20);
+            CHECK(d->ruler.kind == Ruler::Fan && d->ruler.snap && rb->isChecked() && app()->tools()->current()->id() == "ruler");
+            if (qEnvironmentVariableIsSet("GX_SHOTS")) {
+                rb->menu()->actions()[Ruler::Concentric]->trigger();
+                pump(250);
+                w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/ruler_concentric.png");
+                rb->menu()->actions()[Ruler::Curve]->trigger();
+                pump(50);
+                w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/ruler_curve.png");
+            }
+            rb->menu()->actions()[Ruler::None]->trigger();
+            pump(20);
+            CHECK(!d->ruler.isOn() && !rb->isChecked());
+        }
+        // focus lines: a drag makes a lines layer, the panel changes it, undo takes it back
+        const size_t layers = d->root()->children.size();
+        app()->tools()->setCurrent("focuslines");
+        pump(250);
+        auto* ft = dynamic_cast<FocusLinesTool*>(app()->tools()->current());
+        CHECK(ft != nullptr);
+        if (!ft) return;
+        ft->settings().gaps = 0;
+        ft->settings().count = 100;
+        dragCanvas(QPointF(400, 300), QPointF(520, 380));
+        pump(30);
+        CHECK(d->root()->children.size() == layers + 1);
+        auto* fl = dynamic_cast<RasterLayer*>(d->currentLayer());
+        CHECK(fl && fl->generatorEditable() && ft->editedLayer() == fl);
+        if (fl) {
+            CHECK((fl->pixels.pixel(400, 300) >> 24) == 0 && (fl->pixels.pixel(460, 330) >> 24) == 0);
+            const long long before = opaquePixels(fl);
+            CHECK(before > 800 * 600 / 30);
+            ft->settings().width = 30;  // as the panel does
+            ft->settingsChanged();
+            pump(200);
+            fl = dynamic_cast<RasterLayer*>(d->currentLayer());
+            const long long thick = opaquePixels(fl);
+            std::fprintf(stderr, "INFO focus lines pixels %lld -> %lld after a thicker setting\n", before, thick);
+            CHECK(thick > before * 2);
+            CHECK(d->root()->children.size() == layers + 1);  // the same layer
+            if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/focuslines.png");
+        }
+        // speed lines on a new layer (another kind does not change the focus layer)
+        app()->tools()->setCurrent("speedlines");
+        pump(250);
+        dragCanvas(QPointF(600, 300), QPointF(200, 300));
+        pump(30);
+        CHECK(d->root()->children.size() == layers + 2);
+        auto* sl = dynamic_cast<RasterLayer*>(d->currentLayer());
+        CHECK(sl && FocusLines::fromJson(sl->generator).kind == FocusLines::Speed);
+        if (sl) CHECK(std::abs(std::abs(FocusLines::fromJson(sl->generator).angle) - 180) < 1);
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/speedlines.png");
+        d->undo();
+        d->undo();
+        d->undo();
+        pump(20);
+        CHECK(d->root()->children.size() == layers);
     }, w);
 
     scenario("reference over everything", [](MainWindow& w) {

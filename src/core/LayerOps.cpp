@@ -1404,6 +1404,7 @@ void transformDocument(Document& doc, const QTransform& t, const QSize& newSize,
     if (doc.hasSelection()) transformMask(doc.selection(), t, smooth);
     for (auto& p : doc.perspective.vp) p = t.map(p);
     doc.symmetry.center = t.map(doc.symmetry.center);
+    doc.ruler.transform(t);
     doc.setSizeNoUndo(newSize);
 }
 
@@ -1439,6 +1440,7 @@ void resizeCanvas(Document& doc, const QSize& size, const QPoint& offset) {
     if (doc.hasSelection()) doc.selection() = doc.selection().translated(offset.x(), offset.y());
     for (auto& p : doc.perspective.vp) p += offset;
     doc.symmetry.center += offset;
+    doc.ruler.transform(QTransform::fromTranslate(offset.x(), offset.y()));
     doc.setSizeNoUndo(size);
     doc.structureChanged();
 }

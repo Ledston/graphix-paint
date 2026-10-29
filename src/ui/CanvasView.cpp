@@ -493,6 +493,23 @@ void CanvasView::drawGuides(QPainter& p) {
         }
         p.restore();
     }
+    const Ruler& ru = m_doc->ruler;
+    if (ru.isOn()) {
+        p.save();
+        p.setTransform(canvasToWidget(), true);
+        p.setBrush(Qt::NoBrush);
+        QColor c = ru.color;
+        c.setAlpha(ru.kind == Ruler::Concentric || ru.kind == Ruler::Parallel || ru.kind == Ruler::Fan ? 90 : 120);
+        QPen helper(c, 0, Qt::DashLine);
+        helper.setCosmetic(true);
+        p.setPen(helper);
+        p.drawPath(ru.guidePath(vis));
+        QPen main(QColor(ru.color.red(), ru.color.green(), ru.color.blue(), ru.snap ? 230 : 140), 2);
+        main.setCosmetic(true);
+        p.setPen(main);
+        p.drawPath(ru.mainPath());
+        p.restore();
+    }
     const Symmetry& sy = m_doc->symmetry;
     if (sy.isOn()) {
         p.save();

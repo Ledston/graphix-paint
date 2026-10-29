@@ -46,6 +46,7 @@ private:
     void* m_lastDoc = nullptr;
     // perspective snapping
     bool m_snap = false;
+    bool m_rulerSnap = false;  // the special ruler leads the stroke
     int m_snapTarget = -1;
     QPointF m_snapStart;
     std::vector<InputSample> m_snapHold;

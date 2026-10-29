@@ -220,6 +220,8 @@ std::shared_ptr<Layer> RasterLayer::clone() const {
     auto l = std::make_shared<RasterLayer>();
     copyBaseTo(*l);
     l->pixels = pixels;  // previews are runtime state
+    l->generator = generator;
+    l->generatorVersion = generatorVersion;
     return l;
 }
 

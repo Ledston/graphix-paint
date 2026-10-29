@@ -14,6 +14,7 @@ struct DocSnapshot {
     double dpi = 350;
     Perspective perspective;
     Symmetry symmetry;
+    Ruler ruler;
 };
 DocSnapshot takeSnapshot(const Document& doc);
 

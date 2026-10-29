@@ -111,7 +111,12 @@ QJsonObject layerToJson(const Layer& l, Writer& w) {
         o["maskEnabled"] = l.maskEnabled;
     }
     switch (l.type()) {
-    case LayerType::Raster: o["pixels"] = w.add(static_cast<const RasterLayer&>(l).pixels); break;
+    case LayerType::Raster: {
+        const auto& rl = static_cast<const RasterLayer&>(l);
+        o["pixels"] = w.add(rl.pixels);
+        if (rl.generatorEditable()) o["generator"] = rl.generator;  // lines that can still be changed
+        break;
+    }
     case LayerType::Vector: {
         const auto& v = static_cast<const VectorLayer&>(l);
         QJsonArray strokes;
@@ -158,6 +163,8 @@ LayerPtr layerFromJson(const QJsonObject& o, Reader& r, int depth) {
     case LayerType::Raster: {
         auto rl = std::make_shared<RasterLayer>();
         if (!r.raster(o.value("pixels").toInt(-1), rl->pixels)) return nullptr;
+        rl->generator = o.value("generator").toObject();
+        rl->generatorVersion = rl->version;
         l = rl;
         break;
     }
@@ -235,6 +242,7 @@ DocSnapshot takeSnapshot(const Document& doc) {
     s.dpi = doc.dpi();
     s.perspective = doc.perspective;
     s.symmetry = doc.symmetry;
+    s.ruler = doc.ruler;
     return s;
 }
 
@@ -249,6 +257,7 @@ bool saveNative(const DocSnapshot& snap, const QString& path, QString* error, co
     head["current"] = qint64(snap.state.currentId);
     head["perspective"] = snap.perspective.toJson();
     head["symmetry"] = snap.symmetry.toJson();
+    if (snap.ruler.isOn()) head["ruler"] = snap.ruler.toJson();
     QJsonArray layers;
     for (const auto& c : snap.state.root->children) layers.append(layerToJson(*c, w));
     head["layers"] = layers;
@@ -338,6 +347,7 @@ std::unique_ptr<Document> loadNative(const QString& path, QString* error) {
     doc->setDpi(head.value("dpi").toDouble(350));
     doc->perspective = Perspective::fromJson(head.value("perspective").toObject());
     if (head.contains("symmetry")) doc->symmetry = Symmetry::fromJson(head.value("symmetry").toObject());
+    if (head.contains("ruler")) doc->ruler = Ruler::fromJson(head.value("ruler").toObject());
     for (const auto& lv : head.value("layers").toArray()) {
         LayerPtr l = layerFromJson(lv.toObject(), r, 0);
         if (!l) {
