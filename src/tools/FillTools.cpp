@@ -12,6 +12,7 @@
 
 #include "app/App.h"
 #include "app/I18n.h"
+#include "app/Materials.h"
 #include "core/Document.h"
 #include "core/ImageOps.h"
 #include "core/Pixel.h"
@@ -24,22 +25,32 @@ namespace gx {
 
 namespace {
 
-// Composites a color onto a raster layer through a coverage mask (0..255 surface).
+}  // namespace
+
+// Composites a color (or the current pattern) onto a raster layer through a coverage mask.
 void paintThroughMask(Document* d, RasterLayer* l, const MaskSurface& mask, const QColor& color, double opacity, bool erase,
-                      const QString& undoName) {
+                      const QString& undoName, bool pattern, bool clipToSelection) {
     QRect r = mask.exactBounds() & d->bounds();
     if (r.isEmpty()) return;
+    Materials& mat = Materials::instance();
+    QImage tile = pattern ? mat.pattern(mat.currentPattern()) : QImage();
+    if (pattern && tile.isNull()) {
+        app()->showStatus(T("Choose a pattern first: Window > Materials > Patterns."), 5000);
+        return;
+    }
     d->pushUndo(undoName);
     l = static_cast<RasterLayer*>(d->layer(l->id));
     const size_t n = size_t(r.width()) * r.height();
     std::vector<float> px(n * 4), m(n), sel;
     readFloat(l->pixels, r, px.data());
     readMask(mask, r, m.data());
-    if (d->hasSelection()) {
+    if (clipToSelection && d->hasSelection()) {
         sel.resize(n);
         readMask(d->selection(), r, sel.data());
     }
     float c[3] = {float(color.redF()), float(color.greenF()), float(color.blueF())};
+    const double scale = std::max(0.05, mat.patternScale);
+    const bool tint = mat.patternTint;
     for (size_t i = 0; i < n; ++i) {
         float w = m[i] * float(opacity) * (sel.empty() ? 1.f : sel[i]);
         if (w <= 0) continue;
@@ -48,16 +59,33 @@ void paintThroughMask(Document* d, RasterLayer* l, const MaskSurface& mask, cons
             for (int k = 0; k < 4; ++k) p[k] *= 1.f - w;
             continue;
         }
-        float oldA = p[3];
-        float s[4] = {c[0] * w, c[1] * w, c[2] * w, w};
+        float s[4];
+        if (!tile.isNull()) {
+            // the pattern tiles from the corner of the picture, so fills next to each other match
+            const int x = r.left() + int(i % size_t(r.width())), y = r.top() + int(i / size_t(r.width()));
+            int tx = int(std::floor(x / scale)) % tile.width(), ty = int(std::floor(y / scale)) % tile.height();
+            if (tx < 0) tx += tile.width();
+            if (ty < 0) ty += tile.height();
+            const QRgb t = reinterpret_cast<const QRgb*>(tile.constScanLine(ty))[tx];
+            const float a = qAlpha(t) / 255.f * w;
+            if (tint) s[0] = c[0] * a, s[1] = c[1] * a, s[2] = c[2] * a;
+            else s[0] = qRed(t) / 255.f * a, s[1] = qGreen(t) / 255.f * a, s[2] = qBlue(t) / 255.f * a;
+            s[3] = a;
+        } else {
+            s[0] = c[0] * w;
+            s[1] = c[1] * w;
+            s[2] = c[2] * w;
+            s[3] = w;
+        }
         if (l->alphaLock) blendRowAtop(BlendMode::Normal, p, s, 1);
         else blendRow(BlendMode::Normal, p, s, 1);
-        (void)oldA;
     }
     writeFloat(l->pixels, r, px.data(), true);
     l->pixels.optimizeRect(r);
     d->pixelsChanged(r, l);
 }
+
+namespace {
 
 RasterLayer* paintableLayer(Document* d) {
     Layer* l = d->currentLayer();
@@ -111,7 +139,77 @@ void FillTool::press(const PointerEvent& e) {
         m.writeRect(r, u.data(), W);
     }
     bool erase = app()->transparentColor();
-    paintThroughMask(d, l, m, app()->foreground(), opacity, erase, T("Fill"));
+    paintThroughMask(d, l, m, app()->foreground(), opacity, erase, T("Fill"), usePattern);
+}
+
+// "Fill with: color / pattern", the pattern, its size and color (shared by every fill)
+QWidget* patternOptions(QWidget* parent, bool* use) {
+    auto* box = new QWidget(parent);
+    auto* v = new QVBoxLayout(box);
+    v->setContentsMargins(0, 0, 0, 0);
+    v->setSpacing(3);
+    auto* with = new QComboBox(box);
+    with->addItem(T("Fill with the main color"), 0);
+    with->addItem(T("Fill with a pattern"), 1);
+    with->setCurrentIndex(*use ? 1 : 0);
+    v->addWidget(with);
+    auto* more = new QWidget(box);
+    auto* mv = new QVBoxLayout(more);
+    mv->setContentsMargins(0, 0, 0, 0);
+    mv->setSpacing(3);
+    auto* pat = new QComboBox(more);
+    pat->setIconSize(QSize(24, 24));
+    auto fillList = [pat] {
+        const QSignalBlocker b(pat);
+        pat->clear();
+        Materials& m = Materials::instance();
+        for (const QString& n : m.patterns()) {
+            QImage img = m.pattern(n);
+            QImage icon(24, 24, QImage::Format_ARGB32_Premultiplied);
+            icon.fill(Qt::white);
+            {
+                QPainter ip(&icon);
+                ip.fillRect(icon.rect(), QBrush(img.scaled(std::max(4, img.width() / 2), std::max(4, img.height() / 2), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+            }
+            pat->addItem(QIcon(QPixmap::fromImage(icon)), T(n), n);
+        }
+        pat->setCurrentIndex(std::max(0, pat->findData(m.currentPattern())));
+    };
+    fillList();
+    QObject::connect(&Materials::instance(), &Materials::changed, pat, fillList);
+    QObject::connect(&Materials::instance(), &Materials::currentPatternChanged, pat, [pat] {
+        const QSignalBlocker b(pat);
+        pat->setCurrentIndex(std::max(0, pat->findData(Materials::instance().currentPattern())));
+    });
+    QObject::connect(pat, &QComboBox::activated, pat, [pat](int i) { Materials::instance().setCurrentPattern(pat->itemData(i).toString()); });
+    mv->addWidget(pat);
+    auto* sc = new ValueBar(T("Pattern size"), 0.1, 10, 2, more);
+    sc->setDisplayScale(100);
+    sc->setSuffix("%");
+    sc->setLogarithmic(true);
+    sc->setValue(Materials::instance().patternScale);
+    QObject::connect(sc, &ValueBar::valueChanged, sc, [](double x) {
+        Materials& m = Materials::instance();
+        m.patternScale = x;
+        m.setCurrentPattern(m.currentPattern());  // remembers the size
+    });
+    mv->addWidget(sc);
+    auto* tint = new QCheckBox(T("In the main color"), more);
+    tint->setToolTip(T("Paint the pattern in the main color. Off: the pattern keeps its own colors."));
+    tint->setChecked(Materials::instance().patternTint);
+    QObject::connect(tint, &QCheckBox::toggled, tint, [](bool on) {
+        Materials& m = Materials::instance();
+        m.patternTint = on;
+        m.setCurrentPattern(m.currentPattern());
+    });
+    mv->addWidget(tint);
+    v->addWidget(more);
+    more->setVisible(*use);
+    QObject::connect(with, &QComboBox::activated, with, [with, more, use](int i) {
+        *use = with->itemData(i).toInt() == 1;
+        more->setVisible(*use);
+    });
+    return box;
 }
 
 QWidget* FillTool::createOptions(QWidget* parent) {
@@ -147,6 +245,7 @@ QWidget* FillTool::createOptions(QWidget* parent) {
     aa->setChecked(antialias);
     connect(aa, &QCheckBox::toggled, this, [this](bool on) { antialias = on; });
     ex->setLabel(T("Go under the lines"));
+    f->addWidget(patternOptions(w, &usePattern));
     for (QWidget* x : {static_cast<QWidget*>(src), static_cast<QWidget*>(tol), static_cast<QWidget*>(gap), static_cast<QWidget*>(ex),
                        static_cast<QWidget*>(op), static_cast<QWidget*>(cont), static_cast<QWidget*>(aa)})
         f->addWidget(x);
@@ -281,7 +380,7 @@ void LassoFillTool::apply(CanvasView* v, const QPolygonF& poly, Qt::KeyboardModi
         m = ops::rasterizePath(p, d->bounds(), antialias);
     }
     bool erase = eraseMode || (mods & Qt::AltModifier) || app()->transparentColor();
-    paintThroughMask(d, l, m, app()->foreground(), opacity, erase, erase ? T("Lasso erase") : T("Lasso fill"));
+    paintThroughMask(d, l, m, app()->foreground(), opacity, erase, erase ? T("Lasso erase") : T("Lasso fill"), usePattern && !erase);
 }
 
 QWidget* LassoFillTool::createOptions(QWidget* parent) {
@@ -305,6 +404,7 @@ QWidget* LassoFillTool::createOptions(QWidget* parent) {
     modeBox->setCurrentIndex(mode);
     modeBox->setToolTip(T("Closed areas: draw roughly around the parts to color; every area of the line art that is mostly inside is filled up to the lines, without gaps under them."));
     f->addWidget(modeBox);
+    f->addWidget(patternOptions(w, &usePattern));
     auto* enclosed = new QWidget(w);
     auto* ef = new QVBoxLayout(enclosed);
     ef->setContentsMargins(0, 0, 0, 0);

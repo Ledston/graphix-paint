@@ -1153,3 +1153,91 @@ Stretches the ribbon pattern along the stroke	Растягивает узор л
 Your own stamps: a folder of pictures in textures/stamps. Your own ribbons: pictures in textures/ribbons.	Свои штампы: папка с картинками в textures/stamps. Свои ленты: картинки в textures/ribbons.
 No stamps	Без штампов
 No ribbon	Без ленты
+ px	 пикс
+A picture becomes a new layer.	Картинка станет новым слоем.
+Add patterns	Добавить узоры
+Add patterns...	Добавить узоры...
+Add pictures	Добавить картинки
+Add pictures...	Добавить картинки...
+Adds a gradient map layer that recolors everything under it by brightness.	Добавляет слой карты градиента: он перекрашивает всё, что под ним, по яркости.
+Big dots	Крупные точки
+Black and white	Чёрно-белая
+Blue print	Синька
+Checker	Шахматка
+Choose a pattern first: Window > Materials > Patterns.	Сначала выберите узор: Окно > Материалы > Узоры.
+Cinema	Кино
+Cold night	Холодная ночь
+Could not open the picture.	Не удалось открыть картинку.
+Could not save the file.	Не удалось сохранить файл.
+Delete (only your own gradient maps)	Удалить (только свои карты градиента)
+Delete "%1"?	Удалить «%1»?
+Diagonal lines	Косые линии
+Diagonal stripes	Косые полоски
+Dots 10%	Точки 10%
+Dots 30%	Точки 30%
+Dots 50%	Точки 50%
+Drag onto the canvas or double-click.	Перетащите на холст или дважды щёлкните.
+Drop materials onto the canvas.	Бросьте материал на холст.
+Fill with a pattern	Заливать узором
+Fill with pattern	Залить узором
+Fill with the main color	Заливать основным цветом
+Fills the selection (or the whole picture) on a new layer. The chosen pattern is also used by the fill tools.	Заливает выделение (или всю картинку) на новом слое. Выбранный узор используют и инструменты заливки.
+Fills the selection (or the whole picture) with a screentone layer; change it later in Layer > Effects.	Заливает выделение (или всю картинку) слоем тона; настроить его можно в Слой > Эффекты.
+Fish scales	Чешуя
+Forest	Лес
+Gingham	Виши
+Golden hour	Золотой час
+Gradient dots	Точки с переходом
+Gradient lines	Линии с переходом
+Gradient maps	Градиенты
+Hearts	Сердечки
+Herringbone	Ёлочка
+In the main color	Основным цветом
+Inside	Внутри
+Materials	Материалы
+Neon	Неон
+On the edge	По краю
+Open the folder	Открыть папку
+Outside	Снаружи
+Paint the pattern in the main color. Off: the pattern keeps its own colors.	Рисовать узор основным цветом. Если выключено, узор сохраняет свои цвета.
+Paint with:	Чем рисовать:
+Pastel	Пастель
+Pattern	Узор
+Pattern size	Размер узора
+Patterns	Узоры
+Pictures	Картинки
+Place pattern	Узор из материалов
+Place picture	Картинка из материалов
+Place screentone	Тон из материалов
+Plaid	Шотландка
+Polka dots	Горошек
+Position:	Где:
+Recolor the pixels of the current layer...	Перекрасить пиксели текущего слоя...
+Save as pattern	Сохранить как узор
+Save as picture	Сохранить как картинку
+Save gradient map	Сохранить карту градиента
+Save the gradient of the selected gradient map layer	Сохранить градиент выбранного слоя карты градиента
+Save the selected part of the layer as a pattern	Сохранить выделенную часть слоя как узор
+Save the selected part of the layer as a picture	Сохранить выделенную часть слоя как картинку
+Saved to Materials > Gradient maps.	Сохранено в Материалы > Градиенты.
+Saved to Materials > Patterns.	Сохранено в Материалы > Узоры.
+Saved to Materials > Pictures.	Сохранено в Материалы > Картинки.
+Select a gradient map layer first.	Сначала выберите слой карты градиента.
+Select a pixel layer.	Выберите пиксельный слой.
+Select an area first.	Сначала выделите область.
+Sepia	Сепия
+Stripes	Полоски
+Stroke selection	Обвести выделение
+Stroke selection...	Обвести выделение...
+The gradient map was not found.	Карта градиента не найдена.
+The pattern from Materials	Узором из материалов
+The pattern was not found.	Узор не найден.
+The selection is outside the picture.	Выделение за пределами картинки.
+The stroke is too thin.	Обводка слишком тонкая.
+The tone was not found.	Тон не найден.
+There is nothing to save here.	Здесь нечего сохранять.
+Tones	Тона
+Warm evening	Тёплый вечер
+Waves	Волны
+Width:	Ширина:
+Zigzag	Зигзаг

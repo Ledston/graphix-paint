@@ -7,6 +7,13 @@
 
 namespace gx {
 
+// Paints the main color (or the current pattern of the materials panel) through a mask,
+// inside the selection, as one undo step.
+void paintThroughMask(Document* d, RasterLayer* l, const MaskSurface& mask, const QColor& color, double opacity, bool erase,
+                      const QString& undoName, bool pattern = false, bool clipToSelection = true);
+// The fill options for "fill with: main color / pattern"
+QWidget* patternOptions(QWidget* parent, bool* usePattern);
+
 // Paint bucket. Samples all visible layers by default (fills under line art),
 // with tolerance, expansion and soft edges.
 class FillTool : public Tool {
@@ -24,6 +31,7 @@ public:
     int expand = 1;
     bool antialias = true;
     double opacity = 1.0;
+    bool usePattern = false;
 };
 
 // Draw a shape with the lasso and it is filled with the main color (Alt: erases).
@@ -40,6 +48,7 @@ public:
     int source = 2;    // FillSource: lines from all visible layers, the current layer or the reference layers
     int gapClose = 3;  // px
     int under = 2;     // the fill goes this far under the lines
+    bool usePattern = false;
 
 protected:
     void apply(CanvasView* v, const QPolygonF& poly, Qt::KeyboardModifiers mods) override;

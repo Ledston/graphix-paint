@@ -522,6 +522,21 @@ void drawIcon(QPainter& p, const QString& n, const QColor& col, const QColor& ac
         d.cubicTo(22, 16.5, 19.5, 13, 19.5, 13);
         path(d, true, acc);
         poly({{4, 11}, {18, 11}, {11, 18}}, true, QColor(acc.red(), acc.green(), acc.blue(), 140));
+    } else if (n == "pattern") {
+        p.drawRoundedRect(QRectF(4, 4, 16, 16), 1.5, 1.5);
+        for (int y = 0; y < 2; ++y)
+            for (int x = 0; x < 2; ++x) circle(8 + x * 8, 8 + y * 8, 1.8, true, (x + y) % 2 ? col : acc);
+    } else if (n == "stroke") {
+        QPen dash = p.pen();
+        dash.setDashPattern({2, 2});
+        p.setPen(dash);
+        p.drawRect(QRectF(7, 7, 10, 10));
+        QPen thick = p.pen();
+        thick.setStyle(Qt::SolidLine);
+        thick.setColor(acc);
+        thick.setWidthF(2.2);
+        p.setPen(thick);
+        p.drawRoundedRect(QRectF(4, 4, 16, 16), 2, 2);
     } else if (n == "gradient") {
         QLinearGradient g(4, 0, 20, 0);
         g.setColorAt(0, col);

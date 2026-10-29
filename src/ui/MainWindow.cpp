@@ -36,6 +36,11 @@
 #include <QStandardPaths>
 #include <QThread>
 #include <QtConcurrent/QtConcurrentRun>
+#include <QInputDialog>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSettings>
+#include <QDoubleSpinBox>
 #include <atomic>
 
 #include "app/App.h"
@@ -78,6 +83,9 @@
 #include "ui/NavigatorPanel.h"
 #include "ui/PreferencesDialog.h"
 #include "ui/ReferencePanel.h"
+#include "ui/MaterialsPanel.h"
+#include "app/MaterialActions.h"
+#include "app/Materials.h"
 #include "ui/ScratchpadPanel.h"
 #include "ui/ShortcutsDialog.h"
 #include "ui/Theme.h"
@@ -314,6 +322,8 @@ void MainWindow::createActions() {
     act("edit.pastenew", "Paste as new image", "Edit", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V), [this] { paste(true); }, {}, false);
     act("edit.clear", "Clear", "Edit", QKeySequence(Qt::Key_Delete), [doc, cur] { if (auto* l = cur()) ops::clearLayer(*doc(), l->id); }, "clear");
     act("edit.fill", "Fill with main color", "Edit", QKeySequence(Qt::ALT | Qt::Key_Backspace), [this] { fill(); }, "fill");
+    act("edit.fillpattern", "Fill with pattern", "Edit", QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_Backspace), [this] { fillPattern(); }, "pattern");
+    act("edit.stroke", "Stroke selection...", "Edit", {}, [this] { strokeSelectionDialog(); }, "stroke");
     act("edit.transform", "Free transform", "Edit", QKeySequence(Qt::CTRL | Qt::Key_T), [] { app()->tools()->setCurrent("transform"); }, "transform");
     act("edit.warp", "Mesh warp", "Edit", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_T), [] { app()->tools()->setCurrent("warp"); }, "warp");
     act("edit.liquify", "Liquify", "Edit", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_X), [] { app()->tools()->setCurrent("liquify"); }, "liquify");
@@ -637,7 +647,7 @@ void MainWindow::createMenus() {
 
     QMenu* edit = mb->addMenu(T("&Edit"));
     for (const char* id : {"edit.undo", "edit.redo", "", "edit.cut", "edit.copy", "edit.copymerged", "edit.paste", "edit.pastenew",
-                           "", "edit.clear", "edit.fill", "", "edit.transform", "edit.warp", "edit.liquify"}) {
+                           "", "edit.clear", "edit.fill", "edit.fillpattern", "edit.stroke", "", "edit.transform", "edit.warp", "edit.liquify"}) {
         if (!*id) edit->addSeparator();
         else add(edit, id);
     }
@@ -901,7 +911,13 @@ void MainWindow::createDocks() {
     }
     auto* scratchDock = dock("scratchDock", "Scratchpad", new ScratchpadPanel, Qt::RightDockWidgetArea);
     auto* previewDock = dock("previewDock", "Preview", new PreviewPanel, Qt::RightDockWidgetArea);
-    tabifyDockWidget(histDock, refDock);
+    auto* materials = new MaterialsPanel;
+    auto* matDock = dock("materialsDock", "Materials", materials, Qt::RightDockWidgetArea);
+    connect(materials, &MaterialsPanel::place, this, [this](const QString& k, const QString& v) { placeMaterial(k, v); });
+    connect(materials, &MaterialsPanel::applyGradient, this, &MainWindow::applyGradientMap);
+    connect(materials, &MaterialsPanel::saveSelection, this, &MainWindow::saveSelectionAsMaterial);
+    tabifyDockWidget(histDock, matDock);
+    tabifyDockWidget(matDock, refDock);
     tabifyDockWidget(refDock, scratchDock);
     tabifyDockWidget(scratchDock, previewDock);
     histDock->raise();
@@ -1278,6 +1294,116 @@ void MainWindow::fill() {
     if (!d || !d->currentLayer()) return;
     app()->tools()->commitPending();
     ops::fillLayer(*d, d->currentLayer()->id, app()->foreground());
+}
+
+void MainWindow::placeMaterial(const QString& kind, const QString& value, std::optional<QPointF> at) {
+    Document* d = activeDocument();
+    if (!d) {
+        app()->showStatus(T("Open or create a picture first."));
+        return;
+    }
+    app()->tools()->commitPending();
+    QString err;
+    Layer* l = nullptr;
+    if (kind == "image") l = materials::placeImage(*d, value, at, &err);
+    else if (kind == "pattern") l = materials::placePattern(*d, value, app()->foreground(), &err);
+    else if (kind == "tone") l = materials::placeTone(*d, value.toInt(), app()->foreground(), &err);
+    else if (kind == "gradient") l = materials::placeGradient(*d, value.toInt(), &err);
+    else if (kind == "save-gradient") {
+        auto* g = dynamic_cast<AdjustmentLayer*>(d->currentLayer());
+        if (!g || g->adjustment.type != AdjustmentType::GradientMap) {
+            app()->showStatus(T("Select a gradient map layer first."), 5000);
+            return;
+        }
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, T("Save gradient map"), T("Name:"), QLineEdit::Normal, g->name, &ok);
+        if (ok && materials::saveLayerGradient(*d, name, &err)) app()->showStatus(T("Saved to Materials > Gradient maps."));
+        return;
+    }
+    if (!l && !err.isEmpty()) app()->showStatus(err, 5000);
+}
+
+void MainWindow::fillPattern() {
+    Document* d = activeDocument();
+    if (!d) return;
+    app()->tools()->commitPending();
+    QString err;
+    if (!materials::fillWithPattern(*d, app()->foreground(), &err)) app()->showStatus(err, 5000);
+}
+
+void MainWindow::strokeSelectionDialog() {
+    Document* d = activeDocument();
+    if (!d) return;
+    app()->tools()->commitPending();
+    if (!d->hasSelection()) {
+        app()->showStatus(T("Select an area first."), 5000);
+        return;
+    }
+    QDialog dlg(this);
+    dlg.setWindowTitle(T("Stroke selection"));
+    auto* f = new QFormLayout(&dlg);
+    QSettings& s = app()->settings();
+    auto* width = new QDoubleSpinBox(&dlg);
+    width->setRange(0.5, 500);
+    width->setDecimals(1);
+    width->setSuffix(T(" px"));
+    width->setValue(s.value("stroke/width", 4.0).toDouble());
+    f->addRow(T("Width:"), width);
+    auto* pos = new QComboBox(&dlg);
+    pos->addItem(T("Inside"), 0);
+    pos->addItem(T("On the edge"), 1);
+    pos->addItem(T("Outside"), 2);
+    pos->setCurrentIndex(std::clamp(s.value("stroke/position", 1).toInt(), 0, 2));
+    f->addRow(T("Position:"), pos);
+    auto* with = new QComboBox(&dlg);
+    with->addItem(T("The main color"), 0);
+    with->addItem(T("The pattern from Materials"), 1);
+    with->setCurrentIndex(std::clamp(s.value("stroke/pattern", 0).toInt(), 0, 1));
+    f->addRow(T("Paint with:"), with);
+    auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    f->addRow(bb);
+    if (dlg.exec() != QDialog::Accepted) return;
+    s.setValue("stroke/width", width->value());
+    s.setValue("stroke/position", pos->currentIndex());
+    s.setValue("stroke/pattern", with->currentIndex());
+    QString err;
+    if (!materials::strokeSelection(*d, width->value(), materials::StrokePosition(pos->currentIndex()), app()->foreground(),
+                                    with->currentIndex() == 1, &err))
+        app()->showStatus(err, 5000);
+}
+
+void MainWindow::saveSelectionAsMaterial(bool asPattern) {
+    Document* d = activeDocument();
+    if (!d) {
+        app()->showStatus(T("Open or create a picture first."));
+        return;
+    }
+    app()->tools()->commitPending();
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, asPattern ? T("Save as pattern") : T("Save as picture"), T("Name:"),
+                                               QLineEdit::Normal, d->currentLayer() ? d->currentLayer()->name : QString(), &ok);
+    if (!ok) return;
+    QString err;
+    if (materials::saveSelection(*d, asPattern, name, &err).isEmpty()) app()->showStatus(err, 5000);
+    else app()->showStatus(asPattern ? T("Saved to Materials > Patterns.") : T("Saved to Materials > Pictures."));
+}
+
+void MainWindow::applyGradientMap(int index) {
+    Document* d = activeDocument();
+    if (!d) return;
+    app()->tools()->commitPending();
+    Layer* l = d->currentLayer();
+    const QList<Gradient> grads = Materials::instance().gradients();
+    if (!l || !l->isRaster() || index < 0 || index >= grads.size()) {
+        app()->showStatus(T("Adjustments change pixels: select a pixel layer, or use an adjustment layer."));
+        return;
+    }
+    Adjustment a = Adjustment::defaults(AdjustmentType::GradientMap);
+    a.params["gradient"] = grads[index].toJson();
+    AdjustmentDialog dlg(d, l->id, a, AdjustmentDialog::Mode::ApplyToLayer, this);
+    dlg.exec();
 }
 
 void MainWindow::adjustment(int type, bool asLayer) {
@@ -1746,11 +1872,31 @@ void MainWindow::closeEvent(QCloseEvent* e) {
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* e) {
-    if (e->mimeData()->hasUrls() || e->mimeData()->hasImage()) e->acceptProposedAction();
+    const QMimeData* md = e->mimeData();
+    if (md->hasFormat(QString::fromLatin1(kMaterialMime)) || md->hasUrls() || md->hasImage()) e->acceptProposedAction();
 }
 
 void MainWindow::dropEvent(QDropEvent* e) {
     const QMimeData* md = e->mimeData();
+    if (md->hasFormat(QString::fromLatin1(kMaterialMime))) {
+        // a material from Window > Materials: placed where it was dropped
+        const QJsonObject o = QJsonDocument::fromJson(md->data(QString::fromLatin1(kMaterialMime))).object();
+        std::optional<QPointF> at;
+        for (QWidget* w = childAt(e->position().toPoint()); w; w = w->parentWidget())
+            if (auto* v = qobject_cast<CanvasView*>(w)) {
+                for (QMdiSubWindow* sw : m_mdi->subWindowList())
+                    if (auto* cw = dynamic_cast<CanvasWindow*>(sw); cw && cw->view() == v) m_mdi->setActiveSubWindow(sw);
+                at = v->toCanvas(v->mapFrom(this, e->position()));
+                break;
+            }
+        if (!at) {
+            app()->showStatus(T("Drop materials onto the canvas."));
+            return;
+        }
+        placeMaterial(o.value("kind").toString(), o.value("value").toString(), at);
+        e->acceptProposedAction();
+        return;
+    }
     if (md->hasUrls()) {
         Document* d = activeDocument();
         QWidget* target = childAt(e->position().toPoint());

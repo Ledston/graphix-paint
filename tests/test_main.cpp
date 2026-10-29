@@ -4,6 +4,8 @@
 #include <QPainterPath>
 #include <QGuiApplication>
 #include "app/BrushLibrary.h"
+#include "app/MaterialActions.h"
+#include "app/Materials.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QTemporaryDir>
@@ -616,6 +618,106 @@ static void testDecorBrushes() {
     }
 }
 
+static void testMaterials() {
+    QTemporaryDir root;
+    Materials& m = Materials::instance();
+    m.setRoot(root.path());
+    CHECK(m.patterns().contains("Checker") && m.patterns().contains("Polka dots"));
+    CHECK(Materials::tones().size() >= 6 && m.gradients().size() >= 8);
+    const QImage checker = m.pattern("Checker");
+    CHECK(!checker.isNull() && checker.width() >= 4);
+    {   // a pattern on a new layer: covers the selection only, with holes where the tile is empty
+        Document doc(QSize(200, 200));
+        ops::addRasterLayer(doc);
+        QPainterPath p;
+        p.addRect(20, 20, 100, 100);
+        ops::selectPath(doc, p, ops::SelectMode::Replace, false, "sel");
+        m.patternScale = 1;
+        m.patternTint = true;
+        const int before = int(doc.root()->children.size());
+        auto* l = static_cast<RasterLayer*>(materials::placePattern(doc, "Checker", Qt::red, nullptr));
+        CHECK(l && int(doc.root()->children.size()) == before + 1);
+        CHECK(m.currentPattern() == "Checker");
+        if (l) {
+            int on = 0, off = 0;
+            for (int y = 20; y < 120; ++y)
+                for (int x = 20; x < 120; ++x) ((l->pixels.pixel(x, y) >> 24) > 128 ? on : off)++;
+            CHECK(on > 2000 && off > 2000);
+            CHECK((l->pixels.pixel(150, 150) >> 24) == 0);  // outside the selection
+            const quint32 px = l->pixels.pixel(20, 20) ? l->pixels.pixel(20, 20) : l->pixels.pixel(20 + checker.width() / 2, 20);
+            CHECK(((px >> 16) & 0xff) > 200 && ((px >> 8) & 0xff) < 30);  // in the main color
+        }
+        doc.undo();
+        CHECK(int(doc.root()->children.size()) == before);
+    }
+    {   // Edit > Fill with pattern on the current layer, then a stroke around the selection
+        Document doc(QSize(200, 200));
+        auto* l = ops::addRasterLayer(doc);
+        QString err;
+        m.setCurrentPattern("Checker");
+        CHECK(materials::fillWithPattern(doc, Qt::black, &err));
+        l = static_cast<RasterLayer*>(doc.currentLayer());
+        int on = 0;
+        for (int x = 0; x < 200; ++x) on += (l->pixels.pixel(x, 100) >> 24) > 128;
+        CHECK(on > 40 && on < 160);
+        ops::clearLayer(doc, l->id);
+        QPainterPath p;
+        p.addRect(50, 50, 100, 100);
+        ops::selectPath(doc, p, ops::SelectMode::Replace, false, "sel");
+        CHECK(materials::strokeSelection(doc, 6, materials::StrokePosition::Outside, Qt::black, false, &err));
+        l = static_cast<RasterLayer*>(doc.currentLayer());
+        auto a = [&](int x, int y) { return int(l->pixels.pixel(x, y) >> 24); };
+        CHECK(a(47, 100) == 255 && a(45, 100) == 255 && a(52, 100) == 0 && a(40, 100) == 0 && a(100, 100) == 0);
+        l->pixels.fillRect(doc.bounds(), 0);  // (Clear works only inside the selection)
+        CHECK(materials::strokeSelection(doc, 6, materials::StrokePosition::Inside, Qt::black, false, &err));
+        l = static_cast<RasterLayer*>(doc.currentLayer());
+        CHECK(a(52, 100) == 255 && a(47, 100) == 0 && a(60, 100) == 0);
+        l->pixels.fillRect(doc.bounds(), 0);
+        CHECK(materials::strokeSelection(doc, 8, materials::StrokePosition::Center, Qt::black, false, &err));
+        l = static_cast<RasterLayer*>(doc.currentLayer());
+        CHECK(a(48, 100) == 255 && a(51, 100) == 255 && a(40, 100) == 0 && a(60, 100) == 0);
+        ops::deselect(doc);
+        CHECK(!materials::strokeSelection(doc, 4, materials::StrokePosition::Inside, Qt::black, false, &err) && !err.isEmpty());
+    }
+    {   // a screentone layer and a gradient map layer
+        Document doc(QSize(120, 120));
+        ops::addRasterLayer(doc);
+        auto* t = static_cast<RasterLayer*>(materials::placeTone(doc, 1, Qt::black, nullptr));
+        CHECK(t && t->fx.screentone && (t->pixels.pixel(60, 60) >> 24) == 255);
+        auto* g = dynamic_cast<AdjustmentLayer*>(materials::placeGradient(doc, 2, nullptr));
+        CHECK(g && g->adjustment.type == AdjustmentType::GradientMap);
+        if (g) CHECK(Gradient::fromJson(g->adjustment.params.value("gradient").toObject()).stops.size() >= 2);
+        // the gradient goes into the user's set and can be removed again
+        const int n = int(m.gradients().size());
+        CHECK(materials::saveLayerGradient(doc, "My map", nullptr));
+        CHECK(int(m.gradients().size()) == n + 1 && m.isUserGradient("My map"));
+        m.removeGradient("My map");
+        CHECK(int(m.gradients().size()) == n);
+    }
+    {   // part of a drawing saved as a picture and as a pattern, then placed again
+        Document doc(QSize(100, 100));
+        auto* l = ops::addRasterLayer(doc);
+        l->pixels.fillRect(QRect(10, 10, 20, 30), 0xff00ff00u);
+        QString err;
+        const QString pic = materials::saveSelection(doc, false, "Leaf", &err);
+        CHECK(!pic.isEmpty());
+        QString file;
+        for (const QString& f : m.images())
+            if (QFileInfo(f).completeBaseName() == pic) file = f;
+        CHECK(!file.isEmpty() && QImage(file).size() == QSize(20, 30));
+        auto* placed = static_cast<RasterLayer*>(materials::placeImage(doc, file, QPointF(70, 70), &err));
+        CHECK(placed && (placed->pixels.pixel(70, 70) >> 24) == 255 && (placed->pixels.pixel(55, 70) >> 24) == 0);
+        CHECK(m.removeFile(file) && !m.images().contains(file));
+        doc.setCurrentLayer(l->id);
+        QPainterPath p;
+        p.addRect(0, 0, 40, 40);
+        ops::selectPath(doc, p, ops::SelectMode::Replace, false, "sel");
+        const QString pat = materials::saveSelection(doc, true, "Square", &err);
+        CHECK(pat == "Square" && m.patterns().contains("Square") && m.pattern("Square").size() == QSize(40, 40));
+        CHECK(m.currentPattern() == "Square");
+    }
+}
+
 int main(int argc, char** argv) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
@@ -636,6 +738,7 @@ int main(int argc, char** argv) {
     testMultiLayerOps();
     testNewBrushes();
     testDecorBrushes();
+    testMaterials();
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

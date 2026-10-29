@@ -44,6 +44,19 @@
 #include <QFileInfo>
 #include <QThreadPool>
 #include "ui/Theme.h"
+#include "ui/MaterialsPanel.h"
+#include "app/Materials.h"
+#include <QDialog>
+#include <QDockWidget>
+#include <QDialogButtonBox>
+#include <QDropEvent>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QListWidget>
+#include <QMimeData>
+#include <QPushButton>
+#include <QTabWidget>
+#include <QTimer>
 
 using namespace gx;
 
@@ -800,6 +813,95 @@ int main(int argc, char** argv) {
         CHECK(app()->prefs().showThirds != thirds);
         app()->prefs().showThirds = thirds;
         app()->preferencesChanged();
+    }, w);
+
+    scenario("materials: drag onto the canvas, fill with pattern, stroke selection", [](MainWindow& w) {
+        Document* d = view()->doc();
+        auto* panel = w.findChild<MaterialsPanel*>();
+        CHECK(panel && panel->tabs()->count() == 4);
+        if (!panel) return;
+        for (QListWidget* l : panel->findChildren<QListWidget*>()) CHECK(l->count() > 0 || l->parentWidget() == panel->tabs()->widget(0));
+        QHash<QString, QAction*> acts;
+        for (QAction* a : w.findChildren<QAction*>())
+            if (!a->property("en").toString().isEmpty()) acts.insert(a->property("en").toString(), a);
+        CHECK(acts.contains("Fill with pattern") && acts.contains("Stroke selection..."));
+        auto drop = [&](const QString& kind, const QString& value, QPointF canvasPos) {
+            auto* md = new QMimeData;
+            md->setData(QString::fromLatin1(kMaterialMime), QJsonDocument(QJsonObject{{"kind", kind}, {"value", value}}).toJson());
+            const QPointF at = view()->mapTo(&w, view()->toWidget(canvasPos).toPoint());
+            QDragEnterEvent enter(at.toPoint(), Qt::CopyAction, md, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(&w, &enter);
+            CHECK(enter.isAccepted());
+            QDropEvent ev(at, Qt::CopyAction, md, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(&w, &ev);
+            pump(30);
+            delete md;
+        };
+        // a pattern dropped on the canvas: a new layer filled with it
+        size_t layers = d->root()->children.size();
+        drop("pattern", "Polka dots", QPointF(400, 300));
+        CHECK(d->root()->children.size() == layers + 1);
+        const long long dots = opaquePixels(d->currentLayer());
+        CHECK(dots > 800 * 600 / 20 && dots < 800 * 600 * 9 / 10);
+        // a picture lands where it is dropped
+        QImage pic(40, 40, QImage::Format_ARGB32_Premultiplied);
+        pic.fill(Qt::blue);
+        const QString file = Materials::instance().addImage(pic, "Blue square");
+        drop("image", file, QPointF(200, 150));
+        CHECK(d->root()->children.size() == layers + 2);
+        auto* pl = dynamic_cast<RasterLayer*>(d->currentLayer());
+        CHECK(pl && (pl->pixels.pixel(200, 150) >> 24) == 255 && (pl->pixels.pixel(260, 150) >> 24) == 0);
+        Materials::instance().removeFile(file);
+        // a screentone and a gradient map from the panel (double-click does the same)
+        Q_EMIT panel->place("tone", "0");
+        pump(20);
+        auto* tl = dynamic_cast<RasterLayer*>(d->currentLayer());
+        CHECK(tl && tl->fx.screentone);
+        Q_EMIT panel->place("gradient", "0");
+        pump(20);
+        auto* gl = dynamic_cast<AdjustmentLayer*>(d->currentLayer());
+        CHECK(gl && gl->adjustment.type == AdjustmentType::GradientMap);
+        // Edit > Fill with pattern on a fresh layer
+        ops::addRasterLayer(*d);
+        Materials::instance().setCurrentPattern("Stripes");
+        acts["Fill with pattern"]->trigger();
+        pump(20);
+        const long long stripes = opaquePixels(d->currentLayer());
+        CHECK(stripes > 800 * 600 / 10 && stripes < 800 * 600 * 9 / 10);
+        // Edit > Stroke selection: an outline around a rectangle
+        ops::addRasterLayer(*d);
+        QPainterPath r;
+        r.addRect(300, 200, 200, 150);
+        ops::selectPath(*d, r, ops::SelectMode::Replace, false, "sel");
+        QTimer::singleShot(150, [] {
+            if (auto* dlg = qobject_cast<QDialog*>(QApplication::activeModalWidget()))
+                if (auto* bb = dlg->findChild<QDialogButtonBox*>()) bb->button(QDialogButtonBox::Ok)->click();
+        });
+        acts["Stroke selection..."]->trigger();
+        pump(30);
+        auto* sl = dynamic_cast<RasterLayer*>(d->currentLayer());
+        CHECK(sl && opaquePixels(sl) > 600 * 2 && (sl->pixels.pixel(400, 275) >> 24) == 0);
+        std::fprintf(stderr, "INFO stroke pixels %lld\n", sl ? opaquePixels(sl) : 0LL);
+        ops::deselect(*d);
+        // undo takes the stroke back (deselect and select are steps too)
+        const quint32 sid = sl ? sl->id : 0;
+        bool gone = false;
+        for (int i = 0; i < 4 && !gone; ++i) {
+            d->undo();
+            Layer* l = d->layer(sid);
+            gone = l && opaquePixels(l) == 0;
+        }
+        CHECK(gone);
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) {
+            for (QDockWidget* dk : w.findChildren<QDockWidget*>())
+                if (dk->objectName() == "materialsDock") dk->raise();
+            for (int t = 0; t < 4; ++t) {
+                panel->tabs()->setCurrentIndex(t);
+                pump(40);
+                panel->grab().save(qEnvironmentVariable("GX_SHOTS") + QString("/materials_%1.png").arg(t));
+            }
+            w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/materials_window.png");
+        }
     }, w);
 
     scenario("reference over everything", [](MainWindow& w) {

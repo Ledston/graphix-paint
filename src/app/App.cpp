@@ -10,6 +10,7 @@
 #include "app/BrushLibrary.h"
 #include "app/I18n.h"
 #include "app/Shortcuts.h"
+#include "app/Materials.h"
 #include "app/Recorder.h"
 #include "core/Textures.h"
 #include "tools/ToolManager.h"
@@ -68,6 +69,7 @@ void App::init() {
 
     m_tools = new ToolManager(this);
     Recorder::instance().setRoot(m_dataDir + "/recordings");
+    Materials::instance().setRoot(m_dataDir + "/materials");
     QDir(m_dataDir + "/timelapse").removeRecursively();  // frames of the old timelapse (before video recording)
 }
 

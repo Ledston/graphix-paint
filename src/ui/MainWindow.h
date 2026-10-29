@@ -3,6 +3,8 @@
 #include <QMainWindow>
 #include <QPointer>
 #include <memory>
+#include <optional>
+#include <QPointF>
 
 class QMdiArea;
 class QMdiSubWindow;
@@ -71,6 +73,12 @@ private:
     void copy(bool merged, bool cut);
     void paste(bool asNewDocument);
     void fill();
+    // Window > Materials, Edit > Fill with pattern / Stroke selection
+    void placeMaterial(const QString& kind, const QString& value, std::optional<QPointF> at = {});
+    void fillPattern();
+    void strokeSelectionDialog();
+    void saveSelectionAsMaterial(bool asPattern);
+    void applyGradientMap(int index);
     void adjustment(int type, bool asLayer);
     void filter(const QString& id);
     void effectFilter(const QString& key);  // Filter > Effects
