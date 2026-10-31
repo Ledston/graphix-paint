@@ -25,6 +25,7 @@ public:
     void reject() override;
     // the area the effect changes (layer content + room for the effect, inside the selection)
     QRect area() const;
+    void setNewLayer(bool on);
 
 private:
     void schedule();
@@ -37,6 +38,7 @@ private:
     QString m_key;
     LayerEffects m_fx;
     QCheckBox* m_previewBox = nullptr;
+    QCheckBox* m_newLayer = nullptr;  // the effect goes onto a new layer above (the layer stays as it was)
     QLabel* m_busy = nullptr;
     QTimer m_timer;
     QFutureWatcher<RasterSurface> m_watch;

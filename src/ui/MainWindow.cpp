@@ -87,6 +87,7 @@
 #include "ui/PreferencesDialog.h"
 #include "ui/ReferencePanel.h"
 #include "ui/MaterialsPanel.h"
+#include "ui/LiquifyDialog.h"
 #include "app/MaterialActions.h"
 #include "app/Materials.h"
 #include "ui/ScratchpadPanel.h"
@@ -337,7 +338,8 @@ void MainWindow::createActions() {
     act("edit.stroke", "Stroke selection...", "Edit", {}, [this] { strokeSelectionDialog(); }, "stroke");
     act("edit.transform", "Free transform", "Edit", QKeySequence(Qt::CTRL | Qt::Key_T), [] { app()->tools()->setCurrent("transform"); }, "transform");
     act("edit.warp", "Mesh warp", "Edit", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_T), [] { app()->tools()->setCurrent("warp"); }, "warp");
-    act("edit.liquify", "Liquify", "Edit", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_X), [] { app()->tools()->setCurrent("liquify"); }, "liquify");
+    act("edit.liquify", "Liquify brush on the canvas", "Edit", {}, [] { app()->tools()->setCurrent("liquify"); }, "liquify");
+    act("filter.liquify", "Liquify...", "Filter", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_X), [this] { liquifyDialog(); }, "liquify");
     act("edit.prefs", "Program settings...", "Settings", QKeySequence(Qt::CTRL | Qt::Key_K), [this] { preferences(); }, "settings", false);
     act("edit.shortcuts", "Keyboard shortcuts...", "Settings", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_K), [this] { shortcutsDialog(); }, "keyboard", false);
     act("settings.pen", "Pen and tablet...", "Settings", {}, [this] { preferences(int(PreferencesDialog::Pen)); }, "tablet", false);
@@ -729,8 +731,11 @@ void MainWindow::createMenus() {
     QMenu* filt = mb->addMenu(T("Fi&lter"));
     add(filt, "filter.lineart");
     filt->addSeparator();
+    add(filt, "filter.liquify");
     QMenu* adjM = filt->addMenu(Theme::icon("adjustment"), T("Adjustments"));
     for (int t = 0; t < int(AdjustmentType::Count); ++t) add(adjM, QStringLiteral("adjust.%1").arg(t));
+    adjM->addSeparator();
+    add(adjM, "filter.liquify");
     QMenu* fxM = filt->addMenu(Theme::icon("fx"), T("Effects"));
     fxM->setToolTipsVisible(true);
     for (const char* id : {"filter.fx.chromatic", "", "filter.fx.outline", "filter.fx.shadow", "filter.fx.outerGlow", "", "filter.fx.innerShadow",
@@ -1542,6 +1547,41 @@ void MainWindow::applyGradientMap(int index) {
     a.params["gradient"] = grads[index].toJson();
     AdjustmentDialog dlg(d, l->id, a, AdjustmentDialog::Mode::ApplyToLayer, this);
     dlg.exec();
+}
+
+void MainWindow::liquifyDialog() {
+    Document* d = activeDocument();
+    if (!d) return;
+    app()->tools()->commitPending();
+    auto* l = dynamic_cast<RasterLayer*>(d->currentLayer());
+    if (!l) {
+        app()->showStatus(T("Liquify works on pixel layers."));
+        return;
+    }
+    if (l->isEffectivelyLocked()) {
+        app()->showStatus(T("The layer is locked."));
+        return;
+    }
+    const QRect area = d->bounds();
+    const QImage src = surfaceToImage(l->pixels, area);
+    // outside the selection nothing moves (frozen), as in Photoshop
+    std::vector<float> frozen;
+    if (d->hasSelection()) {
+        std::vector<float> sel(size_t(area.width()) * area.height());
+        readMask(d->selection(), area, sel.data());
+        frozen.resize(sel.size());
+        for (size_t i = 0; i < sel.size(); ++i) frozen[i] = 1.f - sel[i];
+    }
+    LiquifyDialog dlg(src, frozen.empty() ? nullptr : &frozen, this);
+    if (dlg.exec() != QDialog::Accepted || !dlg.field().changed()) return;
+    const quint32 id = l->id;
+    d->pushUndo(T("Liquify"));
+    if (auto* nl = dynamic_cast<RasterLayer*>(d->layer(id))) {
+        nl->pixels.fillRect(area, 0);
+        imageToSurface(dlg.result(), nl->pixels, area.topLeft());
+        nl->pixels.optimizeRect(area);
+        d->pixelsChanged(area, nl);
+    }
 }
 
 void MainWindow::adjustment(int type, bool asLayer) {

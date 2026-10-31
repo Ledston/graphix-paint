@@ -81,6 +81,7 @@ private:
     void applyGradientMap(int index);
     void adjustment(int type, bool asLayer);
     void filter(const QString& id);
+    void liquifyDialog();  // Filter > Liquify (its own window)
     void effectFilter(const QString& key);  // Filter > Effects
     void commandPalette();                  // Help > Find a command (Ctrl+F)
     void layerEffects(quint32 id, const QString& focus = {});

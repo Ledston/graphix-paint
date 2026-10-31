@@ -1333,3 +1333,38 @@ Reach	Охват
 Smart selection	Умное выделение
 Smart selection: take away	Умное выделение: убрать
 The points of the outer edge stay.	Точки внешнего края не удаляются.
+Brings the pixels back to where they were.	Возвращает пиксели на место.
+Brings the whole picture back toward the start by the amount above (frozen places stay).	Возвращает всю картинку к исходной на указанную долю (замороженные места не трогает).
+Evens out bumpy warps.	Сглаживает неровные искажения.
+Filter	Фильтр
+Fit in the window	Вписать в окно
+Forward warp	Деформация
+Freeze	Заморозить
+How fast twirl, pucker and bloat work.	Как быстро работают скручивание, сжатие и вздутие.
+How strong the brush stays toward its edge. Low: soft edge.	Насколько сильна кисть к краю. Меньше — мягче край.
+How strongly the brush moves the pixels.	Насколько сильно кисть сдвигает пиксели.
+Invert frozen	Обратить заморозку
+Lets frozen places move again.	Снова разрешает двигать замороженные места.
+Liquify brush on the canvas	Пластика кистью на холсте
+Mouse wheel zooms, Space or the middle button moves the picture. [ and ] change the size.	Колёсико — масштаб, Пробел или средняя кнопка — двигать картинку. [ и ] — размер кисти.
+Moves the pixels to the left of the pen's way (Alt: to the right).	Сдвигает пиксели влево от движения пера (с Alt — вправо).
+On a new layer	Новым слоем
+Paints places that must not move (shown in red).	Закрашивает места, которые нельзя двигать (видны красным).
+Pen pressure	Нажим пера
+Pucker	Сжатие
+Pulls the pixels toward the middle of the brush (Alt: bloat).	Стягивает пиксели к середине кисти (с Alt — вздутие).
+Push left	Сдвиг влево
+Pushes the pixels along with the pen.	Тянет пиксели вслед за пером.
+Pushes the pixels out from the middle of the brush (Alt: pucker).	Раздувает пиксели от середины кисти (с Alt — сжатие).
+Rate	Скорость
+Reconstruct	Реконструкция
+Show frozen places	Показывать замороженное
+Show mesh	Показывать сетку
+Thaw	Разморозить
+Thaw all	Разморозить всё
+The effect is drawn as pixels: onto a new layer above, or into the layer itself. To keep it changeable, use Layer > Effects instead.	Эффект рисуется пикселями: новым слоем сверху или прямо в слой. Чтобы его можно было менять потом, используйте Слой > Эффекты.
+The effect is put on its own layer above; the layer itself is not changed.	Эффект ложится отдельным слоем сверху, сам слой не меняется.
+Turns the pixels under the brush (Alt: the other way).	Закручивает пиксели под кистью (с Alt — в другую сторону).
+Turns the pixels under the brush the other way.	Закручивает пиксели под кистью в другую сторону.
+Twirl counterclockwise	Скручивание против часовой
+Whole picture	Вся картинка

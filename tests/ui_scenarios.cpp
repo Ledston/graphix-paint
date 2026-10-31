@@ -49,6 +49,8 @@
 #include "tools/FocusLinesTool.h"
 #include "tools/SelectTools.h"
 #include "tools/TransformTool.h"
+#include "ui/LiquifyDialog.h"
+#include "core/LiquifyField.h"
 #include "app/Shortcuts.h"
 #include "core/Textures.h"
 #include "ui/ColorPanel.h"
@@ -720,12 +722,19 @@ int main(int argc, char** argv) {
             waitPreview(dlg);
             CHECK(l->preview != nullptr);  // the canvas shows the result before OK
             CHECK(opaquePixels(l) > before);
+            dlg.setNewLayer(true);  // the default: the effect on its own layer above
             dlg.accept();
         }
         CHECK(!l->preview);
-        const long long withOutline = opaquePixels(l);
-        CHECK(withOutline > before);
+        CHECK(opaquePixels(l) == before);  // the layer itself is not changed
+        auto* fxLayer = dynamic_cast<RasterLayer*>(d->currentLayer());
+        CHECK(fxLayer && fxLayer != l && d->root()->indexOf(fxLayer) == d->root()->indexOf(l) + 1);
+        const long long outlineOnly = fxLayer ? opaquePixels(fxLayer) : 0;
+        std::fprintf(stderr, "INFO outline layer %lld pixels\n", outlineOnly);
+        CHECK(outlineOnly > 0 && fxLayer && (fxLayer->pixels.pixel(400, 275) >> 24) == 0);  // the inside stays on the old layer
+        const quint32 fxId = fxLayer ? fxLayer->id : 0;
         d->undo();
+        CHECK(!d->layer(fxId));
         l = static_cast<RasterLayer*>(d->currentLayer());
         CHECK(opaquePixels(l) == before);
         {   // cancel: nothing changes
@@ -735,10 +744,11 @@ int main(int argc, char** argv) {
             dlg.reject();
         }
         CHECK(!l->preview && opaquePixels(l) == before);
-        {   // chromatic aberration: the edges get colored fringes
+        {   // chromatic aberration into the layer itself: the edges get colored fringes
             EffectFilterDialog dlg(d, l->id, "chromatic", &w);
             dlg.show();
             waitPreview(dlg);
+            dlg.setNewLayer(false);
             dlg.accept();
         }
         QImage img = surfaceToImage(l->pixels, QRect(290, 190, 220, 170));
@@ -1332,6 +1342,98 @@ int main(int argc, char** argv) {
         warp->cancel();
         app()->tools()->setCurrent("brush");
         pump(30);
+    }, w);
+
+    scenario("liquify window: tools, freeze, undo, OK and Cancel", [](MainWindow& w) {
+        Document* d = view()->doc();
+        auto* l = static_cast<RasterLayer*>(d->currentLayer());
+        // vertical stripes: any warp shows as bent stripes
+        for (int x = 100; x < 700; x += 40) l->pixels.fillRect(QRect(x, 100, 20, 400), 0xff202020u);
+        d->pixelsChanged(d->bounds(), l);
+        const QImage before = surfaceToImage(l->pixels, d->bounds());
+        auto diff = [](const QImage& a, const QImage& b, const QRect& r) {
+            int n = 0;
+            for (int y = r.top(); y <= r.bottom(); ++y)
+                for (int x = r.left(); x <= r.right(); ++x) n += a.pixel(x, y) != b.pixel(x, y);
+            return n;
+        };
+        {   // the field on its own: every tool moves pixels (freeze and thaw do not)
+            LiquifyField f;
+            f.begin(before);
+            LiquifyField::Brush b;
+            b.size = 120;
+            b.pressure = 0.8;
+            for (int m = 0; m < LiquifyField::ModeCount; ++m) {
+                if (m == LiquifyField::Reconstruct || m == LiquifyField::Smooth || m == LiquifyField::Freeze || m == LiquifyField::Thaw) continue;
+                f.begin(before);
+                // push left moves sideways to the pen's way: go down so the vertical stripes bend
+                const bool side = m == LiquifyField::PushLeft;
+                for (int i = 0; i < 8; ++i)
+                    f.dab(LiquifyField::Mode(m), side ? QPointF(300, 280 + i * 5) : QPointF(300 + i * 5, 300), side ? QPointF(0, 5) : QPointF(5, 0), 1.0, b);
+                const int changed = diff(f.output(), before, QRect(200, 200, 200, 200));
+                if (changed < 50) std::fprintf(stderr, "NOTE liquify mode %d changed %d pixels\n", m, changed);
+                CHECK(changed >= 50);
+            }
+            // reconstruct brings it back; frozen places do not move
+            f.begin(before);
+            for (int i = 0; i < 8; ++i) f.dab(LiquifyField::Forward, QPointF(300 + i * 5, 300), QPointF(5, 0), 1.0, b);
+            f.saveUndo();
+            f.reconstructAll(1.0);
+            CHECK(diff(f.output(), before, QRect(200, 200, 200, 200)) == 0 && !f.changed());
+            CHECK(f.undo() && f.changed());
+            f.begin(before);
+            f.dab(LiquifyField::Freeze, QPointF(300, 300), {}, 1.0, LiquifyField::Brush{400, 1.0, 1.0, 0.5});
+            CHECK(f.frozenAt(300, 300) > 0.99f);
+            for (int i = 0; i < 8; ++i) f.dab(LiquifyField::Forward, QPointF(300 + i * 5, 300), QPointF(5, 0), 1.0, b);
+            CHECK(diff(f.output(), before, QRect(280, 280, 40, 40)) == 0);
+        }
+        {   // the window: painting with the mouse, then Cancel leaves the layer as it was
+            LiquifyDialog dlg(before, nullptr, &w);
+            dlg.show();
+            pump(80);
+            QWidget* c = dlg.canvasWidget();
+            auto paint = [&](QPointF a, QPointF b) {
+                QMouseEvent p(QEvent::MouseButtonPress, dlg.canvasPoint(a), c->mapToGlobal(dlg.canvasPoint(a)), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                QCoreApplication::sendEvent(c, &p);
+                for (int i = 1; i <= 20; ++i) {
+                    const QPointF q = dlg.canvasPoint(a + (b - a) * (i / 20.0));
+                    QMouseEvent m(QEvent::MouseMove, q, c->mapToGlobal(q), Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+                    QCoreApplication::sendEvent(c, &m);
+                }
+                const QPointF e = dlg.canvasPoint(b);
+                QMouseEvent r(QEvent::MouseButtonRelease, e, c->mapToGlobal(e), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+                QCoreApplication::sendEvent(c, &r);
+                pump(20);
+            };
+            dlg.setMode(LiquifyField::Forward);
+            dlg.brush().size = 150;
+            paint(QPointF(250, 300), QPointF(400, 300));
+            CHECK(dlg.field().changed() && diff(dlg.result(), before, QRect(150, 150, 400, 300)) > 200);
+            if (qEnvironmentVariableIsSet("GX_SHOTS")) dlg.grab().save(qEnvironmentVariable("GX_SHOTS") + "/liquify.png");
+            dlg.reject();
+        }
+        CHECK(diff(surfaceToImage(l->pixels, d->bounds()), before, d->bounds()) == 0);
+        // OK through the menu command: the layer gets the result, one undo step
+        QTimer::singleShot(200, [] {
+            auto* dlg = qobject_cast<LiquifyDialog*>(QApplication::activeModalWidget());
+            if (!dlg) return;
+            dlg->setMode(LiquifyField::TwirlCW);
+            for (int i = 0; i < 20; ++i) dlg->field().dab(LiquifyField::TwirlCW, QPointF(400, 300), {}, 1.0, LiquifyField::Brush{200, 1.0, 0.5, 1.0});
+            dlg->accept();
+        });
+        QAction* act = nullptr;
+        for (QAction* a : w.findChildren<QAction*>())
+            if (a->property("en").toString() == "Liquify...") act = a;
+        CHECK(act != nullptr);
+        if (act) act->trigger();
+        pump(40);
+        l = static_cast<RasterLayer*>(d->currentLayer());
+        const int twisted = diff(surfaceToImage(l->pixels, d->bounds()), before, QRect(250, 150, 300, 300));
+        std::fprintf(stderr, "INFO liquify OK changed %d pixels\n", twisted);
+        CHECK(twisted > 500);
+        d->undo();
+        l = static_cast<RasterLayer*>(d->currentLayer());
+        CHECK(diff(surfaceToImage(l->pixels, d->bounds()), before, d->bounds()) == 0);
     }, w);
 
     scenario("reference over everything", [](MainWindow& w) {

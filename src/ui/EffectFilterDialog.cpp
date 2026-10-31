@@ -1,4 +1,5 @@
 #include "ui/EffectFilterDialog.h"
+#include "core/LayerOps.h"
 
 #include <QCheckBox>
 #include <QDialogButtonBox>
@@ -28,7 +29,8 @@ EffectFilterDialog::EffectFilterDialog(Document* doc, quint32 layerId, const QSt
     for (const auto& e : effectKeys()) *effectSwitch(m_fx, e.first) = e.first == effect;
 
     auto* v = new QVBoxLayout(this);
-    auto* info = new QLabel(T("The effect is drawn into the pixels of the layer. To keep it changeable, use Layer > Effects instead."), this);
+    auto* info = new QLabel(T("The effect is drawn as pixels: onto a new layer above, or into the layer itself. To keep it changeable, use "
+                              "Layer > Effects instead."), this);
     info->setWordWrap(true);
     info->setObjectName("sectionTitle");
     v->addWidget(info);
@@ -45,6 +47,10 @@ EffectFilterDialog::EffectFilterDialog(Document* doc, quint32 layerId, const QSt
         else clearPreview();
     });
     row->addWidget(m_previewBox);
+    m_newLayer = new QCheckBox(T("On a new layer"), this);
+    m_newLayer->setToolTip(T("The effect is put on its own layer above; the layer itself is not changed."));
+    m_newLayer->setChecked(app()->settings().value("effectFilters/newLayer", true).toBool());
+    row->addWidget(m_newLayer);
     row->addStretch();
     m_busy = new QLabel(this);
     m_busy->setObjectName("sectionTitle");
@@ -77,6 +83,10 @@ EffectFilterDialog::EffectFilterDialog(Document* doc, quint32 layerId, const QSt
 EffectFilterDialog::~EffectFilterDialog() {
     m_watch.waitForFinished();
     if (!m_done) clearPreview();
+}
+
+void EffectFilterDialog::setNewLayer(bool on) {
+    if (m_newLayer) m_newLayer->setChecked(on);
 }
 
 QRect EffectFilterDialog::area() const {
@@ -141,13 +151,32 @@ void EffectFilterDialog::accept() {
                                        : bakeEffects(*l, m_fx, area(), m_doc->hasSelection() ? &m_doc->selection() : nullptr);
             l->preview.reset();
             const QRect a = area();
-            m_doc->pushUndo(windowTitle());
-            l = dynamic_cast<RasterLayer*>(m_doc->layer(m_layer));  // the same layer after the undo snapshot
-            if (l) {
-                l->pixels = result;
-                l->pixels.optimizeRect(a);
-                m_doc->pixelsChanged(m_doc->bounds(), l);
+            if (m_newLayer && m_newLayer->isChecked()) {
+                // Only what the effect changed goes onto the new layer: the new layer over the old one
+                // looks like the result, and the layer itself stays as it was.
+                auto nl = std::make_shared<RasterLayer>();
+                nl->name = l->name + " - " + windowTitle();
+                if (!a.isEmpty()) {
+                    const size_t n = size_t(a.width()) * a.height();
+                    std::vector<quint32> before(n), after(n);
+                    l->pixels.readRect(a, before.data(), a.width());
+                    result.readRect(a, after.data(), a.width());
+                    for (size_t i = 0; i < n; ++i)
+                        if (after[i] == before[i]) after[i] = 0;
+                    nl->pixels.writeRect(a, after.data(), a.width());
+                    nl->pixels.optimizeRect(a);
+                }
+                ops::insertLayer(*m_doc, nl, l, true, windowTitle());
+            } else {
+                m_doc->pushUndo(windowTitle());
+                l = dynamic_cast<RasterLayer*>(m_doc->layer(m_layer));  // the same layer after the undo snapshot
+                if (l) {
+                    l->pixels = result;
+                    l->pixels.optimizeRect(a);
+                    m_doc->pixelsChanged(m_doc->bounds(), l);
+                }
             }
+            if (m_newLayer) app()->settings().setValue("effectFilters/newLayer", m_newLayer->isChecked());
         }
         QJsonObject o = m_fx.toJson();
         app()->settings().setValue("effectFilters/" + m_key, QJsonDocument(o).toJson(QJsonDocument::Compact));
