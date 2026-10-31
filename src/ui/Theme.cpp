@@ -479,6 +479,18 @@ void drawIcon(QPainter& p, const QString& n, const QColor& col, const QColor& ac
         line(12, 4.5, 12, 6.5);
         line(11, 5.5, 13, 5.5);
         p.setPen(pen);
+    } else if (n == "smartselect") {
+        // a brush tip inside a dashed outline that hugs a shape
+        dashed(true);
+        QPainterPath s;
+        s.moveTo(4, 14);
+        s.cubicTo(3, 6, 12, 2, 17, 6);
+        s.cubicTo(22, 10, 19, 19, 12, 20);
+        s.cubicTo(8, 21, 5, 19, 4, 14);
+        path(s);
+        dashed(false);
+        circle(11, 12, 3.2, true, acc);
+        line(13.5, 9.5, 19, 4);
     } else if (n == "select-brush") {
         dashed(true);
         circle(12, 12, 8);

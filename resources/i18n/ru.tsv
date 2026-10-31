@@ -1325,3 +1325,11 @@ now: %1	сейчас: %1
 Move to "Custom brushes"	Перенести в «Пользовательские»
 No brush on this key yet: right-click a brush and choose Quick key.	На этой клавише пока нет кисти: правый щелчок по кисти → «Быстрая клавиша».
 Zoom out (-)	Отдалить (-)
+Drag the points to bend the image smoothly. Click a line to add a point there (and a line through it); Ctrl + click a point to remove its line. Drag elsewhere to move the whole mesh. Works on the selection, or on the whole layer.	Тяните точки, чтобы плавно изгибать картинку. Щелчок по линии добавляет там точку (и линию через неё); Ctrl + щелчок по точке убирает её линию. Тяните в другом месте, чтобы двигать всю сетку. Работает с выделением или со всем слоем.
+How different a color may be from the colors painted on and still be taken.	Насколько цвет может отличаться от закрашенных цветов и всё равно попасть в выделение.
+How far from the brush the selection may grow, in brush sizes.	Как далеко от кисти может разрастись выделение, в размерах кисти.
+Paint over the object: the selection spreads over its colors and stops at its edges and lines. Each stroke adds; hold Ctrl or Alt to take away. Ctrl+D deselects.	Водите кистью по объекту: выделение растекается по его цветам и останавливается на краях и линиях. Каждый мазок добавляет; с Ctrl или Alt — убирает. Ctrl+D снимает выделение.
+Reach	Охват
+Smart selection	Умное выделение
+Smart selection: take away	Умное выделение: убрать
+The points of the outer edge stay.	Точки внешнего края не удаляются.

@@ -212,6 +212,7 @@ void MainWindow::createTools() {
     tm->addTool(new LassoSelectTool);
     tm->addTool(new MagicWandTool);
     tm->addTool(new SelectionBrushTool);
+    tm->addTool(new SmartSelectTool);
     tm->addTool(new FillTool);
     tm->addTool(new LassoFillTool);
     tm->addTool(new GradientTool);
@@ -230,7 +231,7 @@ void MainWindow::createTools() {
     tm->addTool(new FocusLinesTool(FocusLines::Focus));
     tm->addTool(new FocusLinesTool(FocusLines::Speed));
     for (const char* id : {"select-rect", "select-ellipse", "lasso", "magic-wand", "transform", "warp", "gradient", "vedit",
-                           "vpressure", "vweight", "ruler", "curve", "liquify", "text", "select-brush"})
+                           "vpressure", "vweight", "ruler", "curve", "liquify", "text", "select-brush", "smart-select"})
         tm->setModifierTool(id, true);
     tm->setCurrent("brush");
 

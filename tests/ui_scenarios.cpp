@@ -1,6 +1,7 @@
 // Scenario tests that drive the real UI: draw, then use tools and check the pixels.
 // Usage: gx_uiscenarios   (run with QT_QPA_PLATFORM=offscreen)
 #include <QApplication>
+#include <QPainter>
 #include <QElapsedTimer>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -47,6 +48,7 @@
 #include "ui/MaterialsPanel.h"
 #include "tools/FocusLinesTool.h"
 #include "tools/SelectTools.h"
+#include "tools/TransformTool.h"
 #include "app/Shortcuts.h"
 #include "core/Textures.h"
 #include "ui/ColorPanel.h"
@@ -1250,6 +1252,86 @@ int main(int argc, char** argv) {
         CHECK(((mid >> 16) & 0xff) > 0x30);  // red carried into the blue
         d->undo();
         if (QAction* a = byId.value("brush.opacity100")) a->trigger();
+    }, w);
+
+    scenario("smart selection stays inside the object; mesh warp lines added and removed", [](MainWindow& w) {
+        Document* d = view()->doc();
+        auto* l = static_cast<RasterLayer*>(d->currentLayer());
+        {   // two red discs with black outlines, on the white paper
+            QImage img(800, 600, QImage::Format_ARGB32_Premultiplied);
+            img.fill(Qt::transparent);
+            QPainter p(&img);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setPen(QPen(Qt::black, 4));
+            p.setBrush(QColor(220, 40, 40));
+            p.drawEllipse(QPointF(250, 300), 120, 120);
+            p.drawEllipse(QPointF(560, 300), 80, 80);
+            p.end();
+            imageToSurface(img, l->pixels, QPoint(0, 0));
+            d->pixelsChanged(d->bounds(), l);
+        }
+        app()->tools()->setCurrent("smart-select");
+        pump(250);
+        auto* smart = dynamic_cast<SmartSelectTool*>(app()->tools()->current());
+        CHECK(smart != nullptr);
+        if (!smart) return;
+        smart->size = 60;
+        auto sel = [&](int x, int y) { return d->hasSelection() ? int(d->selection().pixel(x, y)) : 0; };
+        // a stroke across the middle of the big disc, its brush runs over the outline
+        dragCanvas(QPointF(180, 300), QPointF(330, 300));
+        dragCanvas(QPointF(250, 220), QPointF(250, 380));
+        pump(30);
+        int inside = 0, total = 0;
+        for (int y = 200; y <= 400; y += 10)
+            for (int x = 150; x <= 350; x += 10)
+                if (std::hypot(x - 250, y - 300) < 100) ++total, inside += sel(x, y) >= 128;
+        int spilled = 0;
+        for (int a = 0; a < 360; a += 10) {
+            const double t = a * M_PI / 180;
+            spilled += sel(int(250 + 132 * std::cos(t)), int(300 + 132 * std::sin(t))) > 0;  // just outside the outline
+        }
+        std::fprintf(stderr, "INFO smart selection: %d of %d inside, %d outside the outline\n", inside, total, spilled);
+        CHECK(inside > total * 7 / 10 && spilled == 0);
+        CHECK(sel(560, 300) == 0);  // the other disc is left alone
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/smart_selection.png");
+        dragCanvas(QPointF(250, 300), QPointF(250, 310), Qt::ControlModifier);  // take away around the middle
+        pump(30);
+        CHECK(sel(250, 300) == 0 && sel(145, 300) >= 128);  // taken away as far as the reach, the rest stays
+        ops::deselect(*d);
+
+        // mesh warp: a click on a line adds a line, Ctrl + click removes it
+        app()->tools()->setCurrent("warp");
+        pump(250);
+        auto* warp = dynamic_cast<WarpTool*>(app()->tools()->current());
+        CHECK(warp && warp->columns() == 4 && warp->rows() == 4);
+        if (!warp) return;
+        const QPointF a = warp->point(0), b = warp->point(1);
+        const QPointF mid = (a + b) / 2;
+        mouse(QEvent::MouseButtonPress, mid, Qt::LeftButton);
+        for (int i = 1; i <= 10; ++i) mouse(QEvent::MouseMove, mid + QPointF(0, i * 3), Qt::LeftButton);
+        mouse(QEvent::MouseButtonRelease, mid + QPointF(0, 30), Qt::NoButton);
+        pump(40);
+        CHECK(warp->columns() == 5 && warp->rows() == 4);
+        CHECK(std::abs(warp->point(1).y() - (mid.y() + 30)) < 1.0 && std::abs(warp->point(1).x() - mid.x()) < 2.0);  // dragged at once
+        // a click on a vertical line adds a row
+        const QPointF c = warp->point(0), e2 = warp->point(warp->columns());
+        mouse(QEvent::MouseButtonPress, (c + e2) / 2, Qt::LeftButton);
+        mouse(QEvent::MouseButtonRelease, (c + e2) / 2, Qt::NoButton);
+        pump(40);
+        CHECK(warp->rows() == 5);
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/warp_points.png");
+        // Ctrl + click the new point of the column: the column goes, a corner stays
+        mouse(QEvent::MouseButtonPress, warp->point(1), Qt::LeftButton, Qt::ControlModifier);
+        mouse(QEvent::MouseButtonRelease, warp->point(1), Qt::NoButton, Qt::ControlModifier);
+        pump(40);
+        CHECK(warp->columns() == 4 && warp->rows() == 5);
+        mouse(QEvent::MouseButtonPress, warp->point(0), Qt::LeftButton, Qt::ControlModifier);
+        mouse(QEvent::MouseButtonRelease, warp->point(0), Qt::NoButton, Qt::ControlModifier);
+        pump(40);
+        CHECK(warp->columns() == 4 && warp->rows() == 5);
+        warp->cancel();
+        app()->tools()->setCurrent("brush");
+        pump(30);
     }, w);
 
     scenario("reference over everything", [](MainWindow& w) {

@@ -555,13 +555,119 @@ bool WarpTool::start() {
 }
 
 void WarpTool::resetGrid() {
-    m_n = cells + 1;
-    m_pts.resize(size_t(m_n) * m_n);
+    m_nu = m_nv = cells + 1;
+    m_us.resize(size_t(m_nu));
+    m_vs.resize(size_t(m_nv));
+    for (int i = 0; i < m_nu; ++i) m_us[size_t(i)] = double(i) / cells;
+    for (int j = 0; j < m_nv; ++j) m_vs[size_t(j)] = double(j) / cells;
+    m_colAge.assign(size_t(m_nu), 0);
+    m_rowAge.assign(size_t(m_nv), 0);
+    m_pts.resize(size_t(m_nu) * m_nv);
     QRectF r(m_float.srcRect);
-    for (int j = 0; j < m_n; ++j)
-        for (int i = 0; i < m_n; ++i)
-            m_pts[size_t(j) * m_n + i] = QPointF(r.left() + r.width() * i / cells, r.top() + r.height() * j / cells);
+    for (int j = 0; j < m_nv; ++j)
+        for (int i = 0; i < m_nu; ++i)
+            m_pts[size_t(j) * m_nu + i] = QPointF(r.left() + r.width() * m_us[size_t(i)], r.top() + r.height() * m_vs[size_t(j)]);
     if (m_active) render(true);
+}
+
+int WarpTool::addColumn(double u, int onRow) {
+    // the column between the two around u; its points sit on the surface as it is now
+    int ci = 0;
+    while (ci + 1 < m_nu - 1 && m_us[size_t(ci + 1)] <= u) ++ci;
+    const double span = m_us[size_t(ci + 1)] - m_us[size_t(ci)];
+    const double t = span > 1e-9 ? (u - m_us[size_t(ci)]) / span : 0.5;
+    if (t < 0.02 || t > 0.98) return -1;  // too close to a line that is there
+    std::vector<QPointF> col(static_cast<size_t>(m_nv));
+    for (int j = 0; j < m_nv; ++j) col[size_t(j)] = gridPoint(ci + t, j);
+    std::vector<QPointF> pts;
+    pts.reserve(size_t(m_nu + 1) * m_nv);
+    for (int j = 0; j < m_nv; ++j)
+        for (int i = 0; i < m_nu; ++i) {
+            pts.push_back(m_pts[size_t(j) * m_nu + i]);
+            if (i == ci) pts.push_back(col[size_t(j)]);
+        }
+    m_pts.swap(pts);
+    m_us.insert(m_us.begin() + ci + 1, u);
+    m_colAge.insert(m_colAge.begin() + ci + 1, 1 + *std::max_element(m_colAge.begin(), m_colAge.end()) +
+                                                    *std::max_element(m_rowAge.begin(), m_rowAge.end()));
+    ++m_nu;
+    render(true);
+    return std::clamp(onRow, 0, m_nv - 1) * m_nu + ci + 1;
+}
+
+int WarpTool::addRow(double v, int onColumn) {
+    int cj = 0;
+    while (cj + 1 < m_nv - 1 && m_vs[size_t(cj + 1)] <= v) ++cj;
+    const double span = m_vs[size_t(cj + 1)] - m_vs[size_t(cj)];
+    const double t = span > 1e-9 ? (v - m_vs[size_t(cj)]) / span : 0.5;
+    if (t < 0.02 || t > 0.98) return -1;
+    std::vector<QPointF> row(static_cast<size_t>(m_nu));
+    for (int i = 0; i < m_nu; ++i) row[size_t(i)] = gridPoint(i, cj + t);
+    m_pts.insert(m_pts.begin() + size_t(cj + 1) * m_nu, row.begin(), row.end());
+    m_vs.insert(m_vs.begin() + cj + 1, v);
+    m_rowAge.insert(m_rowAge.begin() + cj + 1, 1 + *std::max_element(m_colAge.begin(), m_colAge.end()) +
+                                                    *std::max_element(m_rowAge.begin(), m_rowAge.end()));
+    ++m_nv;
+    render(true);
+    return (cj + 1) * m_nu + std::clamp(onColumn, 0, m_nu - 1);
+}
+
+bool WarpTool::removeLineAt(int point) {
+    if (point < 0 || point >= int(m_pts.size())) return false;
+    const int i = point % m_nu, j = point / m_nu;
+    const bool colInner = i > 0 && i < m_nu - 1 && m_nu > 2, rowInner = j > 0 && j < m_nv - 1 && m_nv > 2;
+    if (!colInner && !rowInner) return false;  // a point of the outer edge stays
+    // the line that was added last goes first
+    const bool dropColumn = colInner && (!rowInner || m_colAge[size_t(i)] >= m_rowAge[size_t(j)]);
+    if (dropColumn) {
+        std::vector<QPointF> pts;
+        pts.reserve(size_t(m_nu - 1) * m_nv);
+        for (int jj = 0; jj < m_nv; ++jj)
+            for (int ii = 0; ii < m_nu; ++ii)
+                if (ii != i) pts.push_back(m_pts[size_t(jj) * m_nu + ii]);
+        m_pts.swap(pts);
+        m_us.erase(m_us.begin() + i);
+        m_colAge.erase(m_colAge.begin() + i);
+        --m_nu;
+    } else {
+        m_pts.erase(m_pts.begin() + size_t(j) * m_nu, m_pts.begin() + size_t(j + 1) * m_nu);
+        m_vs.erase(m_vs.begin() + j);
+        m_rowAge.erase(m_rowAge.begin() + j);
+        --m_nv;
+    }
+    render(true);
+    return true;
+}
+
+QPointF WarpTool::sourceAt(double u, double v) const {
+    auto at = [](const std::vector<double>& p, double x) {
+        const int n = int(p.size());
+        const int k = std::clamp(int(std::floor(x)), 0, n - 2);
+        const double t = x - k;
+        return p[size_t(k)] + (p[size_t(k + 1)] - p[size_t(k)]) * t;
+    };
+    const QRectF sr(m_float.srcRect);
+    return QPointF(sr.width() * at(m_us, u), sr.height() * at(m_vs, v));
+}
+
+bool WarpTool::hitLine(CanvasView* view, QPointF wp, bool* horizontal, double* u, double* v) const {
+    const QTransform t = view->canvasToWidget();
+    const int S = 24;
+    double best = 7;  // px
+    bool found = false;
+    for (int j = 0; j < m_nv; ++j)
+        for (int k = 0; k <= (m_nu - 1) * S; ++k) {
+            const double uu = double(k) / S;
+            const double d = QLineF(t.map(gridPoint(uu, j)), wp).length();
+            if (d < best) best = d, found = true, *horizontal = true, *u = uu, *v = j;
+        }
+    for (int i = 0; i < m_nu; ++i)
+        for (int k = 0; k <= (m_nv - 1) * S; ++k) {
+            const double vv = double(k) / S;
+            const double d = QLineF(t.map(gridPoint(i, vv)), wp).length();
+            if (d < best) best = d, found = true, *horizontal = false, *u = i, *v = vv;
+        }
+    return found;
 }
 
 void WarpTool::activate() {
@@ -574,28 +680,28 @@ void WarpTool::deactivate() {
 
 QPointF WarpTool::gridPoint(double u, double v) const {
     auto P = [&](int i, int j) {
-        i = std::clamp(i, 0, m_n - 1);
-        j = std::clamp(j, 0, m_n - 1);
-        return m_pts[size_t(j) * m_n + i];
+        i = std::clamp(i, 0, m_nu - 1);
+        j = std::clamp(j, 0, m_nv - 1);
+        return m_pts[size_t(j) * m_nu + i];
     };
     auto cr = [](const QPointF& p0, const QPointF& p1, const QPointF& p2, const QPointF& p3, double t) {
         double t2 = t * t, t3 = t2 * t;
         return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
     };
-    int ci = std::clamp(int(std::floor(u)), 0, m_n - 2), cj = std::clamp(int(std::floor(v)), 0, m_n - 2);
+    int ci = std::clamp(int(std::floor(u)), 0, m_nu - 2), cj = std::clamp(int(std::floor(v)), 0, m_nv - 2);
     double tu = u - ci, tv = v - cj;
     QPointF rows[4];
     for (int k = -1; k <= 2; ++k) {
         // extrapolate beyond the border so the edges stay straight when untouched
         auto Q = [&](int i, int j) {
             if (i < 0) return 2 * P(0, j) - P(1, j);
-            if (i > m_n - 1) return 2 * P(m_n - 1, j) - P(m_n - 2, j);
+            if (i > m_nu - 1) return 2 * P(m_nu - 1, j) - P(m_nu - 2, j);
             return P(i, j);
         };
         int j = cj + k;
         auto R = [&](int i) {
             if (j < 0) return 2 * Q(i, 0) - Q(i, 1);
-            if (j > m_n - 1) return 2 * Q(i, m_n - 1) - Q(i, m_n - 2);
+            if (j > m_nv - 1) return 2 * Q(i, m_nv - 1) - Q(i, m_nv - 2);
             return Q(i, j);
         };
         rows[k + 1] = cr(R(ci - 1), R(ci), R(ci + 1), R(ci + 2), tu);
@@ -608,16 +714,15 @@ void WarpTool::render(bool final) {
     Document* d = m_float.doc;
     if (!d) return;
     const int S = final ? 12 : 6;
-    const int N = cells * S + 1;
-    std::vector<QPointF> pos(size_t(N) * N), uv(size_t(N) * N);
-    const QRectF sr(m_float.srcRect);
+    const int NU = (m_nu - 1) * S + 1, NV = (m_nv - 1) * S + 1;
+    std::vector<QPointF> pos(size_t(NU) * NV), uv(size_t(NU) * NV);
     // Bounding box of the mesh. (QRectF::united ignores empty rects, so track min/max by hand.)
     double minX = 1e300, minY = 1e300, maxX = -1e300, maxY = -1e300;
-    for (int j = 0; j < N; ++j)
-        for (int i = 0; i < N; ++i) {
+    for (int j = 0; j < NV; ++j)
+        for (int i = 0; i < NU; ++i) {
             QPointF p = gridPoint(double(i) / S, double(j) / S);
-            pos[size_t(j) * N + i] = p;
-            uv[size_t(j) * N + i] = QPointF(sr.width() * i / (N - 1), sr.height() * j / (N - 1));
+            pos[size_t(j) * NU + i] = p;
+            uv[size_t(j) * NU + i] = sourceAt(double(i) / S, double(j) / S);
             minX = std::min(minX, p.x());
             minY = std::min(minY, p.y());
             maxX = std::max(maxX, p.x());
@@ -636,9 +741,9 @@ void WarpTool::render(bool final) {
     for (int y = 0; y < dr.height(); y += bandH) bands.push_back(y);
     parallelFor(int(bands.size()), [&](int bi) {
         int y0 = bands[size_t(bi)], y1 = std::min(dr.height() - 1, y0 + bandH - 1);
-        for (int j = 0; j + 1 < N; ++j)
-            for (int i = 0; i + 1 < N; ++i) {
-                size_t a = size_t(j) * N + i, b = a + 1, c = a + N, e = c + 1;
+        for (int j = 0; j + 1 < NV; ++j)
+            for (int i = 0; i + 1 < NU; ++i) {
+                size_t a = size_t(j) * NU + i, b = a + 1, c = a + NU, e = c + 1;
                 for (int tri = 0; tri < 2; ++tri) {
                     size_t v0 = a, v1 = tri ? e : b, v2 = tri ? c : e;
                     QPointF p0 = pos[v0] - dr.topLeft(), p1 = pos[v1] - dr.topLeft(), p2 = pos[v2] - dr.topLeft();
@@ -682,6 +787,24 @@ void WarpTool::press(const PointerEvent& e) {
     for (size_t i = 0; i < m_pts.size(); ++i) {
         double d = QLineF(e.view->toWidget(m_pts[i]), e.widgetPos).length();
         if (d < best) { best = d; m_drag = int(i); }
+    }
+    if (e.mods & Qt::ControlModifier) {
+        // Ctrl + click on a point: its line goes away
+        if (m_drag >= 0 && !removeLineAt(m_drag)) app()->showStatus(T("The points of the outer edge stay."), 2500);
+        m_drag = -1;
+        Q_EMIT overlayChanged();
+        return;
+    }
+    if (m_drag < 0) {
+        // a click on a line adds a line through that place, with a point to drag right away
+        bool horizontal = false;
+        double u = 0, v = 0;
+        if (hitLine(e.view, e.widgetPos, &horizontal, &u, &v)) {
+            const QPointF src = sourceAt(u, v);
+            const QRectF sr(m_float.srcRect);
+            if (horizontal) m_drag = addColumn(sr.width() > 0 ? src.x() / sr.width() : 0.5, int(std::lround(v)));
+            else m_drag = addRow(sr.height() > 0 ? src.y() / sr.height() : 0.5, int(std::lround(u)));
+        }
     }
     m_pressPos = e.pos;
     m_moveAll = m_drag < 0;
@@ -747,18 +870,18 @@ void WarpTool::drawOverlay(QPainter& p, CanvasView* v) {
     QPen pen(Theme::colors().accent, 1);
     p.setPen(pen);
     const int S = 8;
-    for (int j = 0; j < m_n; ++j) {
+    for (int j = 0; j < m_nv; ++j) {
         QPainterPath path;
-        for (int k = 0; k <= cells * S; ++k) {
+        for (int k = 0; k <= (m_nu - 1) * S; ++k) {
             QPointF q = t.map(gridPoint(double(k) / S, j));
             if (k == 0) path.moveTo(q);
             else path.lineTo(q);
         }
         p.drawPath(path);
     }
-    for (int i = 0; i < m_n; ++i) {
+    for (int i = 0; i < m_nu; ++i) {
         QPainterPath path;
-        for (int k = 0; k <= cells * S; ++k) {
+        for (int k = 0; k <= (m_nv - 1) * S; ++k) {
             QPointF q = t.map(gridPoint(i, double(k) / S));
             if (k == 0) path.moveTo(q);
             else path.lineTo(q);
@@ -798,7 +921,8 @@ QWidget* WarpTool::createOptions(QWidget* parent) {
     row->addWidget(ok);
     row->addWidget(cancelB);
     v->addLayout(row);
-    auto* hint = new QLabel(T("Drag the points to bend the image smoothly. Drag elsewhere to move the whole mesh. "
+    auto* hint = new QLabel(T("Drag the points to bend the image smoothly. Click a line to add a point there (and a line through it); "
+                              "Ctrl + click a point to remove its line. Drag elsewhere to move the whole mesh. "
                               "Works on the selection, or on the whole layer."), w);
     hint->setWordWrap(true);
     hint->setObjectName("sectionTitle");

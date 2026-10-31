@@ -532,4 +532,221 @@ QWidget* SelectionBrushTool::createOptions(QWidget* parent) {
     return w;
 }
 
+// ============================================================================ smart selection
+
+namespace {
+inline int colorDistance(quint32 a, quint32 b) {
+    int d = 0;
+    for (int s = 0; s < 32; s += 8) d = std::max(d, std::abs(int((a >> s) & 255u) - int((b >> s) & 255u)));
+    return d;
+}
+}  // namespace
+
+void SmartSelectTool::press(const PointerEvent& e) {
+    if (!e.view) return;
+    m_view = e.view;
+    Document* d = e.view->doc();
+    m_subtract = (e.mods & Qt::AltModifier) || (e.mods & Qt::ControlModifier) || e.eraser;
+    if (m_subtract && !d->hasSelection()) return;
+    // the picture is read once: big pictures are read around the stroke as it goes
+    m_srcRect = d->bounds();
+    QString err;
+    if (qint64(m_srcRect.width()) * m_srcRect.height() > 40ll * 1000 * 1000) m_srcRect = QRect();
+    m_src.clear();
+    if (!m_srcRect.isEmpty()) {
+        const bool hadSel = d->hasSelection();
+        const MaskSurface keep = d->selection();
+        if (hadSel) d->setHasSelection(false);
+        const bool ok = readFillSource(d, m_srcRect, FillSource(std::clamp(source, 0, 2)), d->currentLayer(), m_src, &err);
+        if (hadSel) {
+            d->setHasSelection(true);
+            d->selection() = keep;
+        }
+        if (!ok) {
+            app()->showStatus(T(err));
+            return;
+        }
+    }
+    d->pushUndo(m_subtract ? T("Smart selection: take away") : T("Smart selection"));
+    m_before = d->hasSelection() ? d->selection() : MaskSurface(0);
+    m_stroke = MaskSurface(0);
+    m_samples.clear();
+    if (!d->hasSelection()) {
+        d->selection().clear();
+        d->setHasSelection(true);
+    }
+    m_drag = true;
+    m_last = e.pos;
+    m_residual = 0;
+    dab(e.pos);
+}
+
+void SmartSelectTool::dab(const QPointF& c) {
+    Document* d = m_view->doc();
+    const double r = std::max(1.0, size / 2);
+    const int R = int(std::ceil(r * std::max(1.0, reach)));
+    const QRect win = QRect(int(std::floor(c.x())) - R, int(std::floor(c.y())) - R, 2 * R + 1, 2 * R + 1) & d->bounds();
+    if (win.isEmpty()) return;
+    const int W = win.width(), H = win.height();
+    std::vector<quint32> px(size_t(W) * H);
+    if (!m_srcRect.isEmpty()) {
+        for (int y = 0; y < H; ++y)
+            std::copy_n(&m_src[size_t(win.top() + y - m_srcRect.top()) * m_srcRect.width() + (win.left() - m_srcRect.left())], W,
+                        &px[size_t(y) * W]);
+    } else {
+        QString err;
+        const bool hadSel = d->hasSelection();
+        const MaskSurface keep = d->selection();
+        if (hadSel) d->setHasSelection(false);
+        readFillSource(d, win, FillSource(std::clamp(source, 0, 2)), d->currentLayer(), px, &err);
+        if (hadSel) {
+            d->setHasSelection(true);
+            d->selection() = keep;
+        }
+    }
+    // the colors under the middle of the brush join the colors painted on
+    const int cx = int(std::floor(c.x())) - win.left(), cy = int(std::floor(c.y())) - win.top();
+    const double r2 = r * r;
+    auto inBrush = [&](int x, int y) {
+        const double dx = x + win.left() + 0.5 - c.x(), dy = y + win.top() + 0.5 - c.y();
+        return dx * dx + dy * dy <= r2;
+    };
+    if (cx >= 0 && cy >= 0 && cx < W && cy < H) {
+        const quint32 mid = px[size_t(cy) * W + cx];
+        bool known = false;
+        for (quint32 s : m_samples)
+            if (colorDistance(s, mid) <= tolerance / 3) { known = true; break; }
+        if (!known && m_samples.size() < 32) m_samples.push_back(mid);
+    }
+    auto match = [&](quint32 p) {
+        for (quint32 s : m_samples)
+            if (colorDistance(s, p) <= tolerance) return true;
+        return false;
+    };
+    // grow from the matching pixels under the brush, over matching pixels only, inside the window
+    std::vector<uint8_t> fill(size_t(W) * H, 0);
+    std::vector<int> stack;
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x)
+            if (inBrush(x, y) && match(px[size_t(y) * W + x])) {
+                fill[size_t(y) * W + x] = 1;
+                stack.push_back(y * W + x);
+            }
+    while (!stack.empty()) {
+        const int i = stack.back();
+        stack.pop_back();
+        const int x = i % W, y = i / W;
+        const int nb[4] = {x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, y > 0 ? i - W : -1, y < H - 1 ? i + W : -1};
+        for (int n : nb) {
+            if (n < 0 || fill[size_t(n)]) continue;
+            // stay round: the window is a circle, so the selection does not end in a square
+            const int nx = n % W, ny = n / W;
+            const double dx = nx + win.left() + 0.5 - c.x(), dy = ny + win.top() + 0.5 - c.y();
+            if (dx * dx + dy * dy > double(R) * R) continue;
+            if (!match(px[size_t(n)])) continue;
+            fill[size_t(n)] = 1;
+            stack.push_back(n);
+        }
+    }
+    // into this stroke's mask, then the selection = before (+/-) stroke
+    std::vector<quint8> st(fill.size());
+    m_stroke.readRect(win, st.data(), W);
+    bool any = false;
+    for (size_t i = 0; i < fill.size(); ++i)
+        if (fill[i]) st[i] = 255, any = true;
+    if (!any) return;
+    m_stroke.writeRect(win, st.data(), W);
+    MaskSurface grown = m_stroke;
+    if (expand != 0) growMask(grown, expand, win.adjusted(-std::abs(expand) - 2, -std::abs(expand) - 2, std::abs(expand) + 2, std::abs(expand) + 2) & d->bounds());
+    const QRect upd = win.adjusted(-std::abs(expand) - 2, -std::abs(expand) - 2, std::abs(expand) + 2, std::abs(expand) + 2) & d->bounds();
+    const int UW = upd.width();
+    std::vector<quint8> before(size_t(UW) * upd.height()), add(before.size());
+    m_before.readRect(upd, before.data(), UW);
+    grown.readRect(upd, add.data(), UW);
+    for (size_t i = 0; i < before.size(); ++i)
+        before[i] = m_subtract ? quint8(std::min<int>(before[i], 255 - add[i])) : std::max(before[i], add[i]);
+    d->selection().writeRect(upd, before.data(), UW);
+    d->selectionPainted(upd);
+}
+
+void SmartSelectTool::move(const PointerEvent& e) {
+    if (!m_drag || !m_view) return;
+    const QPointF a = m_last, b = e.pos;
+    const double len = QLineF(a, b).length();
+    const double step = std::max(2.0, size * 0.25);
+    double pos = step - m_residual;
+    while (pos <= len) {
+        dab(a + (b - a) * (pos / len));
+        pos += step;
+    }
+    m_residual = len - (pos - step);
+    m_last = b;
+}
+
+void SmartSelectTool::release(const PointerEvent&) {
+    if (!m_drag || !m_view) return;
+    m_drag = false;
+    Document* d = m_view->doc();
+    m_src.clear();
+    m_src.shrink_to_fit();
+    m_stroke = MaskSurface(0);
+    m_before = MaskSurface(0);
+    d->selection().optimize();
+    d->setHasSelection(!d->selection().isEmpty());
+    d->selectionModified();
+}
+
+QWidget* SmartSelectTool::createOptions(QWidget* parent) {
+    auto* w = new QWidget(parent);
+    auto* v = new QVBoxLayout(w);
+    v->setContentsMargins(6, 6, 6, 6);
+    auto* s = new ValueBar(T("Size"), 2, 1000, 0, w);
+    s->setLogarithmic(true);
+    s->setSuffix(" px");
+    s->setValue(size);
+    connect(s, &ValueBar::valueChanged, this, [this](double x) {
+        size = x;
+        Q_EMIT optionsChanged();
+    });
+    v->addWidget(s);
+    auto* tol = new ValueBar(T("Tolerance"), 0, 255, 0, w);
+    tol->setValue(tolerance);
+    tol->setToolTip(T("How different a color may be from the colors painted on and still be taken."));
+    connect(tol, &ValueBar::valueChanged, this, [this](double x) { tolerance = int(x); });
+    v->addWidget(tol);
+    auto* rc = new ValueBar(T("Reach"), 1, 10, 1, w);
+    rc->setSuffix(QString::fromUtf8("×"));
+    rc->setValue(reach);
+    rc->setToolTip(T("How far from the brush the selection may grow, in brush sizes."));
+    connect(rc, &ValueBar::valueChanged, this, [this](double x) { reach = x; });
+    v->addWidget(rc);
+    auto* src = new QComboBox(w);
+    src->addItems({T("All visible layers"), T("Current layer"), T("Reference layers")});
+    src->setCurrentIndex(std::clamp(source, 0, 2));
+    connect(src, &QComboBox::currentIndexChanged, this, [this](int i) { source = i; });
+    auto* row = new QHBoxLayout;
+    row->addWidget(new QLabel(T("Sample"), w));
+    row->addWidget(src, 1);
+    v->addLayout(row);
+    auto* grow = new ValueBar(T("Expand"), -10, 10, 0, w);
+    grow->setSuffix(" px");
+    grow->setValue(expand);
+    connect(grow, &ValueBar::valueChanged, this, [this](double x) { expand = int(x); });
+    v->addWidget(grow);
+    auto* tint = new QCheckBox(T("Show the selection in color"), w);
+    tint->setChecked(showTint);
+    connect(tint, &QCheckBox::toggled, this, [this](bool on) {
+        showTint = on;
+        Q_EMIT overlayChanged();
+    });
+    v->addWidget(tint);
+    auto* hint = new QLabel(T("Paint over the object: the selection spreads over its colors and stops at its edges and lines. "
+                              "Each stroke adds; hold Ctrl or Alt to take away. Ctrl+D deselects."), w);
+    hint->setWordWrap(true);
+    hint->setObjectName("sectionTitle");
+    v->addWidget(hint);
+    v->addStretch();
+    return w;
+}
+
 }  // namespace gx

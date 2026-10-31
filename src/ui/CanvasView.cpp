@@ -599,8 +599,9 @@ void CanvasView::rebuildSelectionPath() {
 }
 
 bool CanvasView::wantsSelectionTint() const {
-    auto* pen = qobject_cast<SelectionBrushTool*>(app()->tools()->active());
-    return pen && pen->showTint;
+    if (auto* pen = qobject_cast<SelectionBrushTool*>(app()->tools()->active())) return pen->showTint;
+    if (auto* smart = qobject_cast<SmartSelectTool*>(app()->tools()->active())) return smart->showTint;
+    return false;
 }
 
 void CanvasView::updateSelectionTint(const QRect& cr) {

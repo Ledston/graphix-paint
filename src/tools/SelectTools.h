@@ -129,6 +129,42 @@ private:
     QRect m_dirty;
 };
 
+// Smart selection (like Photoshop's quick selection): paint over an object and the selection
+// grows over the colors painted on, but stops at its edges and at the lines of the line art.
+// Strokes add to the selection; Ctrl or Alt take away.
+class SmartSelectTool : public Tool {
+    Q_OBJECT
+public:
+    explicit SmartSelectTool(QObject* p = nullptr) : Tool("smart-select", "Smart selection", "smartselect", p) {}
+    void press(const PointerEvent& e) override;
+    void move(const PointerEvent& e) override;
+    void release(const PointerEvent& e) override;
+    bool showsBrushOutline() const override { return true; }
+    double outlineDiameter() const override { return size; }
+    QWidget* createOptions(QWidget* parent) override;
+    bool isBusy() const override { return m_drag; }
+
+    double size = 40;
+    int tolerance = 36;   // how different a color may be from the colors painted on
+    double reach = 3;     // how far from the brush the selection may grow (times the brush radius)
+    int source = 0;       // FillSource: all visible, current layer, reference layers
+    int expand = 1;       // px under the soft edge of the lines
+    bool showTint = true;
+
+private:
+    void dab(const QPointF& c);
+    bool m_drag = false;
+    bool m_subtract = false;
+    QPointF m_last;
+    double m_residual = 0;
+    QPointer<CanvasView> m_view;
+    QRect m_srcRect;                  // the pixels read once per stroke
+    std::vector<quint32> m_src;
+    std::vector<quint32> m_samples;   // colors painted on so far
+    MaskSurface m_before{0};          // the selection when the stroke began (for subtracting / combining)
+    MaskSurface m_stroke{0};          // what this stroke found
+};
+
 // Flood fill helper shared by the wand and the bucket.
 MaskSurface floodFill(Document* doc, const QPoint& seed, int tolerance, bool sampleMerged, bool contiguous, const Layer* layer,
                       QString* error);

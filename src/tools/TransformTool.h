@@ -106,16 +106,31 @@ public:
     void apply();
     void cancel();
     void resetGrid();
+    // Like Photoshop: a click on a grid line adds a line through that place (its point can be
+    // dragged at once); Ctrl + click on a point removes the line it was added with.
+    // u, v: place in the picture, 0..1. Return the index of the new point on (u, v), or -1.
+    int addColumn(double u, int onRow);
+    int addRow(double v, int onColumn);
+    bool removeLineAt(int point);
+    int columns() const { return m_nu; }
+    int rows() const { return m_nv; }
+    QPointF point(int i) const { return m_pts[size_t(i)]; }
+    void setPoint(int i, QPointF p) { m_pts[size_t(i)] = p; render(true); }
 
 private:
     bool start();
     void render(bool final);
-    QPointF gridPoint(double u, double v) const;  // smooth surface through the control points
+    QPointF gridPoint(double u, double v) const;  // smooth surface through the control points (index space)
+    QPointF sourceAt(double u, double v) const;   // where in the picture an index-space place comes from
+    // the nearest place on a grid line to a widget point: row or column, and the index-space place
+    bool hitLine(CanvasView* view, QPointF widgetPos, bool* horizontal, double* u, double* v) const;
 
     bool m_active = false;
     FloatingPixels m_float;
-    std::vector<QPointF> m_pts;  // (cells+1)^2
-    int m_n = 4;
+    std::vector<QPointF> m_pts;  // m_nu * m_nv control points, row by row
+    int m_nu = 4, m_nv = 4;
+    std::vector<double> m_us, m_vs;      // where the columns / rows are in the picture (0..1)
+    std::vector<int> m_colAge, m_rowAge;  // 0 = from the grid setting, higher = added later by a click
     int m_drag = -1;
     QPointF m_pressPos, m_startPt;
     std::vector<QPointF> m_startPts;

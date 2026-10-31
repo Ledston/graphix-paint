@@ -514,7 +514,7 @@ void BrushSettingsWidget::updateVisibility() {
 // ============================================================================ ToolPanel
 
 QStringList ToolPanel::toolOrder() {
-    return {"select-rect", "select-ellipse", "lasso", "magic-wand", "select-brush", "move", "transform",
+    return {"select-rect", "select-ellipse", "lasso", "magic-wand", "smart-select", "select-brush", "move", "transform",
             "warp", "liquify", "fill", "lasso-fill", "gradient", "eyedropper", "hand", "zoom", "rotate",
             "text", "focuslines", "speedlines", "vpen", "curve", "vedit", "vpressure", "vweight", "vcolor", "veraser", "ruler"};
 }
