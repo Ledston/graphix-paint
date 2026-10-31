@@ -243,6 +243,7 @@ DocSnapshot takeSnapshot(const Document& doc) {
     s.perspective = doc.perspective;
     s.symmetry = doc.symmetry;
     s.ruler = doc.ruler;
+    s.seamless = doc.seamless;
     return s;
 }
 
@@ -258,6 +259,7 @@ bool saveNative(const DocSnapshot& snap, const QString& path, QString* error, co
     head["perspective"] = snap.perspective.toJson();
     head["symmetry"] = snap.symmetry.toJson();
     if (snap.ruler.isOn()) head["ruler"] = snap.ruler.toJson();
+    if (snap.seamless) head["seamless"] = true;
     QJsonArray layers;
     for (const auto& c : snap.state.root->children) layers.append(layerToJson(*c, w));
     head["layers"] = layers;
@@ -348,6 +350,7 @@ std::unique_ptr<Document> loadNative(const QString& path, QString* error) {
     doc->perspective = Perspective::fromJson(head.value("perspective").toObject());
     if (head.contains("symmetry")) doc->symmetry = Symmetry::fromJson(head.value("symmetry").toObject());
     if (head.contains("ruler")) doc->ruler = Ruler::fromJson(head.value("ruler").toObject());
+    doc->seamless = head.value("seamless").toBool();
     for (const auto& lv : head.value("layers").toArray()) {
         LayerPtr l = layerFromJson(lv.toObject(), r, 0);
         if (!l) {

@@ -106,6 +106,7 @@ public:
     Perspective perspective;
     Symmetry symmetry;
     Ruler ruler;  // special ruler (straight, curve, ellipse...)
+    bool seamless = false;  // Canvas > Seamless mode: shown as tiles, strokes wrap around the edges
 
     // Bounds of a layer's visible content in canvas space.
     QRect layerBounds(const Layer* l) const;

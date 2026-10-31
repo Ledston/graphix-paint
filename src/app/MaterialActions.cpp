@@ -276,4 +276,26 @@ bool saveLayerGradient(Document& d, const QString& name, QString* error) {
     return true;
 }
 
+QString savePictureAsPattern(Document& d, const QString& name, QString* error) {
+    const RasterSurface all = ops::renderLayers(d, d.root()->children, d.bounds());
+    const QImage img = surfaceToImage(all, d.bounds());
+    if (img.isNull()) {
+        fail(error, T("There is nothing to save here."));
+        return {};
+    }
+    Materials& m = Materials::instance();
+    QString base = name.trimmed().isEmpty() ? QStringLiteral("Pattern") : name.trimmed();
+    base.replace(QRegularExpression("[\\\\/:*?\"<>|]"), "_");
+    QString file = m.patternsFolder() + "/" + base + ".png";
+    for (int i = 2; QFileInfo::exists(file); ++i) file = m.patternsFolder() + "/" + base + " " + QString::number(i) + ".png";
+    if (!img.convertToFormat(QImage::Format_ARGB32).save(file)) {
+        fail(error, T("Could not save the file."));
+        return {};
+    }
+    const QString saved = QFileInfo(file).completeBaseName();
+    Q_EMIT m.changed();
+    m.setCurrentPattern(saved);
+    return saved;
+}
+
 }  // namespace gx::materials

@@ -1,4 +1,5 @@
 #include "ui/Dialogs.h"
+#include "app/Templates.h"
 
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -242,6 +243,11 @@ double unitFactor(int unit, double dpi) {  // pixels per unit
 NewDocumentDialog::NewDocumentDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(T("New canvas"));
     auto* f = new QFormLayout(this);
+    m_template = new QComboBox(this);
+    for (const templates::Info& t : templates::all())
+        m_template->addItem(t.id.startsWith("user:") ? t.name : T(t.name), t.id);
+    m_template->setToolTip(T("Ready layer sets. Save your own with File > Save as template."));
+    f->addRow(T("Template"), m_template);
     m_preset = new QComboBox(this);
     for (const Preset& p : kPresets) m_preset->addItem(T(p.name));
     f->addRow(T("Preset"), m_preset);
@@ -307,8 +313,20 @@ NewDocumentDialog::NewDocumentDialog(QWidget* parent) : QDialog(parent) {
         }
     });
     for (auto* sb : {m_w, m_h, m_dpi}) connect(sb, &QDoubleSpinBox::valueChanged, this, [this] { updateInfo(); });
+    connect(m_template, &QComboBox::currentIndexChanged, this, [this](int i) {
+        // a template may bring its own size (comic page, character sheet, pattern)
+        const QList<templates::Info> all = templates::all();
+        if (i < 0 || i >= all.size() || all[i].size.isEmpty()) return;
+        if (all[i].dpi > 0) m_dpi->setValue(all[i].dpi);
+        m_unit->setCurrentIndex(0);
+        m_lastUnit = 0;
+        setPixels(all[i].size.width(), all[i].size.height());
+    });
+    m_template->setCurrentIndex(std::max(0, m_template->findData(s.value("newdoc/template", "plain").toString())));
     updateInfo();
 }
+
+QString NewDocumentDialog::templateId() const { return m_template->currentData().toString(); }
 
 void NewDocumentDialog::setPixels(int w, int h) {
     double f = unitFactor(m_unit->currentIndex(), m_dpi->value());
@@ -361,6 +379,7 @@ void NewDocumentDialog::accept() {
     st.setValue("newdoc/h", s.height());
     st.setValue("newdoc/dpi", dpi());
     st.setValue("newdoc/bg", m_bg->currentIndex());
+    st.setValue("newdoc/template", templateId());
     QDialog::accept();
 }
 

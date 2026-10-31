@@ -32,6 +32,8 @@ bool strokeSelection(Document& d, double width, StrokePosition pos, const QColor
 // The selected part of the current layer (or the whole layer) saved as a picture or a pattern.
 // Returns the material name.
 QString saveSelection(Document& d, bool asPattern, const QString& name, QString* error = nullptr);
+// The whole picture (all visible layers) saved as a pattern (Canvas > Save as pattern).
+QString savePictureAsPattern(Document& d, const QString& name, QString* error = nullptr);
 // The gradient of the current gradient map layer saved into the gradient map set.
 bool saveLayerGradient(Document& d, const QString& name, QString* error = nullptr);
 

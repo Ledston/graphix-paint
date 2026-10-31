@@ -1,6 +1,7 @@
 // Scenario tests that drive the real UI: draw, then use tools and check the pixels.
 // Usage: gx_uiscenarios   (run with QT_QPA_PLATFORM=offscreen)
 #include <QApplication>
+#include <QComboBox>
 #include <QPainter>
 #include <QElapsedTimer>
 #include <QKeyEvent>
@@ -51,6 +52,9 @@
 #include "tools/TransformTool.h"
 #include "ui/LiquifyDialog.h"
 #include "ui/ThemeEditor.h"
+#include "ui/ReplaceColorDialog.h"
+#include "app/Templates.h"
+#include "ui/Dialogs.h"
 #include "ui/NavigatorPanel.h"
 #include <QTemporaryDir>
 #include <QWheelEvent>
@@ -1517,6 +1521,68 @@ int main(int argc, char** argv) {
         } else {
             CHECK(false);
         }
+    }, w);
+
+    scenario("seamless mode, replace color, canvas templates", [](MainWindow& w) {
+        Document* d = view()->doc();
+        auto* l = static_cast<RasterLayer*>(d->currentLayer());
+        l->pixels.fillRect(QRect(0, 0, 800, 600), 0xffdd2222u);  // red everywhere: copies show red too
+        d->pixelsChanged(d->bounds(), l);
+        QHash<QString, QAction*> acts;
+        for (QAction* a : w.findChildren<QAction*>())
+            if (!a->property("en").toString().isEmpty()) acts.insert(a->property("en").toString(), a);
+        for (const char* n : {"Seamless mode", "Offset by half", "Save as pattern...", "Replace color...", "Save as template..."}) CHECK(acts.contains(n));
+        // zoom out so the canvas does not fill the view, then look left of it
+        view()->setZoom(0.4);
+        pump(100);
+        auto leftOfCanvas = [&] {
+            const QPointF c = view()->toWidget(QPointF(-100, 300));
+            const QImage img = view()->grab().toImage();
+            const QPoint p = (c * img.devicePixelRatio()).toPoint();
+            return img.rect().contains(p) ? QColor(img.pixel(p)) : QColor();
+        };
+        const QColor off = leftOfCanvas();
+        acts["Seamless mode"]->trigger();
+        pump(200);
+        CHECK(d->seamless && acts["Seamless mode"]->isChecked());
+        const QColor on = leftOfCanvas();
+        std::fprintf(stderr, "INFO left of the canvas: %s off, %s on\n", qPrintable(off.name()), qPrintable(on.name()));
+        CHECK(off.isValid() && on.isValid() && on.red() > on.blue() + 60 && !(off.red() > off.blue() + 60));
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/seamless.png");
+        acts["Seamless mode"]->trigger();
+        pump(50);
+        CHECK(!d->seamless);
+        view()->fitToWindow();
+        // replace color: the red becomes the second color
+        app()->setForeground(QColor(0xdd, 0x22, 0x22));
+        app()->setBackground(QColor(0x22, 0x44, 0xdd));
+        {
+            ReplaceColorDialog dlg(d, l->id, &w);
+            dlg.show();
+            pump(200);
+            CHECK(l->preview != nullptr);  // the canvas shows it before OK
+            dlg.accept();
+        }
+        l = static_cast<RasterLayer*>(d->currentLayer());
+        const quint32 c = l->pixels.pixel(400, 300);
+        CHECK(!l->preview && (c & 0xff) > 0xb0 && ((c >> 16) & 0xff) < 0x50);
+        d->undo();
+        l = static_cast<RasterLayer*>(d->currentLayer());
+        CHECK(((l->pixels.pixel(400, 300) >> 16) & 0xff) > 0xb0);
+        // templates in File > New, and a saved one comes back
+        {
+            NewDocumentDialog dlg(&w);
+            auto* combo = dlg.findChildren<QComboBox*>().value(0);
+            CHECK(combo && combo->count() >= 5);
+        }
+        QString err;
+        CHECK(templates::saveAsTemplate(*d, "Test template", &err));
+        bool listed = false;
+        for (const templates::Info& t : templates::all()) listed |= t.id == "user:Test template.gxp";
+        CHECK(listed);
+        auto fromMine = templates::make("user:Test template.gxp", QSize(), 0, Qt::white, &err);
+        CHECK(fromMine && fromMine->size() == d->size() && fromMine->root()->children.size() == d->root()->children.size());
+        QFile::remove(templates::folder() + "/Test template.gxp");
     }, w);
 
     scenario("reference over everything", [](MainWindow& w) {

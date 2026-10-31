@@ -15,6 +15,7 @@ struct DocSnapshot {
     Perspective perspective;
     Symmetry symmetry;
     Ruler ruler;
+    bool seamless = false;
 };
 DocSnapshot takeSnapshot(const Document& doc);
 

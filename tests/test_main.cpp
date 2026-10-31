@@ -15,6 +15,8 @@
 #include "brush/BrushStroke.h"
 #include "core/Compositor.h"
 #include "core/Document.h"
+#include "core/ReplaceColor.h"
+#include "app/Templates.h"
 #include "core/FocusLines.h"
 #include "core/Guides.h"
 #include "core/ImageOps.h"
@@ -906,6 +908,82 @@ static void testSaiBrushes() {
     }
 }
 
+static void testSeamlessAndReplace() {
+    // replace color: red becomes blue, a darker red a darker blue, green stays
+    {
+        ReplaceColorParams p;
+        p.from = QColor(220, 30, 30);
+        p.to = QColor(30, 60, 220);
+        p.tolerance = 60;
+        p.softness = 20;
+        p.keepShading = true;
+        float px[12] = {220 / 255.f, 30 / 255.f, 30 / 255.f, 1, 110 / 255.f, 15 / 255.f, 15 / 255.f, 1, 30 / 255.f, 200 / 255.f, 30 / 255.f, 1};
+        replaceColorPixels(px, 3, p);
+        CHECK(px[2] > 0.8f && px[0] < 0.2f);                 // blue
+        CHECK(px[6] > px[4] && px[6] < px[2]);               // a darker blue
+        CHECK(std::abs(px[9] - 200 / 255.f) < 1e-4f);        // green untouched
+    }
+    // offset by half wraps the pixels and undoes in one step
+    {
+        Document doc(QSize(200, 100));
+        auto* l = ops::addRasterLayer(doc);
+        l->pixels.fillRect(QRect(0, 0, 10, 10), 0xffff0000u);
+        offsetWrap(doc, 100, 50);
+        l = static_cast<RasterLayer*>(doc.currentLayer());
+        CHECK((l->pixels.pixel(105, 55) >> 24) == 255 && (l->pixels.pixel(5, 5) >> 24) == 0);
+        offsetWrap(doc, 150, 75);  // a stroke over the corner shows on all four sides
+        l = static_cast<RasterLayer*>(doc.currentLayer());
+        CHECK((l->pixels.pixel(55, 25) >> 24) == 255);
+        doc.undo();
+        doc.undo();
+        l = static_cast<RasterLayer*>(doc.currentLayer());
+        CHECK((l->pixels.pixel(5, 5) >> 24) == 255);
+    }
+    // wrap painting: a stroke over the right edge comes back on the left
+    {
+        Document doc(QSize(300, 100));
+        doc.seamless = true;
+        auto* l = ops::addRasterLayer(doc);
+        StrokeContext ctx;
+        ctx.doc = &doc;
+        ctx.layer = l;
+        ctx.brush.size = 20;
+        ctx.brush.hardness = 1;
+        ctx.color = Qt::black;
+        ctx.wrap = true;
+        BrushStroke st(ctx);
+        for (int i = 0; i <= 20; ++i) {
+            InputSample p;
+            p.pos = QPointF(250 + i * 4, 50);  // to x = 330: 30 px past the edge
+            p.pressure = 1;
+            if (i == 0) st.begin(p);
+            else st.add(p);
+        }
+        st.end();
+        CHECK((l->pixels.pixel(20, 50) >> 24) > 200 && (l->pixels.pixel(295, 50) >> 24) > 200 && (l->pixels.pixel(150, 50) >> 24) == 0);
+        // the flag is kept in the file
+        QTemporaryDir dir;
+        QString err;
+        CHECK(saveNative(takeSnapshot(doc), dir.filePath("s.gxp"), &err));
+        auto back = loadNative(dir.filePath("s.gxp"), &err);
+        CHECK(back && back->seamless);
+    }
+    // templates: layer sets
+    {
+        auto ill = templates::make("illustration", QSize(800, 600), 350, Qt::white);
+        CHECK(ill && ill->root()->children.size() == 7);  // paper + 6
+        if (ill) CHECK(ill->currentLayer() && ill->currentLayer()->opacity < 0.5f);  // starts on the sketch
+        auto comic = templates::make("comic", QSize(1000, 1400), 350, Qt::white);
+        bool frames = false;
+        if (comic)
+            for (auto& c : comic->root()->children)
+                if (auto* r = dynamic_cast<RasterLayer*>(c.get()); r && r->reference && !r->pixels.exactBounds().isEmpty()) frames = true;
+        CHECK(frames);
+        auto pat = templates::make("pattern", QSize(256, 256), 350, Qt::transparent);
+        CHECK(pat && pat->seamless && pat->root()->children.size() == 1);
+    }
+}
+
 int main(int argc, char** argv) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
@@ -929,6 +1007,7 @@ int main(int argc, char** argv) {
     testMaterials();
     testRulersAndLines();
     testSaiBrushes();
+    testSeamlessAndReplace();
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

@@ -75,6 +75,7 @@ void BrushTool::press(const PointerEvent& e) {
     ctx.transparentColor = app()->transparentColor();
     ctx.pressureCurve = &app()->pressureCurve();
     if (doc->symmetry.isOn()) ctx.symmetry = doc->symmetry.transforms();
+    ctx.wrap = doc->seamless;  // seamless: what goes over an edge comes back on the other side
 
     m_stab.configure(Stabilizer::Mode(app()->stabilizerMode()), app()->stabilizerLevel(), app()->pressureSmoothing());
     doc->pushUndo(m_usingEraser || ctx.brush.engine == BrushEngine::Erase ? T("Erase") : T("Brush stroke"));

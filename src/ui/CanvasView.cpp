@@ -208,7 +208,9 @@ void CanvasView::invalidateAll() {
     update();
 }
 
-void CanvasView::markCanvasDirty(const QRect& r) {
+void CanvasView::markCanvasDirty(const QRect& r0) {
+    // seamless: the change shows in every copy of the tile around the canvas
+    const QRect r = m_doc->seamless ? QRect(-100000, -100000, 200000, 200000) : r0;
     if (m_rec.valid) {
         QRect rr = m_rec.xf.mapRect(QRectF(r)).toAlignedRect().adjusted(-2, -2, 2, 2) & m_rec.img.rect();
         m_rec.dirty |= rr;
@@ -278,7 +280,10 @@ void CanvasView::ensureCache(ViewCache& vc, Projection* proj) {
     if (s < 1.0) L = std::clamp(int(std::floor(std::log2(1.0 / s))), 0, maxL);
 
     QRect dirty = vc.dirty;
-    QRect canvasArea = xf.inverted().mapRect(QRectF(dirty)).toAlignedRect().adjusted(-2, -2, 2, 2) & m_doc->bounds();
+    QRect canvasArea = xf.inverted().mapRect(QRectF(dirty)).toAlignedRect().adjusted(-2, -2, 2, 2);
+    // seamless: the copies around the canvas need the whole picture
+    if (m_doc->seamless && !m_doc->bounds().contains(canvasArea)) canvasArea = m_doc->bounds();
+    canvasArea &= m_doc->bounds();
     bool complete = true;
     if (!canvasArea.isEmpty()) {
         int sh = TILE_SHIFT + L;
@@ -327,6 +332,7 @@ bool CanvasView::renderRect(ViewCache& vc, const Projection* proj, const QRect& 
     const bool gray = app()->grayscaleView() && !m_scratch;
     const int CW = m_doc->size().width(), CH = m_doc->size().height();
     const int LW = (CW + (1 << L) - 1) >> L, LH = (CH + (1 << L) - 1) >> L;
+    const bool seamless = m_doc->seamless && !m_scratch;
     const double inv2L = 1.0 / double(1 << L);
     uchar* bits = vc.img.bits();
     const qsizetype bpl = vc.img.bytesPerLine();
@@ -343,13 +349,18 @@ bool CanvasView::renderRect(ViewCache& vc, const Projection* proj, const QRect& 
             double cx = m11 * px + m21 * py + dx, cy = m12 * px + m22 * py + dy;
             const int checkRow = (y / cs) & 1;
             for (int x = pr.left(); x <= pr.right(); ++x, cx += m11, cy += m12) {
+                bool copy = false;
                 if (cx < 0 || cy < 0 || cx >= CW || cy >= CH) {
-                    row[x] = wsc;
-                    continue;
+                    if (!seamless) {
+                        row[x] = wsc;
+                        continue;
+                    }
+                    copy = true;  // seamless: the picture repeats around itself
                 }
+                const double cxw = copy ? cx - std::floor(cx / CW) * CW : cx, cyw = copy ? cy - std::floor(cy / CH) * CH : cy;
                 quint32 bg = checker ? ((((x / cs) & 1) ^ checkRow) ? c1 : c2) : paper;
                 quint32 src;
-                double lx = cx * inv2L, ly = cy * inv2L;
+                double lx = cxw * inv2L, ly = cyw * inv2L;
                 if (nearest) {
                     int ix = std::min(LW - 1, int(lx)), iy = std::min(LH - 1, int(ly));
                     src = lk.fetch(ix, iy);
@@ -364,6 +375,7 @@ bool CanvasView::renderRect(ViewCache& vc, const Projection* proj, const QRect& 
                     src = lerpPx(lerpPx(a, b, wx), lerpPx(c, d, wx), wy);
                 }
                 row[x] = overOpaque(src, bg);
+                if (copy) row[x] = lerpPx(row[x], wsc, 60);  // the copies a little dimmer than the canvas itself
                 if (gray) {
                     const quint32 c = row[x];
                     const quint32 l = (((c >> 16) & 255u) * 77u + ((c >> 8) & 255u) * 150u + (c & 255u) * 29u) >> 8;

@@ -429,8 +429,30 @@ double BrushStroke::stepFor(double pr, double taper) const {
 
 void BrushStroke::put(const DabParams& d, float density, bool sub, const TexFrame& tf, Carry& carry, float pr) {
     if (sub) m_useSub = true;
-    if (m_engine == BrushEngine::Paint || m_engine == BrushEngine::Erase) bufferedDab(d, density, sub, tf);
-    else directDab(carry, sub ? m_sub : m_color, d, density, pr, tf);
+    auto one = [&](const DabParams& dd, const TexFrame& t) {
+        if (m_engine == BrushEngine::Paint || m_engine == BrushEngine::Erase) bufferedDab(dd, density, sub, t);
+        else directDab(carry, sub ? m_sub : m_color, dd, density, pr, t);
+    };
+    one(d, tf);
+    if (!m_ctx.wrap || !m_ctx.doc) return;
+    // seamless: the same dab one canvas away, where it reaches back into the picture
+    const QRect bounds = m_ctx.doc->bounds();
+    const QRect box = dabBounds(d);
+    const int W = bounds.width(), H = bounds.height();
+    for (int oy = -1; oy <= 1; ++oy)
+        for (int ox = -1; ox <= 1; ++ox) {
+            if (!ox && !oy) continue;
+            if (!box.translated(ox * W, oy * H).intersects(bounds)) continue;
+            DabParams dd = d;
+            dd.cx += ox * W;
+            dd.cy += oy * H;
+            TexFrame t = tf;
+            t.cx += ox * W;
+            t.cy += oy * H;
+            t.px += ox * W;
+            t.py += oy * H;
+            one(dd, t);
+        }
 }
 
 void BrushStroke::bufferedDab(const DabParams& d, float density, bool sub, const TexFrame& tf) {

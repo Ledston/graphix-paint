@@ -89,6 +89,9 @@
 #include "ui/MaterialsPanel.h"
 #include "ui/LiquifyDialog.h"
 #include "ui/ThemeEditor.h"
+#include "ui/ReplaceColorDialog.h"
+#include "app/Templates.h"
+#include "core/ReplaceColor.h"
 #include "app/MaterialActions.h"
 #include "app/Materials.h"
 #include "ui/ScratchpadPanel.h"
@@ -347,6 +350,62 @@ void MainWindow::createActions() {
 
     // Canvas
     act("canvas.size", "Canvas size...", "Canvas", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C), [this] { canvasSize(); });
+    {
+        QAction* sm = act("canvas.seamless", "Seamless mode", "Canvas", {}, [this] {
+            if (Document* d = activeDocument()) {
+                d->seamless = !d->seamless;
+                d->setModified(true);
+                d->guidesModified();
+                d->pixelsChanged(d->bounds());
+                app()->showStatus(d->seamless ? T("Seamless mode: the picture repeats around itself and strokes go over the edges.")
+                                               : T("Seamless mode is off."), 4000);
+            }
+        }, "pattern");
+        sm->setCheckable(true);
+        auto sync = [this, sm] { sm->setChecked(activeDocument() && activeDocument()->seamless); };
+        connect(app(), &App::activeViewChanged, sm, sync);
+        connect(sm, &QAction::triggered, sm, sync);
+    }
+    act("canvas.offsethalf", "Offset by half", "Canvas", {}, [this, commit] {
+        commit();
+        if (Document* d = activeDocument()) offsetWrap(*d, d->size().width() / 2, d->size().height() / 2);
+    });
+    act("canvas.savepattern", "Save as pattern...", "Canvas", {}, [this, commit] {
+        commit();
+        Document* d = activeDocument();
+        if (!d) return;
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, T("Save as pattern"), T("Name:"), QLineEdit::Normal,
+                                                   d->filePath().isEmpty() ? T("Pattern") : QFileInfo(d->filePath()).completeBaseName(), &ok);
+        if (!ok) return;
+        QString err;
+        if (materials::savePictureAsPattern(*d, name, &err).isEmpty()) QMessageBox::warning(this, T("Save as pattern"), err);
+        else app()->showStatus(T("Saved to Materials > Patterns."));
+    });
+    act("edit.replacecolor", "Replace color...", "Edit", {}, [this, commit] {
+        commit();
+        Document* d = activeDocument();
+        if (!d) return;
+        auto* l = dynamic_cast<RasterLayer*>(d->currentLayer());
+        if (!l) {
+            app()->showStatus(T("Select a pixel layer."));
+            return;
+        }
+        ReplaceColorDialog dlg(d, l->id, this);
+        dlg.exec();
+    }, "swap");
+    act("file.savetemplate", "Save as template...", "File", {}, [this, commit] {
+        commit();
+        Document* d = activeDocument();
+        if (!d) return;
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, T("Save as template"), T("Name:"), QLineEdit::Normal,
+                                                   d->filePath().isEmpty() ? T("My template") : QFileInfo(d->filePath()).completeBaseName(), &ok);
+        if (!ok) return;
+        QString err;
+        if (!templates::saveAsTemplate(*d, name, &err)) QMessageBox::warning(this, T("Save as template"), T(err));
+        else app()->showStatus(T("Saved. It is in File > New > Template."));
+    });
     act("canvas.imagesize", "Image size...", "Canvas", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_I), [this] { imageSize(); });
     act("canvas.rotcw", "Rotate 90 degrees clockwise", "Canvas", {}, [doc, commit] { commit(); ops::rotateCanvas(*doc(), 1); });
     act("canvas.rotccw", "Rotate 90 degrees counter-clockwise", "Canvas", {}, [doc, commit] { commit(); ops::rotateCanvas(*doc(), 3); });
@@ -677,6 +736,7 @@ void MainWindow::createMenus() {
     add(file, "file.saveas");
     add(file, "file.export");
     add(file, "file.import");
+    add(file, "file.savetemplate");
     file->addSeparator();
     QMenu* tl = file->addMenu(Theme::icon("record"), T("Video recording"));
     for (const char* id : {"rec.start", "rec.pause", "rec.stop", "", "rec.toggle", "", "rec.mode.canvas", "rec.mode.window", "", "rec.discard",
@@ -690,14 +750,16 @@ void MainWindow::createMenus() {
 
     QMenu* edit = mb->addMenu(T("&Edit"));
     for (const char* id : {"edit.undo", "edit.redo", "", "edit.cut", "edit.copy", "edit.copymerged", "edit.paste", "edit.pastenew",
-                           "", "edit.clear", "edit.fill", "edit.fillpattern", "edit.stroke", "", "edit.transform", "edit.warp", "edit.liquify"}) {
+                           "", "edit.clear", "edit.fill", "edit.fillpattern", "edit.stroke", "edit.replacecolor", "", "edit.transform", "edit.warp",
+                           "edit.liquify"}) {
         if (!*id) edit->addSeparator();
         else add(edit, id);
     }
 
     QMenu* canvas = mb->addMenu(T("&Canvas"));
     for (const char* id : {"canvas.size", "canvas.imagesize", "", "canvas.rotcw", "canvas.rotccw", "canvas.rot180", "",
-                           "canvas.fliph", "canvas.flipv", "", "canvas.crop", "canvas.trim"}) {
+                           "canvas.fliph", "canvas.flipv", "", "canvas.crop", "canvas.trim", "", "canvas.seamless", "canvas.offsethalf",
+                           "canvas.savepattern"}) {
         if (!*id) canvas->addSeparator();
         else add(canvas, id);
     }
@@ -1194,25 +1256,12 @@ void MainWindow::updateTitle() {
 void MainWindow::newDocument() {
     NewDocumentDialog dlg(this);
     if (dlg.exec() != QDialog::Accepted) return;
-    auto doc = std::make_shared<Document>(dlg.canvasSize());
-    doc->setDpi(dlg.dpi());
-    auto bg = std::make_shared<RasterLayer>();
-    bg->id = doc->newLayerId();
-    if (dlg.background().alpha() > 0) {
-        bg->name = T("Paper");
-        bg->pixels.fillRect(doc->bounds(), premulFromColor(dlg.background()));
-        doc->root()->insert(0, bg);
-        auto l = std::make_shared<RasterLayer>();
-        l->id = doc->newLayerId();
-        l->name = T("Layer 1");
-        doc->root()->insert(1, l);
-        doc->setCurrentLayer(l->id);
-    } else {
-        bg->name = T("Layer 1");
-        doc->root()->insert(0, bg);
-        doc->setCurrentLayer(bg->id);
+    QString err;
+    auto doc = templates::make(dlg.templateId(), dlg.canvasSize(), dlg.dpi(), dlg.background(), &err);
+    if (!doc) {
+        QMessageBox::warning(this, T("New canvas"), err.isEmpty() ? T("The template could not be opened.") : T(err));
+        return;
     }
-    doc->setModified(false);
     addDocument(doc);
 }
 

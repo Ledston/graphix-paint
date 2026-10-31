@@ -27,6 +27,7 @@ struct StrokeContext {
     bool transparentColor = false;  // SAI style "transparent" color: paints transparency
     const PressureCurve* pressureCurve = nullptr;
     QVector<QTransform> symmetry;  // extra mirrored copies
+    bool wrap = false;             // seamless canvas: dabs over an edge are drawn again on the other side
 };
 
 // One brush stroke from pen down to pen up.

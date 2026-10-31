@@ -30,11 +30,13 @@ public:
     QSize canvasSize() const;
     double dpi() const;
     QColor background() const;
+    QString templateId() const;  // File > New templates (see app/Templates.h)
     void accept() override;
 
 private:
     void updateInfo();
     void setPixels(int w, int h);
+    QComboBox* m_template = nullptr;
     QComboBox* m_preset;
     QDoubleSpinBox *m_w, *m_h;
     QComboBox* m_unit;
