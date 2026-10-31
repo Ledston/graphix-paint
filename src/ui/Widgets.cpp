@@ -89,7 +89,8 @@ void ValueBar::paintEvent(QPaintEvent*) {
     p.setRenderHint(QPainter::Antialiasing);
     p.setPen(QPen(c.border, 1));
     p.setBrush(c.base);
-    p.drawRoundedRect(r, 3, 3);
+    const double rad = std::min(r.height() / 2, double(c.radius));
+    p.drawRoundedRect(r, rad, rad);
     double t = std::clamp(toT(m_value), 0.0, 1.0);
     QRectF fill = r.adjusted(1, 1, -1, -1);
     fill.setWidth(fill.width() * t);
@@ -97,7 +98,7 @@ void ValueBar::paintEvent(QPaintEvent*) {
     a.setAlpha(isEnabled() ? 150 : 60);
     p.setPen(Qt::NoPen);
     p.setBrush(a);
-    p.drawRoundedRect(fill, 2, 2);
+    p.drawRoundedRect(fill, std::max(1.0, rad - 1), std::max(1.0, rad - 1));
     p.setPen(isEnabled() ? c.text : c.dim);
     QFont f = font();
     p.setFont(f);

@@ -214,7 +214,7 @@ void BrushSlots::paintEvent(QPaintEvent*) {
         bool cur = brushActive && i == lib->currentIndex();
         p.setPen(cur ? c.accent : c.border);
         p.setBrush(cur ? c.accent : c.button);
-        p.drawRoundedRect(QRectF(r).adjusted(0.5, 0.5, -0.5, -0.5), 3, 3);
+        p.drawRoundedRect(QRectF(r).adjusted(0.5, 0.5, -0.5, -0.5), c.radius, c.radius);
         QColor fg = cur ? c.accentText : c.text;
         const BrushSettings& b = lib->at(i);
         p.drawPixmap(QRect(r.left() + 3, r.top() + 2, 16, 16), Theme::iconPixmap(b.iconKey, 16, fg));
@@ -246,7 +246,7 @@ void BrushSlots::paintEvent(QPaintEvent*) {
     QRect add = cell(l, int(l.cells.size()), width());
     p.setPen(QPen(c.border, 1, Qt::DashLine));
     p.setBrush(Qt::NoBrush);
-    p.drawRoundedRect(QRectF(add).adjusted(0.5, 0.5, -0.5, -0.5), 3, 3);
+    p.drawRoundedRect(QRectF(add).adjusted(0.5, 0.5, -0.5, -0.5), c.radius, c.radius);
     p.drawPixmap(QRect(add.center().x() - 8, add.center().y() - 8, 16, 16), Theme::iconPixmap("plus", 16, c.dim));
 }
 

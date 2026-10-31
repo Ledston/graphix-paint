@@ -1,6 +1,9 @@
 #include "ui/Theme.h"
 
 #include <QApplication>
+#include "app/App.h"
+#include <QJsonDocument>
+#include <QFileInfo>
 #include <QDir>
 #include <QImage>
 #include <QStandardPaths>
@@ -32,6 +35,46 @@ ThemeColors makeColors(const QString& n) {
         c.border = QColor("#c5c8ce");
         c.accent = QColor("#2f6fdc");
         c.accentText = QColor("#ffffff");
+    } else if (n == "soft") {
+        // dark and calm, round shapes, a soft pink accent
+        c.window = QColor("#2b2a30");
+        c.panel = QColor("#34333a");
+        c.base = QColor("#242328");
+        c.alt = QColor("#2e2d33");
+        c.text = QColor("#ece8f1");
+        c.dim = QColor("#a39fae");
+        c.button = QColor("#403e47");
+        c.border = QColor("#4a4853");
+        c.accent = QColor("#e7a0b8");
+        c.accentText = QColor("#2a1820");
+        c.workspace = QColor("#222126");
+        c.radius = 8;
+    } else if (n == "lavender") {
+        c.window = QColor("#e7e2f2");
+        c.panel = QColor("#f2eef9");
+        c.base = QColor("#fbf9ff");
+        c.alt = QColor("#eee9f7");
+        c.text = QColor("#2a2438");
+        c.dim = QColor("#776e8e");
+        c.button = QColor("#f7f4fc");
+        c.border = QColor("#cdc4e0");
+        c.accent = QColor("#8a6fd6");
+        c.accentText = QColor("#ffffff");
+        c.workspace = QColor("#d6cfe6");
+        c.radius = 7;
+    } else if (n == "midnight") {
+        c.window = QColor("#141a2b");
+        c.panel = QColor("#1a2236");
+        c.base = QColor("#0f1424");
+        c.alt = QColor("#172034");
+        c.text = QColor("#dbe4f5");
+        c.dim = QColor("#8796b5");
+        c.button = QColor("#222c44");
+        c.border = QColor("#2c3854");
+        c.accent = QColor("#4fc3c8");
+        c.accentText = QColor("#071216");
+        c.workspace = QColor("#0d1220");
+        c.radius = 5;
     } else if (n == "gray") {
         c.window = QColor("#5a5b5e");
         c.panel = QColor("#636467");
@@ -56,7 +99,41 @@ ThemeColors makeColors(const QString& n) {
         c.accentText = QColor("#0e1116");
     }
     c.danger = QColor("#e5534b");
+    if (!c.workspace.isValid()) c.workspace = c.window.darker(115);
     return c;
+}
+
+// WCAG contrast of two colors (1..21)
+double contrast(const QColor& a, const QColor& b) {
+    auto lum = [](const QColor& c) {
+        auto ch = [](double v) { return v <= 0.03928 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * ch(c.redF()) + 0.7152 * ch(c.greenF()) + 0.0722 * ch(c.blueF());
+    };
+    const double la = lum(a), lb = lum(b);
+    return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
+}
+
+// Text that can be read on its background: when the chosen color is too close, black or white.
+QColor readable(const QColor& text, const QColor& bg, double need = 3.0) {
+    if (contrast(text, bg) >= need) return text;
+    return contrast(Qt::black, bg) > contrast(Qt::white, bg) ? QColor("#141414") : QColor("#f4f4f4");
+}
+
+// A picture blended over a color at some opacity: the tile behind the panels of the custom theme.
+QString textureTile(const ThemeColors& c, const QColor& under, double opacity, const QString& dir, const QString& name) {
+    if (c.texture.isEmpty() || opacity <= 0.001) return {};
+    QImage tex(c.texture);
+    if (tex.isNull()) return {};
+    if (tex.width() > 512 || tex.height() > 512) tex = tex.scaled(512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    QImage tile(tex.size(), QImage::Format_RGB32);
+    tile.fill(under);
+    QPainter p(&tile);
+    p.setOpacity(std::clamp(opacity, 0.0, 1.0));
+    p.drawImage(0, 0, tex);
+    p.end();
+    const QString file = dir + "/" + name + QString::number(qHash(c.texture + QString::number(opacity) + under.name()), 16) + ".png";
+    if (!QFileInfo::exists(file)) tile.save(file);
+    return file;
 }
 
 // Small images the stylesheet needs (check mark, arrows), drawn in the theme colors.
@@ -114,7 +191,7 @@ QLabel#dockTitle { background: transparent; padding: 3px 2px; color: %TEXT%; }
 QToolButton#dockFold { border: none; padding: 0; }
 QToolBar { background: %PANEL%; border: none; border-bottom: 1px solid %BORDER%; spacing: 2px; padding: 2px; }
 QToolBar::separator { background: %BORDER%; width: 1px; margin: 4px 4px; }
-QToolButton { border: 1px solid transparent; border-radius: 3px; padding: 2px; background: transparent; }
+QToolButton { border: 1px solid transparent; border-radius: %R%px; padding: 2px; background: transparent; }
 QToolButton:hover { background: %BUTTON%; border-color: %BORDER%; }
 QToolButton:checked { background: %ACCENT%; color: %ACCENTTEXT%; border-color: %ACCENT%; }
 QToolButton:pressed { background: %BORDER%; }
@@ -123,13 +200,13 @@ QToolButton::menu-button { border: none; border-left: 1px solid transparent; bac
 QToolButton::menu-button:hover { border-left-color: %BORDER%; background: %BUTTON%; }
 QToolButton::menu-arrow { image: url("%ASSETS%/down.png"); width: 8px; height: 8px; }
 QToolButton::menu-indicator { image: url("%ASSETS%/down.png"); width: 8px; height: 8px; subcontrol-origin: padding; subcontrol-position: bottom right; }
-QPushButton { background: %BUTTON%; border: 1px solid %BORDER%; border-radius: 3px; padding: 4px 10px; min-height: 18px; }
+QPushButton { background: %BUTTON%; border: 1px solid %BORDER%; border-radius: %R%px; padding: 4px 10px; min-height: 18px; }
 QPushButton:hover { border-color: %ACCENT%; }
 QPushButton:pressed, QPushButton:checked { background: %ACCENT%; color: %ACCENTTEXT%; }
 QPushButton:default { border-color: %ACCENT%; }
 QPushButton:disabled, QToolButton:disabled { color: %DIM%; }
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit, QTextEdit, QKeySequenceEdit {
-  background: %BASE%; border: 1px solid %BORDER%; border-radius: 3px; padding: 2px 4px; selection-background-color: %ACCENT%; selection-color: %ACCENTTEXT%; }
+  background: %BASE%; border: 1px solid %BORDER%; border-radius: %R%px; padding: 2px 4px; selection-background-color: %ACCENT%; selection-color: %ACCENTTEXT%; }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus { border-color: %ACCENT%; }
 QComboBox::drop-down { border: none; width: 16px; }
 QComboBox QAbstractItemView { background: %BASE%; border: 1px solid %BORDER%; selection-background-color: %ACCENT%; selection-color: %ACCENTTEXT%; }
@@ -137,30 +214,30 @@ QMenuBar { background: %PANEL%; border-bottom: 1px solid %BORDER%; }
 QMenuBar::item { padding: 4px 9px; background: transparent; }
 QMenuBar::item:selected { background: %BUTTON%; }
 QMenu { background: %PANEL%; border: 1px solid %BORDER%; padding: 3px; }
-QMenu::item { padding: 4px 26px 4px 22px; border-radius: 3px; }
+QMenu::item { padding: 4px 26px 4px 22px; border-radius: %R%px; }
 QMenu::item:selected { background: %ACCENT%; color: %ACCENTTEXT%; }
 QMenu::item:disabled { color: %DIM%; }
 QMenu::separator { height: 1px; background: %BORDER%; margin: 3px 6px; }
 QTabWidget::pane { border: 1px solid %BORDER%; top: -1px; }
-QTabBar::tab { background: %WINDOW%; border: 1px solid %BORDER%; padding: 4px 10px; margin-right: -1px; }
+QTabBar::tab { background: %WINDOW%; border: 1px solid %BORDER%; padding: 4px 10px; margin-right: -1px; border-top-left-radius: %R%px; border-top-right-radius: %R%px; }
 QTabBar::tab:selected { background: %PANEL%; border-bottom-color: %PANEL%; }
 QTabBar::tab:hover { background: %BUTTON%; }
 QTreeView, QListView, QListWidget, QTreeWidget, QTableView {
   background: %BASE%; alternate-background-color: %ALT%; border: 1px solid %BORDER%; outline: none;
   selection-background-color: %ACCENT%; selection-color: %ACCENTTEXT%; }
 QHeaderView::section { background: %PANEL%; border: none; border-right: 1px solid %BORDER%; padding: 3px 6px; }
-QGroupBox { border: 1px solid %BORDER%; border-radius: 4px; margin-top: 10px; padding-top: 6px; }
+QGroupBox { border: 1px solid %BORDER%; border-radius: %R1%px; margin-top: 10px; padding-top: 6px; }
 QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; color: %DIM%; }
 QSlider::groove:horizontal { height: 4px; background: %BASE%; border: 1px solid %BORDER%; border-radius: 2px; }
 QSlider::sub-page:horizontal { background: %ACCENT%; border-radius: 2px; }
 QSlider::handle:horizontal { background: %TEXT%; width: 10px; height: 10px; margin: -4px 0; border-radius: 5px; }
 QScrollBar:vertical { background: %WINDOW%; width: 11px; margin: 0; }
 QScrollBar:horizontal { background: %WINDOW%; height: 11px; margin: 0; }
-QScrollBar::handle { background: %BUTTON%; border: 1px solid %BORDER%; border-radius: 4px; min-height: 24px; min-width: 24px; }
+QScrollBar::handle { background: %BUTTON%; border: 1px solid %BORDER%; border-radius: %R1%px; min-height: 24px; min-width: 24px; }
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 QCheckBox::indicator, QRadioButton::indicator, QGroupBox::indicator, QTreeView::indicator, QListView::indicator {
-  width: 13px; height: 13px; background: %BASE%; border: 1px solid %CHECKBORDER%; border-radius: 3px; }
+  width: 13px; height: 13px; background: %BASE%; border: 1px solid %CHECKBORDER%; border-radius: %R%px; }
 QRadioButton::indicator { border-radius: 7px; }
 QCheckBox::indicator:hover, QRadioButton::indicator:hover, QGroupBox::indicator:hover { border-color: %ACCENT%; }
 QCheckBox::indicator:checked, QGroupBox::indicator:checked, QTreeView::indicator:checked, QListView::indicator:checked {
@@ -188,7 +265,16 @@ QFrame#panelFrame { background: %PANEL%; }
     s.replace("%BORDER%", h(c.border)).replace("%ACCENT%", h(c.accent)).replace("%ACCENTTEXT%", h(c.accentText));
     s.replace("%DIM%", h(c.dim));
     s.replace("%CHECKBORDER%", h(c.dim));
-    s.replace("%ASSETS%", assetsDir(c));
+    const QString assets = assetsDir(c);
+    s.replace("%ASSETS%", assets);
+    s.replace("%R1%", QString::number(c.radius + 1)).replace("%R%", QString::number(c.radius));
+    // the custom theme's picture over the panels and the window
+    const QString panelTile = textureTile(c, c.panel, c.textureOpacity, assets, "panel");
+    const QString windowTile = textureTile(c, c.window, c.windowTextureOpacity, assets, "window");
+    if (!panelTile.isEmpty())
+        s += QStringLiteral("QScrollArea#dockScroll, QToolBar, QMenuBar, QStatusBar, QWidget#dockTitleBar { background-image: url(\"%1\"); }\n")
+                 .arg(panelTile);
+    if (!windowTile.isEmpty()) s += QStringLiteral("QMainWindow, QDialog, QMdiArea { background-image: url(\"%1\"); }\n").arg(windowTile);
     return s;
 }
 
@@ -1000,9 +1086,79 @@ void drawIcon(QPainter& p, const QString& n, const QColor& col, const QColor& ac
 
 }  // namespace
 
+QStringList Theme::names() { return {"dark", "gray", "light", "soft", "lavender", "midnight", "custom"}; }
+
+QString Theme::displayName(const QString& n) {
+    if (n == "gray") return "Gray";
+    if (n == "light") return "Light";
+    if (n == "soft") return "Soft (round)";
+    if (n == "lavender") return "Lavender";
+    if (n == "midnight") return "Midnight blue";
+    if (n == "custom") return "My theme";
+    return "Dark";
+}
+
+QJsonObject ThemeColors::toJson() const {
+    auto h = [](const QColor& c) { return c.name(); };
+    return {{"window", h(window)}, {"panel", h(panel)}, {"base", h(base)}, {"alt", h(alt)}, {"text", h(text)}, {"dim", h(dim)},
+            {"button", h(button)}, {"border", h(border)}, {"accent", h(accent)}, {"accentText", h(accentText)},
+            {"workspace", h(workspace)}, {"radius", radius}, {"texture", texture}, {"textureOpacity", textureOpacity},
+            {"windowTextureOpacity", windowTextureOpacity}};
+}
+
+ThemeColors ThemeColors::fromJson(const QJsonObject& o) {
+    ThemeColors c = makeColors("soft");
+    auto col = [&](const char* k, QColor& f) {
+        const QColor v(o.value(k).toString());
+        if (v.isValid()) f = v;
+    };
+    col("window", c.window);
+    col("panel", c.panel);
+    col("base", c.base);
+    col("alt", c.alt);
+    col("text", c.text);
+    col("dim", c.dim);
+    col("button", c.button);
+    col("border", c.border);
+    col("accent", c.accent);
+    col("accentText", c.accentText);
+    col("workspace", c.workspace);
+    c.radius = std::clamp(o.value("radius").toInt(c.radius), 0, 16);
+    c.texture = o.value("texture").toString();
+    c.textureOpacity = std::clamp(o.value("textureOpacity").toDouble(), 0.0, 1.0);
+    c.windowTextureOpacity = std::clamp(o.value("windowTextureOpacity").toDouble(), 0.0, 1.0);
+    return c;
+}
+
+ThemeColors Theme::customColors() {
+    QJsonObject o;
+    if (app()) o = QJsonDocument::fromJson(app()->settings().value("theme/custom").toByteArray()).object();
+    ThemeColors c = o.isEmpty() ? makeColors("soft") : ThemeColors::fromJson(o);
+    if (o.isEmpty()) c.radius = 6;
+    return c;
+}
+
+void Theme::saveCustom(const ThemeColors& c) {
+    if (app()) app()->settings().setValue("theme/custom", QJsonDocument(c.toJson()).toJson(QJsonDocument::Compact));
+}
+
+ThemeColors Theme::colorsFor(const QString& name) { return name == "custom" ? customColors() : makeColors(name); }
+
 void Theme::apply(const QString& name, int fontSize) {
-    g_name = (name == "light" || name == "gray") ? name : "dark";
-    g_colors = makeColors(g_name);
+    const QStringList known = names();
+    const QString n = known.contains(name) ? name : "dark";
+    ThemeColors c = colorsFor(n);
+    applyColors(c, fontSize);
+    g_name = n;
+}
+
+void Theme::applyColors(const ThemeColors& in, int fontSize) {
+    g_colors = in;
+    // text stays readable whatever colors were picked
+    g_colors.text = readable(in.text, in.panel, 4.0);
+    g_colors.dim = readable(in.dim, in.panel, 2.2);
+    g_colors.accentText = readable(in.accentText, in.accent, 3.0);
+    g_name = "custom";
     const ThemeColors& c = g_colors;
     qApp->setStyle(QStyleFactory::create("Fusion"));
     QPalette pal;

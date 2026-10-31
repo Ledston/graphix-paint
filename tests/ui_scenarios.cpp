@@ -50,6 +50,10 @@
 #include "tools/SelectTools.h"
 #include "tools/TransformTool.h"
 #include "ui/LiquifyDialog.h"
+#include "ui/ThemeEditor.h"
+#include "ui/NavigatorPanel.h"
+#include <QTemporaryDir>
+#include <QWheelEvent>
 #include "core/LiquifyField.h"
 #include "app/Shortcuts.h"
 #include "core/Textures.h"
@@ -1434,6 +1438,85 @@ int main(int argc, char** argv) {
         d->undo();
         l = static_cast<RasterLayer*>(d->currentLayer());
         CHECK(diff(surfaceToImage(l->pixels, d->bounds()), before, d->bounds()) == 0);
+    }, w);
+
+    scenario("themes: the classic three stay, new ones, my theme with a picture; navigator wheel", [](MainWindow& w) {
+        const QStringList names = Theme::names();
+        for (const char* n : {"dark", "gray", "light", "soft", "lavender", "midnight", "custom"}) CHECK(names.contains(n));
+        // every theme applies, has readable text, and the menu has it
+        for (const QString& n : names) {
+            Theme::apply(n, 0);
+            pump(30);
+            CHECK(Theme::current() == n);
+            const ThemeColors& c = Theme::colors();
+            CHECK(c.text != c.panel && c.workspace.isValid());
+            bool inMenu = false;
+            for (QAction* a : w.findChildren<QAction*>())
+                if (a->property("en").toString() != "" && a->isCheckable() && a->actionGroup() && a->text() == T(n == "dark" ? "Dark theme" : n == "gray" ? "Gray theme" : n == "light" ? "Light theme" : Theme::displayName(n)))
+                    inMenu = true;
+            CHECK(inMenu);
+            if (qEnvironmentVariableIsSet("GX_SHOTS") && (n == "soft" || n == "lavender" || n == "midnight")) {
+                app()->prefs().theme = n;
+                app()->preferencesChanged();
+                pump(80);
+                w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/theme_" + n + ".png");
+            }
+        }
+        CHECK(qApp->styleSheet().contains("border-radius: 5px"));  // midnight is round 5
+        // my theme: colors, roundness, a picture, unreadable text fixed by itself
+        QTemporaryDir dir;
+        QImage tex(64, 64, QImage::Format_RGB32);
+        for (int y = 0; y < 64; ++y)
+            for (int x = 0; x < 64; ++x) tex.setPixel(x, y, ((x / 8 + y / 8) % 2) ? 0xff806040u : 0xff403020u);
+        const QString texFile = dir.filePath("wood.png");
+        tex.save(texFile);
+        {
+            ThemeEditorDialog dlg(&w);
+            ThemeColors& c = dlg.colors();
+            c.panel = QColor("#3a2a20");
+            c.window = QColor("#2a1d16");
+            c.text = QColor("#3b2b21");  // almost the panel color: cannot be read
+            c.accent = QColor("#e0a050");
+            c.radius = 12;
+            c.texture = texFile;
+            c.textureOpacity = 0.3;
+            dlg.preview();
+            pump(50);
+            CHECK(Theme::colors().text != QColor("#3b2b21"));  // made readable
+            CHECK(qApp->styleSheet().contains("border-radius: 12px") && qApp->styleSheet().contains("background-image"));
+            if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/theme_custom.png");
+            // export and import keep everything, the picture inside the file
+            const QString f = dir.filePath("mine.gxtheme");
+            QString err;
+            CHECK(ThemeEditorDialog::exportTheme(c, f, &err));
+            ThemeColors back;
+            CHECK(ThemeEditorDialog::importTheme(f, &back, &err));
+            CHECK(back.panel == c.panel && back.radius == 12 && !back.texture.isEmpty() && QImage(back.texture).size() == QSize(64, 64));
+            dlg.accept();
+        }
+        CHECK(app()->prefs().theme == "custom" && Theme::current() == "custom" && Theme::customColors().radius == 12);
+        {   // Cancel puts the theme back
+            ThemeEditorDialog dlg(&w);
+            dlg.colors().radius = 2;
+            dlg.preview();
+            dlg.reject();
+        }
+        CHECK(Theme::current() == "custom" && qApp->styleSheet().contains("border-radius: 12px"));
+        app()->prefs().theme = "dark";
+        Theme::apply("dark", 0);
+        app()->preferencesChanged();
+        pump(30);
+        // the navigator: the wheel over it zooms the canvas
+        if (auto* nav = w.findChild<NavigatorView*>()) {
+            const double z = view()->zoom();
+            QWheelEvent we(QPointF(20, 20), nav->mapToGlobal(QPointF(20, 20)), QPoint(), QPoint(0, 120), Qt::NoButton, Qt::NoModifier,
+                           Qt::NoScrollPhase, false);
+            QCoreApplication::sendEvent(nav, &we);
+            pump(20);
+            CHECK(view()->zoom() > z);
+        } else {
+            CHECK(false);
+        }
     }, w);
 
     scenario("reference over everything", [](MainWindow& w) {

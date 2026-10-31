@@ -36,6 +36,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include "ui/ShortcutsDialog.h"
+#include "ui/ThemeEditor.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
@@ -272,15 +273,28 @@ QWidget* PreferencesDialog::interfacePage() {
 
     f = pb.group(T("Look"));
     auto* theme = new QComboBox(w);
-    theme->addItem(Theme::icon("theme"), T("Dark"), "dark");
-    theme->addItem(Theme::icon("theme"), T("Gray"), "gray");
-    theme->addItem(Theme::icon("theme"), T("Light"), "light");
+    for (const QString& n : Theme::names()) theme->addItem(Theme::icon("theme"), T(Theme::displayName(n)), n);
     theme->setCurrentIndex(std::max(0, theme->findData(m_p.theme)));
     connect(theme, &QComboBox::currentIndexChanged, this, [this, theme] {
         m_p.theme = theme->currentData().toString();
         Theme::apply(m_p.theme, m_p.uiFontSize);  // preview right away
     });
-    f->addRow(T("Theme"), theme);
+    auto* themeRow = new QHBoxLayout;
+    themeRow->addWidget(theme, 1);
+    auto* editTheme = new QPushButton(T("Edit my theme..."), w);
+    themeRow->addWidget(editTheme);
+    connect(editTheme, &QPushButton::clicked, this, [this, theme] {
+        ThemeEditorDialog dlg(this);
+        if (dlg.exec() == QDialog::Accepted) {
+            m_p.theme = "custom";
+            m_original.theme = "custom";  // already saved by the editor: Cancel here keeps it
+            QSignalBlocker b(theme);
+            theme->setCurrentIndex(std::max(0, theme->findData("custom")));
+        } else {
+            Theme::apply(m_p.theme, m_p.uiFontSize);  // the theme chosen in this window, still not saved
+        }
+    });
+    f->addRow(T("Theme"), themeRow);
     auto* fs = new QSpinBox(w);
     fs->setRange(0, 24);
     fs->setSpecialValueText(T("System default"));

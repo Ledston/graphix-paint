@@ -1368,3 +1368,31 @@ Turns the pixels under the brush (Alt: the other way).	Закручивает п
 Turns the pixels under the brush the other way.	Закручивает пиксели под кистью в другую сторону.
 Twirl counterclockwise	Скручивание против часовой
 Whole picture	Вся картинка
+(keep)	(не менять)
+(none)	(нет)
+Accent	Акцент
+Choose a picture	Выберите картинку
+Choose a picture...	Выбрать картинку...
+Edit my theme	Настроить свою тему
+Edit my theme...	Настроить свою тему...
+Every change shows on the whole program right away. Text that would be hard to read is made black or white by itself. Cancel brings the theme back as it was.	Каждое изменение сразу видно во всей программе. Текст, который было бы трудно читать, сам становится чёрным или белым. «Отмена» вернёт тему как было.
+Every other row	Чередующиеся строки
+Export theme	Экспорт темы
+Fields and lists	Поля и списки
+Import theme	Импорт темы
+Import...	Импорт...
+Lavender	Лаванда
+Lines and borders	Линии и рамки
+Midnight blue	Полночная синяя
+My theme	Своя тема
+No picture	Без картинки
+Over the panels	На панелях
+Over the window background	На фоне окна
+Picture over the panels	Картинка на панелях
+Pictures (*.png *.jpg *.jpeg *.bmp *.webp)	Картинки (*.png *.jpg *.jpeg *.bmp *.webp)
+Quiet text	Приглушённый текст
+Soft (round)	Мягкая (скруглённая)
+Start from	Взять за основу
+Text on the accent	Текст на акценте
+This is not a GraphiX theme file.	Это не файл темы GraphiX.
+Window background	Фон окна

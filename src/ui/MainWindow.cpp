@@ -88,6 +88,7 @@
 #include "ui/ReferencePanel.h"
 #include "ui/MaterialsPanel.h"
 #include "ui/LiquifyDialog.h"
+#include "ui/ThemeEditor.h"
 #include "app/MaterialActions.h"
 #include "app/Materials.h"
 #include "ui/ScratchpadPanel.h"
@@ -572,14 +573,18 @@ void MainWindow::createActions() {
             resetInterface();
     }, "reset", false);
     act("view.fullscreen", "Full screen", "View", QKeySequence(Qt::Key_F11), [this] { isFullScreen() ? showNormal() : showFullScreen(); }, {}, false);
-    for (const QString& th : {QString("dark"), QString("gray"), QString("light")}) {
-        QString label = th == "dark" ? "Dark theme" : th == "gray" ? "Gray theme" : "Light theme";
+    for (const QString& th : Theme::names()) {
+        const QString label = th == "dark" ? "Dark theme" : th == "gray" ? "Gray theme" : th == "light" ? "Light theme" : Theme::displayName(th);
         act("view.theme." + th, label, "Settings", {}, [th] {
             app()->prefs().theme = th;
             Theme::apply(th, app()->prefs().uiFontSize);
             app()->preferencesChanged();
         }, {}, false);
     }
+    act("view.theme.edit", "Edit my theme...", "Settings", {}, [this] {
+        ThemeEditorDialog dlg(this);
+        dlg.exec();
+    }, "theme", false);
 
     // Tools
     const QList<QPair<QString, QKeySequence>> toolKeys = {
@@ -790,17 +795,20 @@ void MainWindow::createMenus() {
     }
     QMenu* themeM = setM->addMenu(Theme::icon("theme"), T("Theme"));
     auto* themeGroup = new QActionGroup(themeM);
-    for (const char* id : {"view.theme.dark", "view.theme.gray", "view.theme.light"}) {
-        if (QAction* a = m_actions.value(id)) {
+    for (const QString& th : Theme::names()) {
+        if (th == "soft") themeM->addSeparator();  // the classic three first, then the new ones
+        if (QAction* a = m_actions.value("view.theme." + th)) {
             a->setCheckable(true);
-            a->setChecked(QString(id).endsWith(app()->prefs().theme));
+            a->setChecked(th == app()->prefs().theme);
             themeGroup->addAction(a);
             themeM->addAction(a);
         }
     }
+    themeM->addSeparator();
+    themeM->addAction(m_actions.value("view.theme.edit"));
     connect(app(), &App::prefsChanged, themeM, [this] {
-        for (const char* id : {"view.theme.dark", "view.theme.gray", "view.theme.light"})
-            if (QAction* a = m_actions.value(id)) a->setChecked(QString(id).endsWith(app()->prefs().theme));
+        for (const QString& th : Theme::names())
+            if (QAction* a = m_actions.value("view.theme." + th)) a->setChecked(th == app()->prefs().theme);
     });
     QMenu* tabM = setM->addMenu(Theme::icon("tablet"), T("Pen input"));
     auto* tabGroup = new QActionGroup(tabM);

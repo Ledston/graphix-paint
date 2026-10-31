@@ -1,4 +1,5 @@
 #include "ui/NavigatorPanel.h"
+#include <QWheelEvent>
 
 #include <QHBoxLayout>
 #include <QMouseEvent>
@@ -88,6 +89,13 @@ void NavigatorView::jump(const QPointF& w) {
 }
 
 void NavigatorView::mousePressEvent(QMouseEvent* e) { jump(e->position()); }
+void NavigatorView::wheelEvent(QWheelEvent* e) {
+    // the wheel over the navigator zooms the canvas
+    if (!m_view) return;
+    if (e->angleDelta().y() > 0) m_view->zoomIn();
+    else if (e->angleDelta().y() < 0) m_view->zoomOut();
+    e->accept();
+}
 void NavigatorView::mouseMoveEvent(QMouseEvent* e) {
     if (e->buttons()) jump(e->position());
 }

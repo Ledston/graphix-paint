@@ -18,6 +18,7 @@
 #include "core/ImageOps.h"
 #include "core/Pixel.h"
 #include "tools/SelectTools.h"
+#include "ui/Theme.h"
 #include "tools/ToolManager.h"
 
 namespace gx {
@@ -311,7 +312,9 @@ bool CanvasView::renderRect(ViewCache& vc, const Projection* proj, const QRect& 
     const double m11 = inv.m11(), m12 = inv.m12(), m21 = inv.m21(), m22 = inv.m22(), dx = inv.dx(), dy = inv.dy();
     const Preferences& prefs = app()->prefs();
     const QString theme = prefs.theme;
-    const QColor ws = theme == "light" ? prefs.workspaceLight : theme == "gray" ? prefs.workspaceGray : prefs.workspaceDark;
+    // the classic themes take the color around the canvas from the settings, the others bring their own
+    const QColor ws = theme == "light" ? prefs.workspaceLight : theme == "gray" ? prefs.workspaceGray
+                      : theme == "dark" || theme.isEmpty() ? prefs.workspaceDark : Theme::colors().workspace;
     const quint32 wsc = 0xff000000u | (quint32(ws.red()) << 16) | (quint32(ws.green()) << 8) | quint32(ws.blue());
     const bool checker = prefs.checkerboard;
     auto rgb = [](const QColor& c) { return (quint32(c.red()) << 16) | (quint32(c.green()) << 8) | quint32(c.blue()); };
