@@ -93,6 +93,8 @@ public:
     void layerChanged(Layer* layer);  // properties (opacity, blend, visibility...)
     void structureChanged();          // layers added / removed / moved
     void selectionModified();
+    // Part of the selection mask was painted (selection pen): redraw it, rebuild the outline later.
+    void selectionPainted(const QRect& r) { Q_EMIT selectionPainting(r); }
     void guidesModified() { Q_EMIT guidesChanged(); }
 
     Projection* projection() { return m_projection.get(); }
@@ -114,6 +116,7 @@ Q_SIGNALS:
     void layerPropertiesChanged(quint32 id);
     void currentLayerChanged();
     void selectionChanged();
+    void selectionPainting(const QRect& r);
     void historyChanged();
     void modifiedChanged(bool);
     void sizeChanged();

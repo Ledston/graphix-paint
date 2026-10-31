@@ -23,6 +23,8 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QScreen>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTabBar>
@@ -160,7 +162,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         resize(avail.size() * 0.9);
         move(avail.center() - rect().center());
     }
+    m_defaultState = saveState(2);  // for Window > Reset the interface
     restoreState(s.value("window/state").toByteArray(), 2);
+    const QStringList folded = s.value("window/folded").toStringList();
+    for (QDockWidget* d : m_docks)
+        if (folded.contains(d->objectName())) setDockFolded(d, true);
 
     connect(app(), &App::statusMessage, this, [this](const QString& t, int ms) {
         m_statusMsg->setText(t);
@@ -554,6 +560,12 @@ void MainWindow::createActions() {
     }
     act("view.gridsettings", "Grid settings...", "View", {}, [this] { preferences(int(PreferencesDialog::Canvas)); }, {}, false);
     act("view.panels", "Hide / show panels", "View", QKeySequence(Qt::Key_Tab), [this] { togglePanels(); }, {}, false);
+    act("window.reset", "Reset the interface", "Window", {}, [this] {
+        if (QMessageBox::question(this, T("Reset the interface"),
+                                  T("Put all panels back where they were at the start, unfold them and show the hidden tools, tabs and parts "
+                                    "of the color panel? Brushes, colors and shortcuts stay as they are.")) == QMessageBox::Yes)
+            resetInterface();
+    }, "reset", false);
     act("view.fullscreen", "Full screen", "View", QKeySequence(Qt::Key_F11), [this] { isFullScreen() ? showNormal() : showFullScreen(); }, {}, false);
     for (const QString& th : {QString("dark"), QString("gray"), QString("light")}) {
         QString label = th == "dark" ? "Dark theme" : th == "gray" ? "Gray theme" : "Light theme";
@@ -926,18 +938,58 @@ void MainWindow::syncGuides() {
     for (QAction* a : m_rulerBtn->menu()->actions()) a->setChecked(d ? a->data().toInt() == d->ruler.kind : a->data().toInt() == 0);
 }
 
+namespace {
+// Scrolls a panel vertically when it is made shorter than its contents, but keeps the
+// panel's own minimum width (a plain scroll area would let the panel be squeezed thin).
+class DockScroll : public QScrollArea {
+public:
+    using QScrollArea::QScrollArea;
+    QSize minimumSizeHint() const override {
+        QSize s = QScrollArea::minimumSizeHint();
+        if (QWidget* w = widget()) {
+            const int sb = verticalScrollBar() ? verticalScrollBar()->sizeHint().width() : 12;
+            s.setWidth(std::max(s.width(), std::max(w->minimumSizeHint().width(), w->minimumWidth()) + sb));
+        }
+        s.setHeight(std::min(s.height(), 40));
+        return s;
+    }
+};
+}  // namespace
+
 void MainWindow::createDocks() {
     auto dock = [this](const QString& id, const QString& title, QWidget* w, Qt::DockWidgetArea area) {
         auto* d = new QDockWidget(T(title), this);
         d->setObjectName(id);
-        d->setWidget(w);
+        // The panel scrolls when it is made smaller than its contents, so every panel can be
+        // made shorter or taller by dragging the line between panels.
+        auto* scroll = new DockScroll(d);
+        scroll->setObjectName("dockScroll");
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setWidget(w);
+        d->setWidget(scroll);
         d->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
-        // Plain title without the small float / close buttons: drag the title to move the
-        // panel out, double-click it to put it back. Panels are shown and hidden in Window.
-        auto* head = new QLabel(d->windowTitle(), d);
-        head->setObjectName("dockTitle");
+        // Title without the small float / close buttons: an arrow folds the panel, drag the title
+        // to move the panel out, double-click it to put it back. Panels are shown and hidden in Window.
+        auto* head = new QWidget(d);
+        head->setObjectName("dockTitleBar");
+        auto* hl = new QHBoxLayout(head);
+        hl->setContentsMargins(2, 0, 4, 0);
+        hl->setSpacing(2);
+        auto* arrow = new QToolButton(head);
+        arrow->setObjectName("dockFold");
+        arrow->setArrowType(Qt::DownArrow);
+        arrow->setAutoRaise(true);
+        arrow->setFixedSize(16, 16);
+        arrow->setToolTip(T("Fold or unfold the panel"));
+        auto* label = new QLabel(d->windowTitle(), head);
+        label->setObjectName("dockTitle");
+        hl->addWidget(arrow);
+        hl->addWidget(label, 1);
         head->setToolTip(T("Drag to move the panel. Double-click to put it back into the window."));
-        connect(d, &QDockWidget::windowTitleChanged, head, &QLabel::setText);
+        connect(d, &QDockWidget::windowTitleChanged, label, &QLabel::setText);
+        connect(arrow, &QToolButton::clicked, this, [this, d] { setDockFolded(d, !d->property("folded").toBool()); });
         d->setTitleBarWidget(head);
         addDockWidget(area, d);
         m_docks << d;
@@ -973,14 +1025,27 @@ void MainWindow::createDocks() {
     tabifyDockWidget(refDock, scratchDock);
     tabifyDockWidget(scratchDock, previewDock);
     histDock->raise();
+    applyDefaultDockSizes();
+
+    if (QMenu* wm = menuBar()->findChild<QMenu*>("windowMenu")) {
+        wm->addSeparator();
+        wm->addAction(m_actions.value("window.reset"));
+    }
+    connect(m_layers, &LayerPanel::requestEffects, this, &MainWindow::layerEffects);
+    connect(m_layers, &LayerPanel::requestAdjustmentEdit, this, &MainWindow::editAdjustmentLayer);
+    connect(m_layers, &LayerPanel::requestNewAdjustment, this, [this](int t) { adjustment(t, true); });
+}
+
+void MainWindow::applyDefaultDockSizes() {
+    auto find = [this](const char* id) { return findChild<QDockWidget*>(QString::fromLatin1(id)); };
+    QDockWidget *colorDock = find("colorDock"), *toolDock = find("toolDock"), *navDock = find("navDock"), *layerDock = find("layerDock"),
+                *histDock = find("historyDock");
+    if (!colorDock || !toolDock || !navDock || !layerDock || !histDock) return;
+    histDock->raise();
     resizeDocks({colorDock, toolDock}, {320, 560}, Qt::Vertical);
     resizeDocks({colorDock}, {270}, Qt::Horizontal);
     resizeDocks({layerDock}, {300}, Qt::Horizontal);
     resizeDocks({navDock, layerDock, histDock}, {180, 480, 200}, Qt::Vertical);
-
-    connect(m_layers, &LayerPanel::requestEffects, this, &MainWindow::layerEffects);
-    connect(m_layers, &LayerPanel::requestAdjustmentEdit, this, &MainWindow::editAdjustmentLayer);
-    connect(m_layers, &LayerPanel::requestNewAdjustment, this, [this](int t) { adjustment(t, true); });
 }
 
 void MainWindow::createStatusBar() {
@@ -1838,6 +1903,43 @@ void MainWindow::restartApp() {
 void MainWindow::shortcutsDialog() {
     ShortcutsDialog dlg(this);
     if (dlg.exec() == QDialog::Accepted) Shortcuts::instance().save(app()->settings());
+}
+
+void MainWindow::setDockFolded(QDockWidget* d, bool folded) {
+    if (!d) return;
+    const bool was = d->property("folded").toBool();
+    if (folded && !was) d->setProperty("unfoldedHeight", d->height());
+    d->setProperty("folded", folded);
+    if (auto* arrow = d->titleBarWidget() ? d->titleBarWidget()->findChild<QToolButton*>("dockFold") : nullptr)
+        arrow->setArrowType(folded ? Qt::RightArrow : Qt::DownArrow);
+    if (QWidget* body = d->widget()) body->setVisible(!folded);
+    // a folded panel is only its title; the panels next to it take the room
+    const int h = d->titleBarWidget() ? d->titleBarWidget()->sizeHint().height() + 2 : 24;
+    d->setMaximumHeight(folded ? h : QWIDGETSIZE_MAX);
+    // unfolded: back to the height it had (the neighbours give the room back)
+    if (!folded && was && !d->isFloating()) {
+        const int back = std::max(120, d->property("unfoldedHeight").toInt());
+        resizeDocks({d}, {back}, Qt::Vertical);
+    }
+    QStringList list;
+    for (QDockWidget* x : m_docks)
+        if (x->property("folded").toBool()) list << x->objectName();
+    app()->settings().setValue("window/folded", list);
+}
+
+void MainWindow::resetInterface() {
+    m_panelsHidden = false;
+    for (QDockWidget* d : m_docks) setDockFolded(d, false);
+    restoreState(m_defaultState, 2);  // positions and which panels are shown
+    applyDefaultDockSizes();
+    Preferences& p = app()->prefs();
+    p.hiddenTools.clear();
+    p.hiddenBrushTabs.clear();
+    p.hiddenMaterialTabs.clear();
+    p.hiddenColorParts.clear();
+    app()->settings().remove("toolpanel/split");
+    app()->preferencesChanged();
+    app()->showStatus(T("The interface is back as it was at the start."));
 }
 
 void MainWindow::togglePanels() {

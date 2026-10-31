@@ -5,6 +5,7 @@
 #include <functional>
 
 class QComboBox;
+class QLabel;
 class QLineEdit;
 class QStackedWidget;
 class QToolButton;
@@ -108,6 +109,10 @@ class ColorPanel : public QWidget {
 public:
     explicit ColorPanel(QWidget* parent = nullptr);
     void savePalette();
+    // Settings > Interface can switch parts of the panel off
+    static QStringList partKeys();
+    static QStringList partNames();  // English, in partKeys() order
+    void applyParts();
 
 private:
     void syncFromApp();
@@ -116,6 +121,10 @@ private:
     void paletteMenu(int index, const QPoint& pos);
 
     ColorWheel* m_wheel;
+    QWidget* m_swatchRow = nullptr;
+    QWidget* m_harmonyRow = nullptr;
+    QLabel* m_historyLabel = nullptr;
+    QLabel* m_paletteLabel = nullptr;
     GradientSlider* m_sl[6];  // H S V R G B
     QLineEdit* m_hex;
     SwatchGrid* m_history;

@@ -1,4 +1,5 @@
 #pragma once
+#include <QStringList>
 #include <QColor>
 #include <QPointF>
 #include <QSettings>
@@ -13,6 +14,11 @@ struct Preferences {
     QString language = "auto";   // auto, en, ru
     int uiFontSize = 0;          // 0 = system default
     int iconSize = 20;           // tool and toolbar icons, px
+    // Parts of the interface the person switched off (Settings > Interface)
+    QStringList hiddenTools;        // tool ids left out of the tool panel
+    QStringList hiddenBrushTabs;    // brush tab names
+    QStringList hiddenMaterialTabs; // "Pictures", "Patterns", "Tones", "Gradient maps"
+    QStringList hiddenColorParts;   // "wheel", "swatches", "hsv", "rgb", "harmony", "recent", "palette"
 
     // Canvas
     bool checkerboard = true;

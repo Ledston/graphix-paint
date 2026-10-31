@@ -236,6 +236,13 @@ MaterialsPanel::MaterialsPanel(QWidget* parent) : QWidget(parent) {
         row->addWidget(del);
     }
     connect(&Materials::instance(), &Materials::changed, this, &MaterialsPanel::refill);
+    // tabs switched off in Settings > Interface
+    auto applyHidden = [this] {
+        const QStringList keys = {"Pictures", "Patterns", "Tones", "Gradient maps"};
+        for (int i = 0; i < keys.size() && i < m_tabs->count(); ++i) m_tabs->setTabVisible(i, !app()->prefs().hiddenMaterialTabs.contains(keys[i]));
+    };
+    connect(app(), &App::prefsChanged, this, applyHidden);
+    applyHidden();
     connect(&Materials::instance(), &Materials::currentPatternChanged, this, [this] {
         const QSignalBlocker b(m_patterns);
         for (int i = 0; i < m_patterns->count(); ++i)

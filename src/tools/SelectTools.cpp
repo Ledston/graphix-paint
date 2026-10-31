@@ -27,10 +27,11 @@ SelectionOptions& selectionOptions() {
 }
 
 ops::SelectMode selectModeFor(Qt::KeyboardModifiers m) {
-    bool sh = m & Qt::ShiftModifier, alt = m & Qt::AltModifier;
-    if (sh && alt) return ops::SelectMode::Intersect;
+    // Shift adds, Ctrl or Alt subtracts (SAI and Photoshop), both together intersect
+    const bool sh = m & Qt::ShiftModifier, sub = (m & Qt::AltModifier) || (m & Qt::ControlModifier);
+    if (sh && sub) return ops::SelectMode::Intersect;
     if (sh) return ops::SelectMode::Add;
-    if (alt) return ops::SelectMode::Subtract;
+    if (sub) return ops::SelectMode::Subtract;
     return ops::SelectMode(selectionOptions().mode);
 }
 
@@ -39,7 +40,7 @@ QWidget* createSelectionOptions(QWidget* parent, bool showAA) {
     auto* f = new QFormLayout(w);
     f->setContentsMargins(6, 6, 6, 6);
     auto* mode = new QComboBox(w);
-    mode->addItems({T("New selection"), T("Add (Shift)"), T("Subtract (Alt)"), T("Intersect (Shift+Alt)")});
+    mode->addItems({T("New selection"), T("Add (Shift)"), T("Subtract (Ctrl or Alt)"), T("Intersect (Shift+Ctrl)")});
     mode->setCurrentIndex(selectionOptions().mode);
     QObject::connect(mode, &QComboBox::currentIndexChanged, w, [](int i) { selectionOptions().mode = i; });
     f->addRow(T("Mode"), mode);
@@ -54,7 +55,7 @@ QWidget* createSelectionOptions(QWidget* parent, bool showAA) {
     fe->setValue(selectionOptions().feather);
     QObject::connect(fe, &ValueBar::valueChanged, w, [](double v) { selectionOptions().feather = v; });
     f->addRow(fe);
-    auto* hint = new QLabel(T("Shift adds, Alt subtracts, Shift+Alt intersects."), w);
+    auto* hint = new QLabel(T("Shift adds, Ctrl (or Alt) subtracts, Shift+Ctrl intersects."), w);
     hint->setWordWrap(true);
     hint->setObjectName("sectionTitle");
     f->addRow(hint);
@@ -70,10 +71,8 @@ static void finishSelection(Document* d) {
 QRectF ShapeSelectTool::rectNow() const {
     QPointF a = m_a, b = m_b;
     QPointF d = b - a;
-    if (m_mods & Qt::ShiftModifier && !(m_mods & Qt::AltModifier)) {
-        // square / circle while adding is ambiguous; use Ctrl for constraining instead
-    }
-    if (m_mods & Qt::ControlModifier) {
+    // a square / circle: Shift pressed during the drag (Shift held at the start adds instead)
+    if (m_square) {
         double s = std::max(std::fabs(d.x()), std::fabs(d.y()));
         d = QPointF(d.x() < 0 ? -s : s, d.y() < 0 ? -s : s);
         b = a + d;
@@ -87,13 +86,14 @@ void ShapeSelectTool::press(const PointerEvent& e) {
     m_view = e.view;
     m_a = m_b = e.pos;
     m_mods = e.mods;
+    m_square = false;
     m_drag = true;
 }
 
 void ShapeSelectTool::move(const PointerEvent& e) {
     if (!m_drag) return;
     m_b = e.pos;
-    m_mods = (m_mods & (Qt::ShiftModifier | Qt::AltModifier)) | (e.mods & Qt::ControlModifier);
+    m_square = (e.mods & Qt::ShiftModifier) && !(m_mods & Qt::ShiftModifier);
     Q_EMIT overlayChanged();
 }
 
@@ -336,26 +336,54 @@ MaskSurface floodFillEx(Document* doc, const QPoint& seed, int tol, FillSource s
 
 // ============================================================================ wand
 
+void growMask(MaskSurface& m, int px, const QRect& limit) {
+    if (px == 0) return;
+    QRect r = (m.exactBounds().adjusted(-std::abs(px) - 1, -std::abs(px) - 1, std::abs(px) + 1, std::abs(px) + 1)) & limit;
+    if (r.isEmpty()) return;
+    const int W = r.width(), H = r.height();
+    std::vector<quint8> v(size_t(W) * H);
+    m.readRect(r, v.data(), W);
+    std::vector<uint8_t> seeds(v.size());
+    // growing: distance to the selected pixels; shrinking: distance to the unselected ones
+    for (size_t i = 0; i < v.size(); ++i) seeds[i] = px > 0 ? v[i] >= 128 : v[i] < 128;
+    std::vector<float> d2;
+    distanceTransform(seeds, W, H, d2);
+    const float lim = float(std::abs(px)) + 0.5f;
+    for (size_t i = 0; i < v.size(); ++i) {
+        if (seeds[i]) continue;
+        const float d = std::sqrt(d2[i]);
+        if (d > lim) continue;
+        // a soft last pixel keeps the edge smooth
+        const float a = std::clamp(lim + 0.5f - d, 0.f, 1.f);
+        v[i] = px > 0 ? quint8(std::max<int>(v[i], int(a * 255))) : quint8(std::min<int>(v[i], int((1 - a) * 255)));
+    }
+    m.writeRect(r, v.data(), W);
+    m.optimize();
+}
+
 void MagicWandTool::press(const PointerEvent& e) {
     if (!e.view) return;
     Document* d = e.view->doc();
     QPoint seed(int(std::floor(e.pos.x())), int(std::floor(e.pos.y())));
     if (!d->bounds().contains(seed)) return;
     QString err;
-    bool hadSel = d->hasSelection();
-    // the wand ignores the current selection as a limit when replacing
-    MaskSurface keep = d->selection();
-    if (selectModeFor(e.mods) == ops::SelectMode::Replace && hadSel) d->setHasSelection(false);
-    MaskSurface m = floodFill(d, seed, tolerance, sampleMerged, contiguous, d->currentLayer(), &err);
-    if (selectModeFor(e.mods) == ops::SelectMode::Replace && hadSel) {
-        d->selection() = keep;
+    const ops::SelectMode mode = selectModeFor(e.mods);
+    // The wand looks at the whole picture whatever is selected now: adding next to the selection
+    // must find the new area (the fill tools stop at the selection, the wand must not).
+    const bool hadSel = d->hasSelection();
+    const MaskSurface keep = d->selection();  // switching the selection off clears it, so it is kept here
+    if (hadSel) d->setHasSelection(false);
+    MaskSurface m = floodFillEx(d, seed, tolerance, FillSource(std::clamp(source, 0, 2)), contiguous, d->currentLayer(), gapClose, &err);
+    if (hadSel) {
         d->setHasSelection(true);
+        d->selection() = keep;
     }
     if (!err.isEmpty()) {
         app()->showStatus(T(err));
         return;
     }
-    ops::combineSelection(*d, m, selectModeFor(e.mods), T("Magic wand"));
+    if (expand != 0) growMask(m, expand, d->bounds());
+    ops::combineSelection(*d, m, mode, T("Magic wand"));
     finishSelection(d);
 }
 
@@ -364,17 +392,33 @@ QWidget* MagicWandTool::createOptions(QWidget* parent) {
     auto* f = static_cast<QFormLayout*>(w->layout());
     auto* tol = new ValueBar(T("Tolerance"), 0, 255, 0, w);
     tol->setValue(tolerance);
+    tol->setToolTip(T("How different a color may be and still be taken. 0: exactly the same color."));
     connect(tol, &ValueBar::valueChanged, this, [this](double v) { tolerance = int(v); });
     f->insertRow(0, tol);
     auto* src = new QComboBox(w);
-    src->addItems({T("All visible layers"), T("Current layer")});
-    src->setCurrentIndex(sampleMerged ? 0 : 1);
-    connect(src, &QComboBox::currentIndexChanged, this, [this](int i) { sampleMerged = i == 0; });
+    src->addItems({T("All visible layers"), T("Current layer"), T("Reference layers")});
+    src->setCurrentIndex(std::clamp(source, 0, 2));
+    connect(src, &QComboBox::currentIndexChanged, this, [this](int i) {
+        source = i;
+        sampleMerged = i == 0;
+    });
     f->insertRow(1, T("Sample"), src);
     auto* cont = new QCheckBox(T("Contiguous"), w);
     cont->setChecked(contiguous);
     connect(cont, &QCheckBox::toggled, this, [this](bool on) { contiguous = on; });
     f->insertRow(2, cont);
+    auto* gaps = new ValueBar(T("Close gaps"), 0, 30, 0, w);
+    gaps->setSuffix(" px");
+    gaps->setValue(gapClose);
+    gaps->setToolTip(T("Breaks in the lines up to this size count as closed, so the selection does not leak out."));
+    connect(gaps, &ValueBar::valueChanged, this, [this](double v) { gapClose = int(v); });
+    f->insertRow(3, gaps);
+    auto* grow = new ValueBar(T("Expand"), -20, 20, 0, w);
+    grow->setSuffix(" px");
+    grow->setValue(expand);
+    grow->setToolTip(T("Grows the selection under the soft edge of the lines (no white halo when filling)."));
+    connect(grow, &ValueBar::valueChanged, this, [this](double v) { expand = int(v); });
+    f->insertRow(4, grow);
     return w;
 }
 
@@ -384,7 +428,8 @@ void SelectionBrushTool::press(const PointerEvent& e) {
     if (!e.view) return;
     m_view = e.view;
     Document* d = e.view->doc();
-    m_erase = (e.mods & Qt::AltModifier) || e.eraser;
+    // Alt, Ctrl or the pen eraser take away from the selection
+    m_erase = (e.mods & Qt::AltModifier) || (e.mods & Qt::ControlModifier) || e.eraser;
     d->pushUndo(m_erase ? T("Erase selection") : T("Paint selection"));
     if (!d->hasSelection()) {
         d->selection().clear();
@@ -392,9 +437,11 @@ void SelectionBrushTool::press(const PointerEvent& e) {
     }
     m_drag = true;
     m_last = e.pos;
+    m_lastPressure = e.pressure;
     m_residual = 0;
     m_dirty = QRect();
     dab(e.pos, e.pressure);
+    d->selectionPainted(m_dirty);
 }
 
 void SelectionBrushTool::dab(const QPointF& p, double pressure) {
@@ -402,7 +449,7 @@ void SelectionBrushTool::dab(const QPointF& p, double pressure) {
     DabParams dp;
     dp.cx = p.x();
     dp.cy = p.y();
-    dp.diameter = size * (0.3 + 0.7 * app()->pressureCurve().map(float(pressure)));
+    dp.diameter = pressureSize ? size * (0.15 + 0.85 * app()->pressureCurve().map(float(pressure))) : size;
     dp.hardness = hardness;
     QRect box = dabBounds(dp) & d->bounds();
     if (box.isEmpty()) return;
@@ -412,7 +459,7 @@ void SelectionBrushTool::dab(const QPointF& p, double pressure) {
     d->selection().readRect(box, m.data(), box.width());
     for (size_t i = 0; i < m.size(); ++i) {
         float v = m[i] / 255.f, c = cov[i];
-        v = m_erase ? v * (1.f - c) : std::max(v, c);
+        v = m_erase ? std::min(v, 1.f - c) : std::max(v, c);
         m[i] = quint8(std::clamp(int(v * 255.f + 0.5f), 0, 255));
     }
     d->selection().writeRect(box, m.data(), box.width());
@@ -421,17 +468,21 @@ void SelectionBrushTool::dab(const QPointF& p, double pressure) {
 
 void SelectionBrushTool::move(const PointerEvent& e) {
     if (!m_drag || !m_view) return;
-    double step = std::max(1.0, size * 0.15);
-    QPointF a = m_last, b = e.pos;
-    double len = QLineF(a, b).length();
+    const QPointF a = m_last, b = e.pos;
+    const double len = QLineF(a, b).length();
+    const double step = std::max(0.5, size * 0.08);
     double pos = step - m_residual;
+    m_dirty = QRect();
     while (pos <= len) {
-        dab(a + (b - a) * (pos / len), e.pressure);
+        const double t = pos / len;
+        dab(a + (b - a) * t, m_lastPressure + (e.pressure - m_lastPressure) * t);
         pos += step;
     }
     m_residual = len - (pos - step);
     m_last = b;
-    m_view->doc()->selectionModified();
+    m_lastPressure = e.pressure;
+    // only the painted part is redrawn; the marching ants are rebuilt when the stroke ends
+    if (!m_dirty.isEmpty()) m_view->doc()->selectionPainted(m_dirty);
 }
 
 void SelectionBrushTool::release(const PointerEvent&) {
@@ -451,7 +502,10 @@ QWidget* SelectionBrushTool::createOptions(QWidget* parent) {
     s->setLogarithmic(true);
     s->setSuffix(" px");
     s->setValue(size);
-    connect(s, &ValueBar::valueChanged, this, [this](double x) { size = x; });
+    connect(s, &ValueBar::valueChanged, this, [this](double x) {
+        size = x;
+        Q_EMIT optionsChanged();
+    });
     auto* h = new ValueBar(T("Hardness"), 0, 1, 2, w);
     h->setDisplayScale(100);
     h->setSuffix("%");
@@ -459,7 +513,18 @@ QWidget* SelectionBrushTool::createOptions(QWidget* parent) {
     connect(h, &ValueBar::valueChanged, this, [this](double x) { hardness = x; });
     v->addWidget(s);
     v->addWidget(h);
-    auto* hint = new QLabel(T("Paint to add to the selection, hold Alt (or use the pen eraser) to remove."), w);
+    auto* pr = new QCheckBox(T("Pressure changes the size"), w);
+    pr->setChecked(pressureSize);
+    connect(pr, &QCheckBox::toggled, this, [this](bool on) { pressureSize = on; });
+    v->addWidget(pr);
+    auto* tint = new QCheckBox(T("Show the selection in color"), w);
+    tint->setChecked(showTint);
+    connect(tint, &QCheckBox::toggled, this, [this](bool on) {
+        showTint = on;
+        Q_EMIT overlayChanged();
+    });
+    v->addWidget(tint);
+    auto* hint = new QLabel(T("Paint to add to the selection. Hold Ctrl or Alt (or use the pen eraser) to take away."), w);
     hint->setWordWrap(true);
     hint->setObjectName("sectionTitle");
     v->addWidget(hint);

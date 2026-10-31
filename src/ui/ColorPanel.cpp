@@ -331,7 +331,9 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent) {
     m_wheel = new ColorWheel(this);
     v->addWidget(m_wheel, 1);
 
-    auto* row = new QHBoxLayout;
+    m_swatchRow = new QWidget(this);
+    auto* row = new QHBoxLayout(m_swatchRow);
+    row->setContentsMargins(0, 0, 0, 0);
     row->addWidget(new ColorSwatches(this));
     auto* hexBox = new QVBoxLayout;
     m_hex = new QLineEdit(this);
@@ -342,7 +344,7 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent) {
     hexBox->addStretch();
     row->addLayout(hexBox);
     row->addStretch();
-    v->addLayout(row);
+    v->addWidget(m_swatchRow);
 
     const char* names[6] = {"H", "S", "V", "R", "G", "B"};
     const int maxes[6] = {359, 100, 100, 255, 255, 255};
@@ -359,7 +361,9 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent) {
         connect(m_sl[i], &GradientSlider::released, this, [] { app()->pushColorHistory(app()->foreground()); });
     }
 
-    auto* hrow = new QHBoxLayout;
+    m_harmonyRow = new QWidget(this);
+    auto* hrow = new QHBoxLayout(m_harmonyRow);
+    hrow->setContentsMargins(0, 0, 0, 0);
     auto* hlab = new QLabel(T("Harmony"), this);
     hlab->setObjectName("sectionTitle");
     hrow->addWidget(hlab);
@@ -369,7 +373,7 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent) {
     m_harmonyBox->setToolTip(T("Shows colors that go well with the main color"));
     m_harmonyBox->setCurrentIndex(app()->settings().value("colors/harmony", 0).toInt());
     hrow->addWidget(m_harmonyBox, 1);
-    v->addLayout(hrow);
+    v->addWidget(m_harmonyRow);
     m_harmonySw = new SwatchGrid(this, 18);
     m_harmonySw->setToolTip(T("Click a color to use it"));
     v->addWidget(m_harmonySw);
@@ -382,12 +386,12 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent) {
         app()->pushColorHistory(c);
     });
 
-    auto* hl = new QLabel(T("Recent colors"), this);
+    auto* hl = m_historyLabel = new QLabel(T("Recent colors"), this);
     hl->setObjectName("sectionTitle");
     v->addWidget(hl);
     m_history = new SwatchGrid(this, 14);
     v->addWidget(m_history);
-    auto* pl = new QLabel(T("Palette"), this);
+    auto* pl = m_paletteLabel = new QLabel(T("Palette"), this);
     pl->setObjectName("sectionTitle");
     v->addWidget(pl);
     m_palette = new SwatchGrid(this, 16);
@@ -414,12 +418,33 @@ ColorPanel::ColorPanel(QWidget* parent) : QWidget(parent) {
     m_history->setColors(app()->colorHistory().mid(0, 24));
     loadPalette();
     syncFromApp();
+    connect(app(), &App::prefsChanged, this, &ColorPanel::applyParts);
+    applyParts();
+}
+
+QStringList ColorPanel::partKeys() { return {"wheel", "swatches", "hsv", "rgb", "harmony", "recent", "palette"}; }
+QStringList ColorPanel::partNames() {
+    return {"Color wheel", "Main and sub color, hex code", "HSV sliders", "RGB sliders", "Color harmony", "Recent colors", "Palette"};
+}
+
+void ColorPanel::applyParts() {
+    const QStringList& h = app()->prefs().hiddenColorParts;
+    m_wheel->setVisible(!h.contains("wheel"));
+    m_swatchRow->setVisible(!h.contains("swatches"));
+    for (int i = 0; i < 3; ++i) m_sl[i]->setVisible(!h.contains("hsv"));
+    for (int i = 3; i < 6; ++i) m_sl[i]->setVisible(!h.contains("rgb"));
+    m_harmonyRow->setVisible(!h.contains("harmony"));
+    m_harmonySw->setVisible(!h.contains("harmony") && m_harmonyBox->currentIndex() > 0);
+    m_historyLabel->setVisible(!h.contains("recent"));
+    m_history->setVisible(!h.contains("recent"));
+    m_paletteLabel->setVisible(!h.contains("palette"));
+    m_palette->setVisible(!h.contains("palette"));
 }
 
 void ColorPanel::updateHarmony() {
     if (!m_harmonyBox) return;
     const int kind = m_harmonyBox->currentIndex();
-    m_harmonySw->setVisible(kind > 0);
+    m_harmonySw->setVisible(kind > 0 && !app()->prefs().hiddenColorParts.contains("harmony"));
     QColor c = app()->foreground();
     float h, s, v;
     c.getHsvF(&h, &s, &v);

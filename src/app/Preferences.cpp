@@ -14,6 +14,10 @@ void Preferences::load(QSettings& s) {
     const int version = s.value("version", 1).toInt();
     uiFontSize = s.value("uiFontSize", uiFontSize).toInt();
     iconSize = std::clamp(s.value("iconSize", iconSize).toInt(), 16, 40);
+    hiddenTools = s.value("hiddenTools").toStringList();
+    hiddenBrushTabs = s.value("hiddenBrushTabs").toStringList();
+    hiddenMaterialTabs = s.value("hiddenMaterialTabs").toStringList();
+    hiddenColorParts = s.value("hiddenColorParts").toStringList();
     checkerboard = s.value("checkerboard", checkerboard).toBool();
     checker1 = QColor(s.value("checker1", checker1.name()).toString());
     checker2 = QColor(s.value("checker2", checker2.name()).toString());
@@ -71,6 +75,10 @@ void Preferences::save(QSettings& s) const {
     s.setValue("version", 2);
     s.setValue("uiFontSize", uiFontSize);
     s.setValue("iconSize", iconSize);
+    s.setValue("hiddenTools", hiddenTools);
+    s.setValue("hiddenBrushTabs", hiddenBrushTabs);
+    s.setValue("hiddenMaterialTabs", hiddenMaterialTabs);
+    s.setValue("hiddenColorParts", hiddenColorParts);
     s.setValue("checkerboard", checkerboard);
     s.setValue("checker1", checker1.name());
     s.setValue("checker2", checker2.name());

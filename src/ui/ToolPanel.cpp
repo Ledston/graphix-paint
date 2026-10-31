@@ -17,6 +17,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSplitter>
 #include <QStackedWidget>
 #include <QHelpEvent>
 #include <QToolButton>
@@ -44,25 +45,30 @@ constexpr int kTabH = 20, kCellH = 40, kCellMinW = 92;
 }
 
 BrushSlots::BrushSlots(QWidget* parent) : QWidget(parent) {
-    QSizePolicy sp(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    sp.setHeightForWidth(true);
-    setSizePolicy(sp);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     auto* lib = app()->brushes();
     m_group = app()->settings().value("brushes/tab").toString();
     if (!groupsShown().contains(m_group)) m_group = lib->current().group;
+    if (!groupsShown().contains(m_group) && !groupsShown().isEmpty()) m_group = groupsShown().first();
     connect(lib, &BrushLibrary::slotsChanged, this, [this] {
         if (!groupsShown().contains(m_group)) m_group = app()->brushes()->current().group;
-        updateGeometry();
+        fitHeight();
         update();
     });
     connect(lib, &BrushLibrary::currentChanged, this, [this](int i) {
-        // a brush picked with a shortcut shows its tab
+        // a brush picked with a shortcut shows its tab (unless that tab is switched off)
         const QString g = app()->brushes()->at(i).group;
-        if (g != m_group) setGroup(g);
+        if (g != m_group && groupsShown().contains(g)) setGroup(g);
+        update();
+    });
+    connect(app(), &App::prefsChanged, this, [this] {
+        const QStringList shown = groupsShown();
+        if (!shown.contains(m_group) && !shown.isEmpty()) m_group = shown.first();
+        fitHeight();
         update();
     });
     connect(lib, &BrushLibrary::brushChanged, this, [this] {
-        updateGeometry();
+        fitHeight();
         update();
     });
     connect(app()->tools(), &ToolManager::currentChanged, this, [this] { update(); });
@@ -73,7 +79,7 @@ BrushSlots::BrushSlots(QWidget* parent) : QWidget(parent) {
 void BrushSlots::setGroup(const QString& g) {
     m_group = g;
     app()->settings().setValue("brushes/tab", g);
-    updateGeometry();
+    fitHeight();
     update();
 }
 
@@ -88,7 +94,11 @@ QStringList BrushSlots::groupsShown() const {
     for (const QString& g : present)
         if (!out.contains(g)) out << g;  // the user's own tabs, after the built-in ones
     if (!m_group.isEmpty() && !out.contains(m_group)) out << m_group;
-    return out;
+    // tabs switched off in Settings > Interface (one always stays)
+    QStringList shown;
+    for (const QString& g : out)
+        if (!app()->prefs().hiddenBrushTabs.contains(g)) shown << g;
+    return shown.isEmpty() ? out.mid(0, 1) : shown;
 }
 
 int BrushSlots::cols(int w) const { return std::max(2, w / kCellMinW); }
@@ -120,7 +130,13 @@ BrushSlots::Layout BrushSlots::layoutFor(int w) const {
 
 int BrushSlots::heightForWidth(int w) const { return layoutFor(w).height; }
 
-void BrushSlots::resizeEvent(QResizeEvent*) { updateGeometry(); }
+void BrushSlots::resizeEvent(QResizeEvent*) { fitHeight(); }
+
+void BrushSlots::fitHeight() {
+    const int h = layoutFor(std::max(1, width())).height;
+    if (minimumHeight() != h) setMinimumHeight(h);
+    updateGeometry();
+}
 
 QRect BrushSlots::cell(const Layout& l, int pos, int w) const {
     const int c = cols(w);
@@ -449,6 +465,12 @@ void BrushSettingsWidget::updateVisibility() {
 
 // ============================================================================ ToolPanel
 
+QStringList ToolPanel::toolOrder() {
+    return {"select-rect", "select-ellipse", "lasso", "magic-wand", "select-brush", "move", "transform",
+            "warp", "liquify", "fill", "lasso-fill", "gradient", "eyedropper", "hand", "zoom", "rotate",
+            "text", "focuslines", "speedlines", "vpen", "curve", "vedit", "vpressure", "vweight", "vcolor", "veraser", "ruler"};
+}
+
 ToolPanel::ToolPanel(QWidget* parent) : QWidget(parent) {
     auto* v = new QVBoxLayout(this);
     v->setContentsMargins(4, 4, 4, 4);
@@ -458,9 +480,7 @@ ToolPanel::ToolPanel(QWidget* parent) : QWidget(parent) {
     grid->setSpacing(1);
     m_group = new QButtonGroup(this);
     m_group->setExclusive(true);
-    const QStringList order = {"select-rect", "select-ellipse", "lasso", "magic-wand", "select-brush", "move", "transform",
-                               "warp", "liquify", "fill", "lasso-fill", "gradient", "eyedropper", "hand", "zoom", "rotate",
-                               "text", "focuslines", "speedlines", "vpen", "curve", "vedit", "vpressure", "vweight", "vcolor", "veraser", "ruler"};
+    const QStringList order = toolOrder();
     int i = 0;
     for (const QString& id : order) {
         Tool* t = app()->tools()->tool(id);
@@ -481,7 +501,15 @@ ToolPanel::ToolPanel(QWidget* parent) : QWidget(parent) {
     v->addLayout(grid);
     layoutToolButtons();
     connect(app(), &App::prefsChanged, this, &ToolPanel::layoutToolButtons);
-    v->addWidget(new BrushSlots(this));
+    // brushes above, settings below; the line between them can be dragged, both scroll
+    auto* slots_ = new BrushSlots;
+    auto* brushScroll = new QScrollArea;
+    brushScroll->setObjectName("brushSlotsScroll");
+    brushScroll->setWidgetResizable(true);
+    brushScroll->setFrameShape(QFrame::NoFrame);
+    brushScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    brushScroll->setWidget(slots_);
+    brushScroll->setMinimumHeight(48);
 
     m_stack = new QStackedWidget(this);
     m_brush = new BrushSettingsWidget(m_stack);
@@ -491,7 +519,19 @@ ToolPanel::ToolPanel(QWidget* parent) : QWidget(parent) {
     m_scroll->setFrameShape(QFrame::NoFrame);
     m_scroll->setWidget(m_stack);
     m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    v->addWidget(m_scroll, 1);
+    m_scroll->setMinimumHeight(60);
+    m_split = new QSplitter(Qt::Vertical, this);
+    m_split->setObjectName("brushSplit");
+    m_split->setChildrenCollapsible(false);
+    m_split->setHandleWidth(7);
+    m_split->addWidget(brushScroll);
+    m_split->addWidget(m_scroll);
+    m_split->setStretchFactor(0, 0);
+    m_split->setStretchFactor(1, 1);
+    const QByteArray st = app()->settings().value("toolpanel/split").toByteArray();
+    if (st.isEmpty() || !m_split->restoreState(st)) m_split->setSizes({4 * 40 + 30, 400});  // the tabs and about four rows
+    connect(m_split, &QSplitter::splitterMoved, this, [this] { app()->settings().setValue("toolpanel/split", m_split->saveState()); });
+    v->addWidget(m_split, 1);
 
     connect(app()->tools(), &ToolManager::currentChanged, this, &ToolPanel::showOptionsFor);
     showOptionsFor(app()->tools()->current());
@@ -501,8 +541,14 @@ void ToolPanel::layoutToolButtons() {
     const int s = app()->prefs().iconSize;
     const int cols = s <= 22 ? 8 : s <= 28 ? 6 : 5;  // keep the panel narrow with big icons
     int i = 0;
+    const QStringList& hidden = app()->prefs().hiddenTools;
     for (QToolButton* b : m_buttonOrder) {
         b->setIconSize(QSize(s, s));
+        m_grid->removeWidget(b);
+        // switched off in Settings > Interface: no button (the shortcut still works)
+        const bool show = !hidden.contains(m_buttons.key(b));
+        b->setVisible(show);
+        if (!show) continue;
         m_grid->addWidget(b, i / cols, i % cols);
         ++i;
     }

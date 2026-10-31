@@ -95,6 +95,11 @@ private:
     void restartApp();
     void shortcutsDialog();
     void togglePanels();
+    void setDockFolded(QDockWidget* d, bool folded);  // the arrow on a panel title
+    void applyDefaultDockSizes();
+public:
+    Q_INVOKABLE void resetInterface();  // Window > Reset the interface
+private:
     void about();
 
     QMdiArea* m_mdi;
@@ -106,6 +111,7 @@ private:
     ColorPanel* m_colors = nullptr;
     QList<QDockWidget*> m_docks;
     QByteArray m_hiddenState;
+    QByteArray m_defaultState;
     bool m_panelsHidden = false;
     QLabel* m_statusPos = nullptr;
     QLabel* m_statusZoom = nullptr;

@@ -1271,3 +1271,32 @@ Speed lines	Линии скорости
 Straight	Прямая
 Uneven ends	Неровные концы
 Uneven spacing	Неровные промежутки
+A hidden tool keeps its shortcut.	Скрытый инструмент сохраняет свою горячую клавишу.
+Breaks in the lines up to this size count as closed, so the selection does not leak out.	Разрывы в линиях до такого размера считаются закрытыми, и выделение не вытекает наружу.
+Brush tabs	Вкладки кистей
+Color harmony	Гармония цветов
+Color panel	Панель «Цвет»
+Color wheel	Цветовой круг
+Fold or unfold the panel	Свернуть или развернуть панель
+Grows the selection under the soft edge of the lines (no white halo when filling).	Расширяет выделение под мягкий край линий (при заливке не будет белой каймы).
+HSV sliders	Ползунки HSV
+How different a color may be and still be taken. 0: exactly the same color.	Насколько цвет может отличаться и всё равно попасть в выделение. 0 — только точно такой же.
+Intersect (Shift+Ctrl)	Пересечение (Shift+Ctrl)
+Main and sub color, hex code	Основной и фоновый цвет, код
+Materials tabs	Вкладки материалов
+Paint to add to the selection. Hold Ctrl or Alt (or use the pen eraser) to take away.	Рисуйте, чтобы добавить к выделению. С Ctrl или Alt (или ластиком пера) — убрать.
+Panels	Панели
+Panels back where they were at the start, unfolded; every tool, tab and part of the color panel shown again.	Панели на исходных местах и развёрнуты; снова видны все инструменты, вкладки и части панели «Цвет».
+Pressure changes the size	Нажим меняет размер
+Put all panels back where they were at the start, unfold them and show the hidden tools, tabs and parts of the color panel? Brushes, colors and shortcuts stay as they are.	Вернуть все панели на исходные места, развернуть их и показать скрытые инструменты, вкладки и части панели «Цвет»? Кисти, цвета и горячие клавиши останутся как есть.
+RGB sliders	Ползунки RGB
+Reference layers	Опорные слои
+Reset the interface	Сбросить интерфейс
+Shift adds, Ctrl (or Alt) subtracts, Shift+Ctrl intersects.	Shift добавляет, Ctrl (или Alt) вычитает, Shift+Ctrl — пересечение.
+Show the selection in color	Показывать выделение цветом
+Shown right away. You can also fold a panel with the arrow on its title.	Применяется сразу. Панель можно ещё свернуть стрелкой на её заголовке.
+Subtract (Ctrl or Alt)	Вычесть (Ctrl или Alt)
+The interface is back as it was at the start.	Интерфейс вернулся к исходному виду.
+Toolbar	Панель инструментов сверху
+Tools in the tool panel	Инструменты на панели
+Window	Окно

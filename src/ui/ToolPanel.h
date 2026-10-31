@@ -5,6 +5,7 @@
 
 #include "brush/BrushSettings.h"
 
+class QSplitter;
 class QButtonGroup;
 class QCheckBox;
 class QComboBox;
@@ -29,7 +30,8 @@ class BrushSlots : public QWidget {
 public:
     explicit BrushSlots(QWidget* parent = nullptr);
     int heightForWidth(int w) const override;
-    bool hasHeightForWidth() const override { return true; }
+    // it sits in a scroll area: its height follows the number of brushes
+    void fitHeight();
     QSize sizeHint() const override { return QSize(220, heightForWidth(220)); }
     QString currentGroup() const { return m_group; }
     void setGroup(const QString& g);
@@ -78,6 +80,7 @@ class ToolPanel : public QWidget {
     Q_OBJECT
 public:
     explicit ToolPanel(QWidget* parent = nullptr);
+    static QStringList toolOrder();  // the tool buttons, in panel order
 private:
     void showOptionsFor(Tool* t);
     QButtonGroup* m_group;
@@ -86,6 +89,7 @@ private:
     QGridLayout* m_grid = nullptr;
     void layoutToolButtons();
     QStackedWidget* m_stack;
+    QSplitter* m_split = nullptr;
     BrushSettingsWidget* m_brush;
     QHash<Tool*, QWidget*> m_options;
     QScrollArea* m_scroll;

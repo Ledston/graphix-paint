@@ -1,5 +1,6 @@
 #pragma once
 #include <QDialog>
+#include <QPointer>
 
 #include "app/Preferences.h"
 
@@ -37,6 +38,7 @@ private:
 
     Preferences m_p;
     Preferences m_original;
+    QList<QPair<QPointer<QWidget>, bool>> m_panelsBefore;  // panels shown before the dialog (Cancel puts them back)
     CurveEditor* m_curve = nullptr;
     QListWidget* m_list = nullptr;
     QStackedWidget* m_stack = nullptr;

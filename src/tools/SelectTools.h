@@ -37,7 +37,8 @@ private:
     bool m_ellipse;
     bool m_drag = false;
     QPointF m_a, m_b;
-    Qt::KeyboardModifiers m_mods;
+    Qt::KeyboardModifiers m_mods;  // at the press: they choose add / subtract
+    bool m_square = false;
     QPointer<CanvasView> m_view;
 };
 
@@ -89,9 +90,15 @@ public:
     QWidget* createOptions(QWidget* parent) override;
 
     int tolerance = 32;
-    bool sampleMerged = true;
+    bool sampleMerged = true;  // (old setting, kept for the scenarios) see source
+    int source = 0;            // FillSource: all visible, current layer, reference layers
     bool contiguous = true;
+    int gapClose = 0;          // px: small breaks in the line art count as closed
+    int expand = 1;            // px: grows under the soft edge of the line art
 };
+
+// Grows (px > 0) or shrinks (px < 0) a mask by a distance, inside `limit`.
+void growMask(MaskSurface& m, int px, const QRect& limit);
 
 // Paints the selection with a brush (Alt erases it).
 class SelectionBrushTool : public Tool {
@@ -107,10 +114,13 @@ public:
     bool isBusy() const override { return m_drag; }
 
     double size = 30;
-    double hardness = 0.8;
+    double hardness = 0.9;
+    bool pressureSize = false;  // the pen pressure changes the size (off: exactly the circle shown)
+    bool showTint = true;       // the selection shown in color while this tool is used
 
 private:
     void dab(const QPointF& p, double pressure);
+    double m_lastPressure = 1;
     bool m_drag = false;
     bool m_erase = false;
     QPointF m_last;

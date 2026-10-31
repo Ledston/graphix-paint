@@ -406,7 +406,7 @@ LayerPanel::LayerPanel(QWidget* parent) : QWidget(parent) {
     m_tree->setSelectionMode(QAbstractItemView::SingleSelection);
     m_tree->setEditTriggers(QAbstractItemView::EditKeyPressed);  // F2 renames, double-click opens the properties
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
-    m_tree->setMinimumHeight(160);
+    m_tree->setMinimumHeight(70);
     v->addWidget(m_tree, 1);
 
     auto* bottom = new QHBoxLayout;

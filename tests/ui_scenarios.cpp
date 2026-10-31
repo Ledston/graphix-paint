@@ -46,6 +46,11 @@
 #include "ui/Theme.h"
 #include "ui/MaterialsPanel.h"
 #include "tools/FocusLinesTool.h"
+#include "tools/SelectTools.h"
+#include "ui/ColorPanel.h"
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QSplitter>
 #include "core/FocusLines.h"
 #include <QMenu>
 #include "app/Materials.h"
@@ -1020,6 +1025,123 @@ int main(int argc, char** argv) {
         d->undo();
         pump(20);
         CHECK(d->root()->children.size() == layers);
+    }, w);
+
+    scenario("selection: wand adds and subtracts, selection pen, panels fold and scroll", [](MainWindow& w) {
+        Document* d = view()->doc();
+        // three separate red squares on the layer
+        auto* l = static_cast<RasterLayer*>(d->currentLayer());
+        for (int k = 0; k < 3; ++k) l->pixels.fillRect(QRect(100 + k * 200, 200, 100, 100), 0xffdd2222u);
+        d->pixelsChanged(d->bounds(), l);
+        app()->tools()->setCurrent("magic-wand");
+        pump(250);
+        auto click = [](QPointF p, Qt::KeyboardModifiers m) {
+            mouse(QEvent::MouseButtonPress, p, Qt::LeftButton, m);
+            mouse(QEvent::MouseButtonRelease, p, Qt::NoButton, m);
+            pump(20);
+        };
+        auto sel = [&](int x, int y) { return d->hasSelection() ? int(d->selection().pixel(x, y)) : 0; };
+        click(QPointF(150, 250), Qt::NoModifier);
+        CHECK(sel(150, 250) == 255 && sel(350, 250) == 0);
+        click(QPointF(350, 250), Qt::ShiftModifier);  // add a square next to the selection
+        std::fprintf(stderr, "INFO wand after shift: %d %d %d %d\n", sel(150, 250), sel(350, 250), sel(550, 250), sel(50, 50));
+        CHECK(sel(150, 250) == 255 && sel(350, 250) == 255 && sel(550, 250) == 0);
+        click(QPointF(550, 250), Qt::ShiftModifier);
+        CHECK(sel(550, 250) == 255);
+        click(QPointF(350, 250), Qt::ControlModifier);  // Ctrl takes one away
+        CHECK(sel(150, 250) == 255 && sel(350, 250) == 0 && sel(550, 250) == 255);
+        click(QPointF(150, 250), Qt::AltModifier);  // so does Alt
+        CHECK(sel(150, 250) == 0 && sel(550, 250) == 255);
+        // the soft edge of the square is taken by "Expand"
+        CHECK(sel(500, 250) >= 128 && sel(497, 250) == 0);
+        // the selection pen: paints exactly its circle, Ctrl takes away, the color tint is shown
+        ops::deselect(*d);
+        app()->tools()->setCurrent("select-brush");
+        pump(250);
+        auto* pen = dynamic_cast<SelectionBrushTool*>(app()->tools()->current());
+        CHECK(pen != nullptr);
+        if (!pen) return;
+        pen->size = 40;
+        dragCanvas(QPointF(100, 450), QPointF(500, 450));
+        pump(30);
+        CHECK(sel(300, 450) == 255 && sel(300, 466) > 128 && sel(300, 480) == 0);
+        dragCanvas(QPointF(300, 420), QPointF(300, 480), Qt::ControlModifier);
+        pump(30);
+        CHECK(sel(300, 450) == 0 && sel(200, 450) == 255);
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/selection_pen.png");
+        d->undo();
+        CHECK(sel(300, 450) == 255);
+        ops::deselect(*d);
+        app()->tools()->setCurrent("brush");
+        pump(50);
+
+        // the brush tab scrolls when it holds many brushes
+        BrushLibrary* lib = app()->brushes();
+        const int n0 = lib->count();
+        for (int i = 0; i < 24; ++i) {
+            BrushSettings b = lib->at(0);
+            b.name = QString("Test brush %1").arg(i);
+            b.group = "Basic";
+            lib->add(b);
+        }
+        pump(80);
+        auto* bs = w.findChild<QScrollArea*>("brushSlotsScroll");
+        CHECK(bs != nullptr);
+        if (bs) {
+            if (auto* slots_ = bs->widget()) {
+                static_cast<BrushSlots*>(slots_)->setGroup("Basic");
+                pump(80);
+                std::fprintf(stderr, "INFO brush slots %d high in a %d view, scroll max %d\n", slots_->height(), bs->viewport()->height(),
+                             bs->verticalScrollBar()->maximum());
+                CHECK(slots_->height() > bs->viewport()->height() && bs->verticalScrollBar()->maximum() > 0);
+            }
+        }
+        while (lib->count() > n0) lib->remove(lib->count() - 1);
+        pump(30);
+
+        // panels: fold with the arrow, shrink by dragging, reset
+        auto* colorDock = w.findChild<QDockWidget*>("colorDock");
+        CHECK(colorDock != nullptr);
+        if (!colorDock) return;
+        const int full = colorDock->height();
+        QToolButton* fold = colorDock->titleBarWidget()->findChild<QToolButton*>("dockFold");
+        CHECK(fold != nullptr);
+        if (fold) fold->click();
+        pump(80);
+        std::fprintf(stderr, "INFO color panel %d high, folded %d\n", full, colorDock->height());
+        CHECK(colorDock->height() < 40 && colorDock->property("folded").toBool());
+        if (fold) fold->click();
+        pump(80);
+        CHECK(colorDock->height() > 150);
+        w.resizeDocks({colorDock}, {140}, Qt::Vertical);  // as when the line under the panel is dragged
+        pump(80);
+        std::fprintf(stderr, "INFO color panel shrunk to %d\n", colorDock->height());
+        CHECK(colorDock->height() < 170);
+        // parts switched off in the settings
+        Preferences& p = app()->prefs();
+        p.hiddenColorParts = {"rgb", "palette"};
+        p.hiddenTools = {"veraser"};
+        p.hiddenMaterialTabs = {"Tones"};
+        p.hiddenBrushTabs = {"Decor"};
+        app()->preferencesChanged();
+        pump(50);
+        auto* cp = w.findChild<ColorPanel*>();
+        int visibleSliders = 0;
+        if (cp)
+            for (QWidget* c : cp->findChildren<QWidget*>())
+                if (QString(c->metaObject()->className()).contains("GradientSlider") && c->isVisibleTo(cp)) ++visibleSliders;
+        CHECK(visibleSliders == 3);
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/panels_hidden.png");
+        auto* mp = w.findChild<MaterialsPanel*>();
+        CHECK(mp && !mp->tabs()->isTabVisible(2) && mp->tabs()->isTabVisible(1));
+        w.resetInterface();
+        pump(80);
+        CHECK(p.hiddenColorParts.isEmpty() && p.hiddenTools.isEmpty() && mp && mp->tabs()->isTabVisible(2));
+        visibleSliders = 0;
+        if (cp)
+            for (QWidget* c : cp->findChildren<QWidget*>())
+                if (QString(c->metaObject()->className()).contains("GradientSlider") && c->isVisibleTo(cp)) ++visibleSliders;
+        CHECK(visibleSliders == 6);
     }, w);
 
     scenario("reference over everything", [](MainWindow& w) {

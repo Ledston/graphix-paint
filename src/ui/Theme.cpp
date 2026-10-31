@@ -102,10 +102,16 @@ QString css(const ThemeColors& c) {
     QString s = R"(
 QWidget { color: %TEXT%; }
 QMainWindow, QDialog { background: %WINDOW%; }
-QMainWindow::separator { background: %BORDER%; width: 3px; height: 3px; }
+QMainWindow::separator { background: %BORDER%; width: 5px; height: 5px; }
+QMainWindow::separator:hover { background: %ACCENT%; }
+QSplitter#brushSplit::handle { background: %BORDER%; margin: 2px 24px; border-radius: 1px; }
+QSplitter#brushSplit::handle:hover { background: %ACCENT%; }
+QScrollArea#dockScroll, QScrollArea#dockScroll > QWidget > QWidget { background: transparent; }
+QWidget#dockTitleBar { background: %PANEL%; border-bottom: 1px solid %BORDER%; }
 QDockWidget { titlebar-close-icon: none; }
 QDockWidget::title { background: %PANEL%; padding: 3px 6px; border-bottom: 1px solid %BORDER%; }
-QLabel#dockTitle { background: %PANEL%; padding: 3px 6px; border-bottom: 1px solid %BORDER%; color: %TEXT%; }
+QLabel#dockTitle { background: transparent; padding: 3px 2px; color: %TEXT%; }
+QToolButton#dockFold { border: none; padding: 0; }
 QToolBar { background: %PANEL%; border: none; border-bottom: 1px solid %BORDER%; spacing: 2px; padding: 2px; }
 QToolBar::separator { background: %BORDER%; width: 1px; margin: 4px 4px; }
 QToolButton { border: 1px solid transparent; border-radius: 3px; padding: 2px; background: transparent; }

@@ -17,6 +17,7 @@
 #include "core/Document.h"
 #include "core/ImageOps.h"
 #include "core/Pixel.h"
+#include "tools/SelectTools.h"
 #include "tools/ToolManager.h"
 
 namespace gx {
@@ -79,7 +80,18 @@ CanvasView::CanvasView(std::shared_ptr<Document> doc, QWidget* parent, bool scra
 
     connect(m_doc.get(), &Document::imageChanged, this, &CanvasView::markCanvasDirty);
     connect(m_doc.get(), &Document::sizeChanged, this, [this] { invalidateAll(); });
-    connect(m_doc.get(), &Document::selectionChanged, this, [this] { m_selDirty = true; update(); });
+    connect(m_doc.get(), &Document::selectionChanged, this, [this] {
+        m_selDirty = true;
+        m_selPainting = false;
+        m_selTintValid = false;
+        update();
+    });
+    connect(m_doc.get(), &Document::selectionPainting, this, [this](const QRect& r) {
+        m_selPainting = true;
+        if (m_selTintValid) updateSelectionTint(r);
+        update();
+    });
+    connect(m_doc.get(), &Document::sizeChanged, this, [this] { m_selTintValid = false; });
     connect(m_doc.get(), &Document::guidesChanged, this, [this] { update(); });
     connect(m_doc.get(), &Document::layersChanged, this, [this] { update(); });
     connect(app()->tools(), &ToolManager::overlayChanged, this, [this] { update(); });
@@ -586,8 +598,53 @@ void CanvasView::rebuildSelectionPath() {
     }
 }
 
+bool CanvasView::wantsSelectionTint() const {
+    auto* pen = qobject_cast<SelectionBrushTool*>(app()->tools()->active());
+    return pen && pen->showTint;
+}
+
+void CanvasView::updateSelectionTint(const QRect& cr) {
+    const double s = m_selTintScale;
+    const QRect tr = QRect(QPoint(int(std::floor(cr.left() * s)) - 1, int(std::floor(cr.top() * s)) - 1),
+                           QPoint(int(std::ceil((cr.right() + 1) * s)), int(std::ceil((cr.bottom() + 1) * s)))) &
+                     m_selTint.rect();
+    if (tr.isEmpty()) return;
+    const QSize ds = m_doc->size();
+    std::vector<quint8> row(size_t(ds.width()));
+    const QColor c(110, 90, 255);
+    for (int y = tr.top(); y <= tr.bottom(); ++y) {
+        const int cy = std::clamp(int((y + 0.5) / s), 0, ds.height() - 1);
+        const int x0 = std::clamp(int((tr.left() + 0.5) / s), 0, ds.width() - 1), x1 = std::clamp(int((tr.right() + 0.5) / s), 0, ds.width() - 1);
+        m_doc->selection().readRect(QRect(x0, cy, x1 - x0 + 1, 1), row.data(), x1 - x0 + 1);
+        QRgb* out = reinterpret_cast<QRgb*>(m_selTint.scanLine(y));
+        for (int x = tr.left(); x <= tr.right(); ++x) {
+            const int cx = std::clamp(int((x + 0.5) / s), x0, x1);
+            const int a = row[size_t(cx - x0)] * 100 / 255;  // up to ~40% strong
+            out[x] = qRgba(c.red() * a / 255, c.green() * a / 255, c.blue() * a / 255, a);
+        }
+    }
+}
+
 void CanvasView::drawSelection(QPainter& p) {
     if (!m_doc->hasSelection() || !m_doc->showSelection) return;
+    if (wantsSelectionTint()) {
+        if (!m_selTintValid) {
+            const QSize ds = m_doc->size();
+            m_selTintScale = std::min(1.0, 2048.0 / std::max(1, std::max(ds.width(), ds.height())));
+            m_selTint = QImage(std::max(1, int(std::ceil(ds.width() * m_selTintScale))), std::max(1, int(std::ceil(ds.height() * m_selTintScale))),
+                               QImage::Format_ARGB32_Premultiplied);
+            m_selTint.fill(Qt::transparent);
+            m_selTintValid = true;
+            updateSelectionTint(m_doc->selectionBounds());
+        }
+        p.save();
+        p.setTransform(canvasToWidget(), true);
+        p.scale(1.0 / m_selTintScale, 1.0 / m_selTintScale);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, m_zoom * m_selTintScale < 1.0);
+        p.drawImage(0, 0, m_selTint);
+        p.restore();
+    }
+    if (m_selPainting) return;  // the outline is rebuilt when the stroke ends
     if (m_selDirty) rebuildSelectionPath();
     if (m_selPath.isEmpty()) return;
     p.save();

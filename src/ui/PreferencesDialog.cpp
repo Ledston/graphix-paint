@@ -26,6 +26,15 @@
 #include "app/App.h"
 #include "app/I18n.h"
 #include "app/TabletInput.h"
+#include "app/BrushLibrary.h"
+#include "tools/ToolManager.h"
+#include "ui/ColorPanel.h"
+#include "ui/ToolPanel.h"
+#include <QDockWidget>
+#include <QGridLayout>
+#include <QMainWindow>
+#include <QTimer>
+#include <QToolBar>
 #include "ui/ShortcutsDialog.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
@@ -96,6 +105,26 @@ QCheckBox* check(const QString& text, bool* field, QWidget* parent) {
     c->setChecked(*field);
     QObject::connect(c, &QCheckBox::toggled, parent, [field](bool on) { *field = on; });
     return c;
+}
+
+// A checkbox per item; a checked box means "shown" (the list keeps what is hidden).
+QWidget* showList(QStringList* hidden, const QStringList& keys, const QStringList& labels, QWidget* parent, int columns = 2) {
+    auto* box = new QWidget(parent);
+    auto* g = new QGridLayout(box);
+    g->setContentsMargins(0, 0, 0, 0);
+    g->setHorizontalSpacing(16);
+    g->setVerticalSpacing(2);
+    for (int i = 0; i < keys.size(); ++i) {
+        auto* c = new QCheckBox(labels.value(i, keys[i]), box);
+        c->setChecked(!hidden->contains(keys[i]));
+        const QString key = keys[i];
+        QObject::connect(c, &QCheckBox::toggled, box, [hidden, key](bool on) {
+            hidden->removeAll(key);
+            if (!on) hidden->append(key);
+        });
+        g->addWidget(c, i / columns, i % columns);
+    }
+    return box;
 }
 
 QSpinBox* spin(int min, int max, int* field, QWidget* parent, const QString& suffix = {}, int step = 1) {
@@ -264,6 +293,77 @@ QWidget* PreferencesDialog::interfacePage() {
     icons->setCurrentIndex(std::max(0, icons->findData(m_p.iconSize)));
     connect(icons, &QComboBox::currentIndexChanged, this, [this, icons] { m_p.iconSize = icons->currentData().toInt(); });
     f->addRow(T("Tool icon size"), icons);
+
+    // ---- what is shown: panels, tools, tabs, parts of the color panel
+    if (auto* mw = qobject_cast<QMainWindow*>(parentWidget())) {
+        f = pb.group(T("Panels"));
+        f->addRow(hint(T("Shown right away. You can also fold a panel with the arrow on its title."), w));
+        auto* box = new QWidget(w);
+        auto* g = new QGridLayout(box);
+        g->setContentsMargins(0, 0, 0, 0);
+        g->setHorizontalSpacing(16);
+        g->setVerticalSpacing(2);
+        int i = 0;
+        QList<QWidget*> items;
+        for (QDockWidget* d : mw->findChildren<QDockWidget*>()) items << d;
+        for (QToolBar* t : mw->findChildren<QToolBar*>()) items << t;
+        for (QWidget* item : items) {
+            auto* c = new QCheckBox(item->windowTitle().isEmpty() ? T("Toolbar") : item->windowTitle(), box);
+            c->setChecked(!item->isHidden());
+            m_panelsBefore.append(qMakePair(QPointer<QWidget>(item), !item->isHidden()));
+            connect(c, &QCheckBox::toggled, item, [item](bool on) { item->setVisible(on); });
+            g->addWidget(c, i / 2, i % 2);
+            ++i;
+        }
+        f->addRow(box);
+        auto* reset = new QPushButton(Theme::icon("reset"), T("Reset the interface"), w);
+        reset->setToolTip(T("Panels back where they were at the start, unfolded; every tool, tab and part of the color panel shown again."));
+        connect(reset, &QPushButton::clicked, this, [this, mw] {
+            if (QMessageBox::question(this, T("Reset the interface"),
+                                      T("Put all panels back where they were at the start, unfold them and show the hidden tools, tabs and "
+                                        "parts of the color panel? Brushes, colors and shortcuts stay as they are.")) != QMessageBox::Yes)
+                return;
+            m_panelsBefore.clear();  // the reset decides what is shown
+            reject();
+            QPointer<QMainWindow> target(mw);
+            QTimer::singleShot(0, [target] {
+                if (target) QMetaObject::invokeMethod(target, "resetInterface");
+            });
+        });
+        f->addRow(reset);
+    }
+
+    f = pb.group(T("Tools in the tool panel"));
+    {
+        QStringList keys, labels;
+        for (const QString& id : ToolPanel::toolOrder())
+            if (Tool* t = app()->tools()->tool(id)) keys << id, labels << T(t->name());
+        f->addRow(showList(&m_p.hiddenTools, keys, labels, w, 3));
+        f->addRow(hint(T("A hidden tool keeps its shortcut."), w));
+    }
+    f = pb.group(T("Brush tabs"));
+    {
+        QStringList keys = BrushSettings::groups();
+        BrushLibrary* lib = app()->brushes();
+        for (int i = 0; i < lib->count(); ++i)
+            if (!keys.contains(lib->at(i).group)) keys << lib->at(i).group;
+        QStringList labels;
+        for (const QString& k : keys) labels << T(k);
+        f->addRow(showList(&m_p.hiddenBrushTabs, keys, labels, w, 3));
+    }
+    f = pb.group(T("Materials tabs"));
+    {
+        const QStringList keys = {"Pictures", "Patterns", "Tones", "Gradient maps"};
+        QStringList labels;
+        for (const QString& k : keys) labels << T(k);
+        f->addRow(showList(&m_p.hiddenMaterialTabs, keys, labels, w, 2));
+    }
+    f = pb.group(T("Color panel"));
+    {
+        QStringList labels;
+        for (const QString& n : ColorPanel::partNames()) labels << T(n);
+        f->addRow(showList(&m_p.hiddenColorParts, ColorPanel::partKeys(), labels, w, 2));
+    }
     return pb.done();
 }
 
@@ -549,8 +649,10 @@ void PreferencesDialog::accept() {
 }
 
 void PreferencesDialog::reject() {
-    // undo the live previews (theme, tablet)
+    // undo the live previews (theme, tablet, panels)
     Theme::apply(m_original.theme, m_original.uiFontSize);
+    for (const auto& pv : m_panelsBefore)
+        if (pv.first) pv.first->setVisible(pv.second);
     if (TabletInput::active() != app()->prefs().tabletApi) TabletInput::apply(app()->prefs().tabletApi);
     QDialog::reject();
 }

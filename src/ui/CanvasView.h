@@ -105,6 +105,9 @@ private:
     void drawCompositionGrid(QPainter& p);
     void drawBrushOutline(QPainter& p);
     void rebuildSelectionPath();
+    // the selection shown in color (selection pen), at most 2048 px on its long side
+    void updateSelectionTint(const QRect& canvasRect);
+    bool wantsSelectionTint() const;
     void viewTransformChanged();
 
     std::shared_ptr<Document> m_doc;
@@ -129,6 +132,10 @@ private:
 
     QPainterPath m_selPath;
     bool m_selDirty = true;
+    bool m_selPainting = false;  // a selection pen stroke is going on: the ants wait for its end
+    QImage m_selTint;
+    double m_selTintScale = 1;
+    bool m_selTintValid = false;
     QTimer m_ants;
     int m_antsPhase = 0;
 };
