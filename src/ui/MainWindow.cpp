@@ -66,6 +66,7 @@
 #include "tools/NavTools.h"
 #include "tools/RulerTool.h"
 #include "tools/FocusLinesTool.h"
+#include "tools/FramesTool.h"
 #include "tools/SelectTools.h"
 #include "tools/TextTool.h"
 #include "tools/ToolManager.h"
@@ -235,6 +236,7 @@ void MainWindow::createTools() {
     tm->addTool(new RulerTool);
     tm->addTool(new FocusLinesTool(FocusLines::Focus));
     tm->addTool(new FocusLinesTool(FocusLines::Speed));
+    tm->addTool(new FramesTool);
     for (const char* id : {"select-rect", "select-ellipse", "lasso", "magic-wand", "transform", "warp", "gradient", "vedit",
                            "vpressure", "vweight", "ruler", "curve", "liquify", "text", "select-brush", "smart-select"})
         tm->setModifierTool(id, true);

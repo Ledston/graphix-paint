@@ -340,8 +340,26 @@ void TransformTool::move(const PointerEvent& e) {
         for (int i = 0; i < 4; ++i) m_quad[i] = r.map(s[i]);
     } else if (m_dragMode >= 1 && m_dragMode <= 4) {
         int k = m_dragMode - 1;
-        if (ctrl) {
+        if (ctrl || mode == Distort) {
             m_quad[k] = s[k] + delta;
+        } else if (mode == Perspective || mode == Skew) {
+            // the corner moves along one of its edges; in perspective its neighbour on that edge
+            // moves the other way (a trapezoid), in skew the neighbour moves the same way
+            const int nh = k ^ 1, nv = 3 - k;  // neighbours on the top / bottom edge and on the side edge
+            QPointF eh = s[nh] - s[k], ev = s[nv] - s[k];
+            const double lh = std::hypot(eh.x(), eh.y()), lv = std::hypot(ev.x(), ev.y());
+            if (lh > 1e-9 && lv > 1e-9) {
+                eh /= lh;
+                ev /= lv;
+                const double ah = delta.x() * eh.x() + delta.y() * eh.y(), av = delta.x() * ev.x() + delta.y() * ev.y();
+                const bool alongH = std::fabs(ah) >= std::fabs(av);
+                const QPointF dir = alongH ? eh : ev;
+                const double a = alongH ? ah : av;
+                const int n = alongH ? nh : nv;
+                for (int i = 0; i < 4; ++i) m_quad[i] = s[i];
+                m_quad[k] = s[k] + dir * a;
+                m_quad[n] = s[n] + dir * (mode == Perspective ? -a : a);
+            }
         } else {
             QPointF O = s[(k + 2) % 4];
             QPointF u = s[(k + 1) % 4] - O, v = s[(k + 3) % 4] - O;
@@ -491,6 +509,15 @@ QWidget* TransformTool::createOptions(QWidget* parent) {
     auto* w = new QWidget(parent);
     auto* v = new QVBoxLayout(w);
     v->setContentsMargins(6, 6, 6, 6);
+    auto* modeBox = new QComboBox(w);
+    modeBox->addItems({T("Corners scale"), T("Corners distort freely"), T("Perspective"), T("Skew")});
+    modeBox->setCurrentIndex(mode);
+    modeBox->setToolTip(T("What dragging a corner does. Perspective: the corner and its neighbour move toward or away from each other."));
+    connect(modeBox, &QComboBox::currentIndexChanged, this, [this](int i) { mode = i; });
+    auto* mrow = new QHBoxLayout;
+    mrow->addWidget(new QLabel(T("Mode"), w));
+    mrow->addWidget(modeBox, 1);
+    v->addLayout(mrow);
     auto* sm = new QCheckBox(T("Smooth resampling"), w);
     sm->setChecked(smooth);
     connect(sm, &QCheckBox::toggled, this, [this](bool on) { smooth = on; updatePreview(true); });
@@ -517,8 +544,8 @@ QWidget* TransformTool::createOptions(QWidget* parent) {
     row->addWidget(ok);
     row->addWidget(cancelB);
     v->addLayout(row);
-    auto* hint = new QLabel(T("Drag inside to move, outside to rotate (Shift: 15° steps). Corners scale (Shift keeps proportions). "
-                              "Ctrl + corner distorts freely (perspective), Ctrl + edge skews. Click the canvas to start again."), w);
+    auto* hint = new QLabel(T("Drag inside to move, outside to rotate (Shift: 15° steps). Corners do what the mode says (Shift keeps "
+                              "proportions when scaling). Ctrl + corner always distorts freely, Ctrl + edge skews. Click the canvas to start again."), w);
     hint->setWordWrap(true);
     hint->setObjectName("sectionTitle");
     v->addWidget(hint);

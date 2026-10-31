@@ -54,6 +54,8 @@
 #include "ui/ThemeEditor.h"
 #include "ui/ReplaceColorDialog.h"
 #include "app/Templates.h"
+#include "tools/FramesTool.h"
+#include "vector/VectorRender.h"
 #include "ui/Dialogs.h"
 #include "ui/NavigatorPanel.h"
 #include <QTemporaryDir>
@@ -1583,6 +1585,79 @@ int main(int argc, char** argv) {
         auto fromMine = templates::make("user:Test template.gxp", QSize(), 0, Qt::white, &err);
         CHECK(fromMine && fromMine->size() == d->size() && fromMine->root()->children.size() == d->root()->children.size());
         QFile::remove(templates::folder() + "/Test template.gxp");
+    }, w);
+
+    scenario("panel frames, speech balloons, perspective transform", [](MainWindow& w) {
+        Document* d = view()->doc();
+        // frames: a page, then a cut with the mouse
+        app()->tools()->setCurrent("frames");
+        pump(250);
+        auto* ft = dynamic_cast<FramesTool*>(app()->tools()->current());
+        CHECK(ft != nullptr);
+        if (!ft) return;
+        const size_t layers = d->root()->children.size();
+        ft->gutter = 20;
+        ft->makePage(d, {1, 1});
+        auto* fl = dynamic_cast<RasterLayer*>(d->currentLayer());
+        CHECK(d->root()->children.size() == layers + 1 && fl && fl->reference && FrameSet::fromJson(fl->generator).frames.size() == 2);
+        ft->mode = 1;
+        dragCanvas(QPointF(400, 20), QPointF(400, 260));  // cut the top frame in two
+        pump(30);
+        fl = dynamic_cast<RasterLayer*>(d->currentLayer());
+        CHECK(fl && FrameSet::fromJson(fl->generator).frames.size() == 3);
+        ft->mode = 0;
+        dragCanvas(QPointF(600, 450), QPointF(700, 520));  // one more frame by hand
+        fl = dynamic_cast<RasterLayer*>(d->currentLayer());
+        CHECK(fl && FrameSet::fromJson(fl->generator).frames.size() == 4 && d->root()->children.size() == layers + 1);
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/frames.png");
+        // a balloon on a text layer, its tail dragged on the canvas
+        app()->tools()->setCurrent("text");
+        pump(250);
+        mouse(QEvent::MouseButtonPress, QPointF(300, 330), Qt::LeftButton);
+        mouse(QEvent::MouseButtonRelease, QPointF(300, 330), Qt::NoButton);
+        pump(40);
+        auto* tl = dynamic_cast<TextLayer*>(d->currentLayer());
+        CHECK(tl != nullptr);
+        if (tl) {
+            QComboBox* balloon = nullptr;
+            for (QComboBox* c : w.findChildren<QComboBox*>())
+                if (c->count() == 5 && c->itemText(1) == T("Oval")) balloon = c;
+            CHECK(balloon != nullptr);
+            if (balloon) balloon->setCurrentIndex(TextParams::Oval);
+            pump(30);
+            tl = dynamic_cast<TextLayer*>(d->currentLayer());
+            CHECK(tl && tl->text.balloon == TextParams::Oval);
+            const QPointF tip = balloonTailTip(tl->text);
+            dragCanvas(tip, QPointF(150, 500));
+            tl = dynamic_cast<TextLayer*>(d->currentLayer());
+            CHECK(tl && QLineF(balloonTailTip(tl->text), QPointF(150, 500)).length() < 2);
+            if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/balloon.png");
+        }
+        // transform in perspective mode: dragging a corner sideways moves its neighbour the other way
+        ops::addRasterLayer(*d);
+        auto* pl = static_cast<RasterLayer*>(d->currentLayer());
+        pl->pixels.fillRect(QRect(200, 200, 200, 200), 0xff3060d0u);
+        d->pixelsChanged(d->bounds(), pl);
+        app()->tools()->setCurrent("transform");
+        pump(250);
+        auto* tt = dynamic_cast<TransformTool*>(app()->tools()->current());
+        CHECK(tt != nullptr);
+        if (!tt) return;
+        tt->mode = TransformTool::Perspective;
+        const QPolygonF q0 = tt->quad();
+        CHECK(q0.size() == 4);
+        dragCanvas(q0[0], q0[0] + QPointF(40, 0));  // the top-left corner to the right
+        const QPolygonF q = tt->quad();
+        std::fprintf(stderr, "INFO perspective: TL %.1f,%.1f TR %.1f,%.1f\n", q[0].x(), q[0].y(), q[1].x(), q[1].y());
+        CHECK(std::abs(q[0].x() - (q0[0].x() + 40)) < 1 && std::abs(q[1].x() - (q0[1].x() - 40)) < 1);  // a trapezoid
+        CHECK(std::abs(q[2].x() - q0[2].x()) < 1e-6 && std::abs(q[3].x() - q0[3].x()) < 1e-6);
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/perspective.png");
+        tt->apply();
+        pump(30);
+        pl = static_cast<RasterLayer*>(d->currentLayer());
+        CHECK((pl->pixels.pixel(205, 205) >> 24) == 0 && (pl->pixels.pixel(300, 395) >> 24) == 255);  // the top got narrower
+        tt->mode = TransformTool::Scale;
+        app()->tools()->setCurrent("brush");
     }, w);
 
     scenario("reference over everything", [](MainWindow& w) {

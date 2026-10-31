@@ -16,6 +16,7 @@
 #include "core/Compositor.h"
 #include "core/Document.h"
 #include "core/ReplaceColor.h"
+#include "tools/FramesTool.h"
 #include "app/Templates.h"
 #include "core/FocusLines.h"
 #include "core/Guides.h"
@@ -984,6 +985,52 @@ static void testSeamlessAndReplace() {
     }
 }
 
+static void testFramesAndBalloons() {
+    // a page of frames and a cut
+    FrameSet fs = FrameSet::page(QRectF(100, 100, 800, 1200), {1, 2, 1}, 40);
+    CHECK(fs.frames.size() == 4);
+    const int cut = fs.cut(QPointF(50, 300), QPointF(950, 300), 30);  // across the top frame
+    CHECK(cut == 1 && fs.frames.size() == 5);
+    double gapTop = 1e9, gapBottom = -1e9;
+    for (const QPolygonF& f : fs.frames) {
+        const QRectF r = f.boundingRect();
+        if (r.top() < 150 && r.bottom() <= 300) gapBottom = std::max(gapBottom, r.bottom());
+        if (r.top() >= 300 && r.top() < 400) gapTop = std::min(gapTop, r.top());
+    }
+    CHECK(std::abs((gapTop - gapBottom) - 30) < 0.5);
+    const FrameSet back = FrameSet::fromJson(fs.toJson());
+    CHECK(back.frames.size() == 5 && FrameSet::isFrames(fs.toJson()));
+    {
+        Document doc(QSize(1000, 1400));
+        auto* l = ops::addRasterLayer(doc);
+        fs.renderInto(doc, *l);
+        CHECK((l->pixels.pixel(100, 700) >> 24) > 200 && (l->pixels.pixel(500, 700) >> 24) == 0 && l->generatorEditable());
+    }
+    // speech balloons: every shape draws around the text, with its tail
+    TextParams t;
+    t.text = "Hello!";
+    t.sizePx = 40;
+    t.origin = QPointF(200, 200);
+    const QRectF plain = textBounds(t);
+    for (int b = 1; b <= 4; ++b) {
+        t.balloon = b;
+        const QPainterPath path = balloonPath(t);
+        CHECK(!path.isEmpty());
+        const QRectF withBalloon = textBounds(t);
+        CHECK(withBalloon.contains(plain) && withBalloon.height() > plain.height() * 2);
+    }
+    t.balloon = TextParams::Oval;
+    t.tailTip = QPointF(-150, 300);
+    CHECK(textBounds(t).left() < 200 - 140);
+    const TextParams tb = TextParams::fromJson(t.toJson());
+    CHECK(tb.balloon == TextParams::Oval && tb.tailTip == t.tailTip && tb.tail);
+    TextLayer tl;
+    tl.text = t;
+    renderTextLayer(tl);
+    const QPointF in = QPointF(200, 200) + QPointF(-10, 10);  // inside the oval, outside the letters: white fill
+    CHECK(tl.cache.pixel(int(in.x()), int(in.y())) == 0xffffffffu);
+}
+
 int main(int argc, char** argv) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
@@ -1008,6 +1055,7 @@ int main(int argc, char** argv) {
     testRulersAndLines();
     testSaiBrushes();
     testSeamlessAndReplace();
+    testFramesAndBalloons();
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

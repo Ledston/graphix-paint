@@ -25,7 +25,7 @@ public:
     void drawOverlay(QPainter& p, CanvasView* v) override;
     QCursor cursor(CanvasView*) const override { return Qt::IBeamCursor; }
     QWidget* createOptions(QWidget* parent) override;
-    bool isBusy() const override { return m_drag; }
+    bool isBusy() const override { return m_drag || m_dragTail; }
 
 private:
     TextLayer* currentText() const;
@@ -43,6 +43,12 @@ private:
     ValueBar* m_letter = nullptr;
     QCheckBox *m_bold = nullptr, *m_italic = nullptr, *m_under = nullptr, *m_vertical = nullptr;
     QComboBox* m_align = nullptr;
+    // speech balloon
+    QComboBox* m_balloon = nullptr;
+    QCheckBox* m_tail = nullptr;
+    ValueBar *m_pad = nullptr, *m_border = nullptr;
+    int m_newBalloon = 0;  // the balloon of new text
+    bool m_dragTail = false;
     bool m_syncing = false;
     QString m_family;
     double m_sizePx = 48;

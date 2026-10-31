@@ -110,6 +110,15 @@ struct TextParams {
     QPointF origin;  // top-left in canvas coordinates
     double rotation = 0;  // degrees
     double scale = 1.0;
+    // Speech balloon behind the text (comics)
+    enum Balloon { NoBalloon = 0, Oval = 1, Box = 2, Thought = 3, Shout = 4 };
+    int balloon = NoBalloon;
+    double balloonPadding = 0.6;  // room around the text, in letter heights
+    double balloonBorder = 3;     // px
+    QColor balloonFill = Qt::white, balloonLine = Qt::black;
+    bool tail = true;
+    QPointF tailTip;  // the end of the tail, in the text's own coordinates (from the top-left of the text)
+    double tailWidth = 0.3;  // the tail's base, as a part of the balloon's smaller side
     QJsonObject toJson() const;
     static TextParams fromJson(const QJsonObject& o);
     QFont font() const;

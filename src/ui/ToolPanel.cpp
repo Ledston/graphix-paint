@@ -516,7 +516,7 @@ void BrushSettingsWidget::updateVisibility() {
 QStringList ToolPanel::toolOrder() {
     return {"select-rect", "select-ellipse", "lasso", "magic-wand", "smart-select", "select-brush", "move", "transform",
             "warp", "liquify", "fill", "lasso-fill", "gradient", "eyedropper", "hand", "zoom", "rotate",
-            "text", "focuslines", "speedlines", "vpen", "curve", "vedit", "vpressure", "vweight", "vcolor", "veraser", "ruler"};
+            "text", "frames", "focuslines", "speedlines", "vpen", "curve", "vedit", "vpressure", "vweight", "vcolor", "veraser", "ruler"};
 }
 
 ToolPanel::ToolPanel(QWidget* parent) : QWidget(parent) {

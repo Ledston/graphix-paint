@@ -207,11 +207,101 @@ QSizeF layoutSize(const TextParams& t, QList<TextLine>& lines, double& lineH, do
 
 }  // namespace
 
+QPainterPath balloonPath(const TextParams& t) {
+    QPainterPath path;
+    if (t.balloon == TextParams::NoBalloon) return path;
+    QList<TextLine> lines;
+    double lh, asc;
+    const QSizeF sz = layoutSize(t, lines, lh, asc);
+    const double pad = t.balloonPadding * t.sizePx;
+    const QRectF r = QRectF(QPointF(0, 0), sz).adjusted(-pad, -pad, pad, pad);
+    const QPointF c = r.center();
+    // an oval around the text box needs about sqrt(2) times its half sizes
+    const double rx = r.width() / 2 * 1.3, ry = r.height() / 2 * 1.3;
+    switch (t.balloon) {
+    case TextParams::Oval: path.addEllipse(c, rx, ry); break;
+    case TextParams::Box: {
+        const double rr = std::min(r.width(), r.height()) * 0.28;
+        path.addRoundedRect(r, rr, rr);
+        break;
+    }
+    case TextParams::Thought: {
+        // puffs along an oval
+        const int n = std::clamp(int((rx + ry) / std::max(8.0, t.sizePx * 0.6)), 8, 28);
+        path.addEllipse(c, rx * 0.92, ry * 0.92);
+        for (int i = 0; i < n; ++i) {
+            const double a = 2 * M_PI * i / n;
+            const double pr = std::max(rx, ry) * 2 * M_PI / n * 0.62;
+            QPainterPath puff;
+            puff.addEllipse(c + QPointF(std::cos(a) * rx * 0.92, std::sin(a) * ry * 0.92), pr, pr * 0.85);
+            path = path.united(puff);
+        }
+        break;
+    }
+    case TextParams::Shout: {
+        // spikes all around
+        const int n = std::clamp(int((rx + ry) / std::max(6.0, t.sizePx * 0.45)), 12, 40);
+        QPolygonF poly;
+        for (int i = 0; i < 2 * n; ++i) {
+            const double a = M_PI * i / n;
+            const double k = (i % 2) ? 1.0 : 1.32 + 0.12 * std::sin(i * 2.3);
+            poly << c + QPointF(std::cos(a) * rx * k, std::sin(a) * ry * k);
+        }
+        path.addPolygon(poly);
+        path.closeSubpath();
+        break;
+    }
+    default: break;
+    }
+    if (t.tail) {
+        QPointF tip = t.tailTip;
+        if (tip.isNull()) tip = QPointF(r.left() + r.width() * 0.25, r.bottom() + t.sizePx * 2.5);
+        const QPointF d = tip - c;
+        const double len = std::hypot(d.x(), d.y());
+        if (len > 1) {
+            const QPointF u = d / len, n(-u.y(), u.x());
+            const double half = std::min(r.width(), r.height()) * t.tailWidth / 2;
+            if (t.balloon == TextParams::Thought) {
+                // little puffs toward the speaker
+                for (int i = 1; i <= 3; ++i) {
+                    const double f = 0.55 + 0.17 * i;
+                    QPainterPath puff;
+                    const double pr = half * (0.9 - 0.22 * i);
+                    puff.addEllipse(c + d * f, pr, pr);
+                    path = path.united(puff);
+                }
+            } else {
+                QPainterPath tail;
+                // a slightly curved wedge from inside the balloon to the tip
+                tail.moveTo(c + n * half);
+                tail.quadTo(c + d * 0.6 + n * half * 0.4, tip);
+                tail.quadTo(c + d * 0.6 - n * half * 0.2, c - n * half);
+                tail.closeSubpath();
+                path = path.united(tail);
+            }
+        }
+    }
+    return path.simplified();
+}
+
+QPointF balloonTailTip(const TextParams& t) {
+    if (!t.tailTip.isNull()) return textTransform(t).map(t.tailTip);
+    QList<TextLine> lines;
+    double lh, asc;
+    const QSizeF sz = layoutSize(t, lines, lh, asc);
+    const double pad = t.balloonPadding * t.sizePx;
+    const QRectF r = QRectF(QPointF(0, 0), sz).adjusted(-pad, -pad, pad, pad);
+    return textTransform(t).map(QPointF(r.left() + r.width() * 0.25, r.bottom() + t.sizePx * 2.5));
+}
+
+QPointF textLocal(const TextParams& t, const QPointF& canvas) { return textTransform(t).inverted().map(canvas); }
+
 QRectF textBounds(const TextParams& t) {
     QList<TextLine> lines;
     double lh, asc;
     QSizeF sz = layoutSize(t, lines, lh, asc);
     QRectF local(QPointF(0, 0), sz);
+    if (t.balloon != TextParams::NoBalloon) local |= balloonPath(t).boundingRect().adjusted(-t.balloonBorder, -t.balloonBorder, t.balloonBorder, t.balloonBorder);
     return textTransform(t).mapRect(local.adjusted(-4, -4, 4, 4));
 }
 
@@ -232,6 +322,12 @@ QRect renderTextLayer(TextLayer& l) {
         p.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
         p.translate(-r.topLeft());
         p.setTransform(textTransform(t), true);
+        if (t.balloon != TextParams::NoBalloon) {
+            p.setBrush(t.balloonFill);
+            p.setPen(t.balloonBorder > 0 ? QPen(t.balloonLine, t.balloonBorder, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin) : QPen(Qt::NoPen));
+            p.drawPath(balloonPath(t));
+            p.setBrush(Qt::NoBrush);
+        }
         QFont f = t.font();
         p.setFont(f);
         p.setPen(t.color);

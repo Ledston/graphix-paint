@@ -1,4 +1,5 @@
 #pragma once
+#include <QPainterPath>
 #include <QRect>
 #include <QVector>
 
@@ -23,5 +24,9 @@ int hitTestControlPoint(const VectorLayer& l, const QPointF& p, double tolerance
 // Text layers
 QRect renderTextLayer(TextLayer& l);
 QRectF textBounds(const TextParams& t);
+// Speech balloon of a text layer (text coordinates) and the end of its tail (canvas coordinates).
+QPainterPath balloonPath(const TextParams& t);
+QPointF balloonTailTip(const TextParams& t);
+QPointF textLocal(const TextParams& t, const QPointF& canvas);  // canvas -> the text's own coordinates
 
 }  // namespace gx

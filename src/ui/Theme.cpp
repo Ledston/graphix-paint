@@ -745,6 +745,14 @@ void drawIcon(QPainter& p, const QString& n, const QColor& col, const QColor& ac
         p.setPen(QPen(acc, 1.8, Qt::SolidLine, Qt::RoundCap));
         line(2, 13, 13, 2);
         p.setPen(pp);
+    } else if (n == "frames") {
+        // a comic page: three frames
+        p.drawRect(QRectF(3, 3, 18, 6));
+        p.drawRect(QRectF(3, 11, 8, 10));
+        QPen keep = p.pen();
+        p.setPen(QPen(acc, 1.6));
+        p.drawRect(QRectF(13, 11, 8, 10));
+        p.setPen(keep);
     } else if (n == "focuslines") {
         for (int k = 0; k < 16; ++k) {
             const double a = 2 * M_PI * k / 16, r1 = (k % 2 ? 5.5 : 7.5), r2 = 12;

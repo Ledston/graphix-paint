@@ -1429,3 +1429,38 @@ Sub color	Фоновый цвет
 Template	Шаблон
 The template could not be opened.	Не удалось открыть шаблон.
 Save as pattern...	Сохранить как узор...
+Select a frames layer first (made by this tool).	Сначала выбери слой рамок (созданный этим инструментом).
+The line does not cross a frame.	Линия не пересекает ни одну рамку.
+Draw a frame (drag a rectangle)	Нарисовать рамку (тяни прямоугольник)
+Cut frames (drag a line across)	Разрезать рамки (проведи линию поперёк)
+Border	Толщина рамки
+Gutter	Промежуток
+The space between frames when cutting or making a page.	Расстояние между рамками при разрезании или создании страницы.
+Page margins	Поля страницы
+A page of frames	Страница рамок
+1 frame	1 рамка
+2 rows	2 ряда
+3 rows	3 ряда
+3 rows, middle split	3 ряда, средний разделён
+2 x 2	2 × 2
+4 rows	4 ряда
+Speech balloon	Облачко
+No balloon	Без облачка
+Oval	Овал
+Box	Прямоугольник
+Thought (cloud)	Мысли (облако)
+Shout (spikes)	Крик (зубцы)
+Tail (drag its end on the canvas)	Хвостик (тяни его конец на холсте)
+Room around the text	Отступ вокруг текста
+Balloon: main color outline, sub color fill	Облачко: контур основным цветом, заливка дополнительным
+Corners scale	Углы масштабируют
+Corners distort freely	Углы искажают свободно
+Skew	Наклон
+What dragging a corner does. Perspective: the corner and its neighbour move toward or away from each other.	Что делает перетаскивание угла. Перспектива: угол и соседний угол сдвигаются навстречу или в разные стороны.
+Drag inside to move, outside to rotate (Shift: 15° steps). Corners do what the mode says (Shift keeps proportions when scaling). Ctrl + corner always distorts freely, Ctrl + edge skews. Click the canvas to start again.	Тяни внутри — перемещение, снаружи — поворот (Shift: шаг 15°). Углы работают по выбранному режиму (Shift сохраняет пропорции при масштабе). Ctrl + угол — всегда свободное искажение, Ctrl + сторона — наклон. Клик по холсту — начать заново.
+Frames are drawn with the main color on a frames layer, which stays editable while you do not paint on it. Select it to add or cut more frames; select another layer to start a new set. The fill tools stop at frames.	Рамки рисуются основным цветом на слое рамок, который остаётся редактируемым, пока ты не рисуешь на нём. Выбери его, чтобы добавить или разрезать рамки; выбери другой слой, чтобы начать новый набор. Заливка останавливается на рамках.
+Panel frame	Рамка панели
+Panel frames	Рамки панелей
+Cut frames	Разрезать рамки
+Page of frames	Страница рамок
+Distort	Искажение

@@ -53,6 +53,12 @@ public:
     void cancelPending() override { cancel(); }
 
     bool smooth = true;
+    // what dragging a corner does: scale, free distort, perspective (the corner and its
+    // neighbour move toward or away from each other, like Photoshop), skew (edges slide)
+    enum Mode { Scale = 0, Distort = 1, Perspective = 2, Skew = 3 };
+    int mode = Scale;
+    QPolygonF quad() const { return m_quad; }
+    void setQuad(const QPolygonF& q) { m_quad = q; updatePreview(true); }
 
     void flip(bool horizontal);
     void rotate90(bool cw);

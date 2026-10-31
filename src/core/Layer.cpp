@@ -112,7 +112,10 @@ QJsonObject TextParams::toJson() const {
     return QJsonObject{{"text", text}, {"family", family}, {"size", sizePx}, {"bold", bold}, {"italic", italic},
                        {"underline", underline}, {"color", colorJson(color)}, {"align", align},
                        {"lineSpacing", lineSpacing}, {"letterSpacing", letterSpacing}, {"vertical", vertical},
-                       {"x", origin.x()}, {"y", origin.y()}, {"rotation", rotation}, {"scale", scale}};
+                       {"x", origin.x()}, {"y", origin.y()}, {"rotation", rotation}, {"scale", scale},
+                       {"balloon", balloon}, {"balloonPadding", balloonPadding}, {"balloonBorder", balloonBorder},
+                       {"balloonFill", colorJson(balloonFill)}, {"balloonLine", colorJson(balloonLine)}, {"tail", tail},
+                       {"tailX", tailTip.x()}, {"tailY", tailTip.y()}, {"tailWidth", tailWidth}};
 }
 
 TextParams TextParams::fromJson(const QJsonObject& o) {
@@ -131,6 +134,14 @@ TextParams TextParams::fromJson(const QJsonObject& o) {
     t.origin = QPointF(o.value("x").toDouble(), o.value("y").toDouble());
     t.rotation = o.value("rotation").toDouble();
     t.scale = o.value("scale").toDouble(1.0);
+    t.balloon = std::clamp(o.value("balloon").toInt(), 0, 4);
+    t.balloonPadding = std::clamp(o.value("balloonPadding").toDouble(0.6), 0.0, 5.0);
+    t.balloonBorder = std::clamp(o.value("balloonBorder").toDouble(3), 0.0, 100.0);
+    t.balloonFill = colorFrom(o.value("balloonFill"), Qt::white);
+    t.balloonLine = colorFrom(o.value("balloonLine"), Qt::black);
+    t.tail = o.value("tail").toBool(true);
+    t.tailTip = QPointF(o.value("tailX").toDouble(), o.value("tailY").toDouble());
+    t.tailWidth = std::clamp(o.value("tailWidth").toDouble(0.3), 0.05, 1.0);
     return t;
 }
 

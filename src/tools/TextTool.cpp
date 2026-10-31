@@ -44,6 +44,15 @@ void TextTool::press(const PointerEvent& e) {
     if (!e.view) return;
     m_view = e.view;
     Document* d = e.view->doc();
+    // the end of the balloon's tail can be dragged
+    if (TextLayer* cur = currentText(); cur && cur->text.balloon && cur->text.tail) {
+        const QPointF tip = e.view->toWidget(balloonTailTip(cur->text));
+        if (QLineF(tip, e.widgetPos).length() < 10) {
+            d->pushUndo(T("Edit text"));
+            m_dragTail = true;
+            return;
+        }
+    }
     // Clicking an existing text layer selects it for editing
     TextLayer* hit = nullptr;
     for (Layer* l : layersTopToBottom(d->root())) {
@@ -74,6 +83,10 @@ void TextTool::press(const PointerEvent& e) {
         p.align = m_align->currentIndex();
         p.lineSpacing = m_line->value();
         p.letterSpacing = m_letter->value();
+        p.balloon = m_newBalloon;
+        if (m_tail) p.tail = m_tail->isChecked();
+        if (m_pad) p.balloonPadding = m_pad->value();
+        if (m_border) p.balloonBorder = m_border->value();
     }
     ops::addTextLayer(*d, p);
     syncFromLayer();
@@ -84,6 +97,17 @@ void TextTool::press(const PointerEvent& e) {
 }
 
 void TextTool::move(const PointerEvent& e) {
+    if (m_dragTail && m_view) {
+        TextLayer* t = currentText();
+        if (!t) return;
+        QRect before = t->cache.tileBounds();
+        t->text.tailTip = textLocal(t->text, e.pos);
+        if (t->text.tailTip.isNull()) t->text.tailTip = QPointF(0.01, 0.01);
+        QRect after = renderTextLayer(*t);
+        m_view->doc()->pixelsChanged(before | after, t);
+        Q_EMIT overlayChanged();
+        return;
+    }
     if (!m_drag || !m_view) return;
     TextLayer* t = currentText();
     if (!t) return;
@@ -94,6 +118,7 @@ void TextTool::move(const PointerEvent& e) {
 }
 
 void TextTool::release(const PointerEvent&) {
+    m_dragTail = false;
     if (!m_drag) return;
     m_drag = false;
     if (m_view && currentText() && currentText()->text.origin == m_origin) m_view->doc()->revertLastUndo();
@@ -107,6 +132,14 @@ void TextTool::drawOverlay(QPainter& p, CanvasView* v) {
     QPen pen(Theme::colors().accent, 1, Qt::DashLine);
     p.setPen(pen);
     p.drawPolygon(q);
+    if (t->text.balloon && t->text.tail) {
+        // the handle at the end of the tail
+        const QPointF tip = v->toWidget(balloonTailTip(t->text));
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(QPen(Qt::black, 1.5));
+        p.setBrush(Theme::colors().accent);
+        p.drawEllipse(tip, 6, 6);
+    }
     p.restore();
 }
 
@@ -126,6 +159,10 @@ void TextTool::syncFromLayer() {
         m_align->setCurrentIndex(t->text.align);
         m_line->setValue(t->text.lineSpacing);
         m_letter->setValue(t->text.letterSpacing);
+        m_balloon->setCurrentIndex(t->text.balloon);
+        m_tail->setChecked(t->text.tail);
+        m_pad->setValue(t->text.balloonPadding);
+        m_border->setValue(t->text.balloonBorder);
     }
     m_edit->setEnabled(t != nullptr);
     m_syncing = false;
@@ -173,6 +210,25 @@ QWidget* TextTool::createOptions(QWidget* parent) {
     v->addWidget(m_letter);
     auto* colorBtn = new QPushButton(T("Use the main color"), w);
     v->addWidget(colorBtn);
+    auto* bt = new QLabel(T("Speech balloon"), w);
+    bt->setObjectName("sectionTitle");
+    v->addWidget(bt);
+    m_balloon = new QComboBox(w);
+    m_balloon->addItems({T("No balloon"), T("Oval"), T("Box"), T("Thought (cloud)"), T("Shout (spikes)")});
+    m_balloon->setCurrentIndex(m_newBalloon);
+    v->addWidget(m_balloon);
+    m_tail = new QCheckBox(T("Tail (drag its end on the canvas)"), w);
+    m_tail->setChecked(true);
+    v->addWidget(m_tail);
+    m_pad = new ValueBar(T("Room around the text"), 0, 3, 2, w);
+    m_pad->setValue(0.6);
+    v->addWidget(m_pad);
+    m_border = new ValueBar(T("Outline"), 0, 30, 1, w);
+    m_border->setSuffix(" px");
+    m_border->setValue(3);
+    v->addWidget(m_border);
+    auto* bcol = new QPushButton(T("Balloon: main color outline, sub color fill"), w);
+    v->addWidget(bcol);
     auto* rast = new QPushButton(T("Rasterize text layer"), w);
     v->addWidget(rast);
     auto* hint = new QLabel(T("Effects such as outline and shadow: Layer > Layer effects."), w);
@@ -201,6 +257,20 @@ QWidget* TextTool::createOptions(QWidget* parent) {
     connect(m_align, &QComboBox::currentIndexChanged, this, [this](int i) { applyEdit([i](TextLayer* t) { t->text.align = i; }, "align"); });
     connect(m_line, &ValueBar::valueChanged, this, [this](double x) { applyEdit([x](TextLayer* t) { t->text.lineSpacing = x; }, "line"); });
     connect(m_letter, &ValueBar::valueChanged, this, [this](double x) { applyEdit([x](TextLayer* t) { t->text.letterSpacing = x; }, "letter"); });
+    connect(m_balloon, &QComboBox::currentIndexChanged, this, [this](int i) {
+        m_newBalloon = i;
+        applyEdit([i](TextLayer* t) { t->text.balloon = i; }, "balloon");
+    });
+    connect(m_tail, &QCheckBox::toggled, this, [this](bool on) { applyEdit([on](TextLayer* t) { t->text.tail = on; }, "tail"); });
+    connect(m_pad, &ValueBar::valueChanged, this, [this](double x) { applyEdit([x](TextLayer* t) { t->text.balloonPadding = x; }, "pad"); });
+    connect(m_border, &ValueBar::valueChanged, this, [this](double x) { applyEdit([x](TextLayer* t) { t->text.balloonBorder = x; }, "border"); });
+    connect(bcol, &QPushButton::clicked, this, [this] {
+        const QColor line = app()->foreground(), fill = app()->background();
+        applyEdit([line, fill](TextLayer* t) {
+            t->text.balloonLine = line;
+            t->text.balloonFill = fill;
+        }, "bcolor");
+    });
     connect(colorBtn, &QPushButton::clicked, this, [this] {
         QColor c = app()->foreground();
         applyEdit([c](TextLayer* t) { t->text.color = c; }, "color");
