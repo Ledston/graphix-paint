@@ -559,6 +559,7 @@ static void testNewBrushes() {
         BrushLibrary lib(file);
         CHECK(lib.indexOfName("My pen") == 0);
         CHECK(lib.indexOfName("Hatching") > 0 && lib.indexOfName("Stipple") > 0);
+        CHECK(lib.indexOfName("Pencil (SAI)") > 0 && lib.indexOfName("b blur") > 0);  // the owner's SAI brushes (version 4)
         const int n = lib.count();
         lib.save();
         BrushLibrary again(file);
@@ -832,6 +833,79 @@ static void testRulersAndLines() {
     }
 }
 
+static void testSaiBrushes() {
+    const QVector<BrushSettings> mine = BrushSettings::customDefaults();
+    CHECK(mine.size() == 6);
+    for (const BrushSettings& b : mine) CHECK(b.group == BrushSettings::customGroup());
+    CHECK(BrushSettings::groups().first() == BrushSettings::customGroup());
+    {
+        BrushSettings b = mine[1];
+        const BrushSettings back = BrushSettings::fromJson(b.toJson());
+        CHECK(back.sizeSoftness == b.sizeSoftness && back.densitySoftness == b.densitySoftness && back.blendSoftness == b.blendSoftness);
+    }
+    // SAI's size list for [ and ]
+    CHECK(brushSizeStep(9, +1) == 10 && brushSizeStep(9, -1) == 8 && brushSizeStep(10.5, +1) == 12 && brushSizeStep(10.5, -1) == 10);
+    CHECK(brushSizeStep(5000, +1) == 5000 && brushSizeStep(0.5, -1) == 0.5);
+    // the softness of pressure: at half pressure a soft brush is wider than a hard one
+    auto width = [](double softness) {
+        Document doc(QSize(400, 120));
+        auto* l = ops::addRasterLayer(doc);
+        BrushSettings b;
+        b.size = 40;
+        b.minSize = 0;
+        b.sizePressure = true;
+        b.hardness = 1;
+        b.sizeSoftness = softness;
+        StrokeContext ctx;
+        ctx.doc = &doc;
+        ctx.layer = l;
+        ctx.brush = b;
+        ctx.color = Qt::black;
+        BrushStroke st(ctx);
+        for (int i = 0; i <= 50; ++i) {
+            InputSample p;
+            p.pos = QPointF(50 + i * 6, 60);
+            p.pressure = 0.5;
+            if (i == 0) st.begin(p);
+            else st.add(p);
+        }
+        st.end();
+        return l->pixels.exactBounds().height();
+    };
+    const int hard = width(0), plain = width(100), soft = width(200);
+    std::printf("pressure softness at half pressure: %d / %d / %d px\n", hard, plain, soft);
+    CHECK(hard < plain && plain < soft);
+    // full blending with full dilution moves the colors and does not wash them out (as in SAI)
+    {
+        Document doc(QSize(300, 100));
+        auto* l = ops::addRasterLayer(doc);
+        l->pixels.fillRect(QRect(0, 0, 150, 100), 0xffdd2222u);
+        l->pixels.fillRect(QRect(150, 0, 150, 100), 0xff2244ddu);
+        StrokeContext ctx;
+        ctx.doc = &doc;
+        ctx.layer = l;
+        ctx.brush = mine[1];  // "111"
+        ctx.color = Qt::green;
+        BrushStroke st(ctx);
+        for (int i = 0; i <= 40; ++i) {
+            InputSample p;
+            p.pos = QPointF(60 + i * 4, 50);
+            p.pressure = 0.8;
+            if (i == 0) st.begin(p);
+            else st.add(p);
+        }
+        st.end();
+        int holes = 0, green = 0;
+        for (int x = 40; x < 260; x += 3) {
+            const quint32 c = l->pixels.pixel(x, 50);
+            holes += (c >> 24) < 250;
+            green += ((c >> 8) & 0xff) > 0x80;
+        }
+        CHECK(holes == 0 && green == 0);
+        CHECK(((l->pixels.pixel(190, 50) >> 16) & 0xff) > 0x30);  // red pulled into the blue
+    }
+}
+
 int main(int argc, char** argv) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
@@ -854,6 +928,7 @@ int main(int argc, char** argv) {
     testDecorBrushes();
     testMaterials();
     testRulersAndLines();
+    testSaiBrushes();
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

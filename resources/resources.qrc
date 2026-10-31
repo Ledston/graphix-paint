@@ -2,5 +2,7 @@
   <qresource prefix="/">
     <file>i18n/ru.tsv</file>
     <file>icons/app.png</file>
+    <file>textures/Paper.png</file>
+    <file>textures/Fabric 01.png</file>
   </qresource>
 </RCC>

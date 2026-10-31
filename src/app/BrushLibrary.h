@@ -45,4 +45,12 @@ private:
     int m_current = 0;
 };
 
+// Quick keys for brushes (A S D Z C B by default): the brush on each key is remembered by name.
+inline constexpr int kQuickBrushes = 10;
+QString quickBrushName(int i);
+void setQuickBrush(int i, const QString& name);
+void selectQuickBrush(int i);
+// The previous (dir < 0) or next size of SAI's list of brush sizes ([ and ]).
+double brushSizeStep(double size, int dir);
+
 }  // namespace gx

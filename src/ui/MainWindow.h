@@ -97,6 +97,7 @@ private:
     void togglePanels();
     void setDockFolded(QDockWidget* d, bool folded);  // the arrow on a panel title
     void applyDefaultDockSizes();
+    void applySaiKeysOnce();  // W Q R E H [ ] F, A S D Z C B and the digits, once over older keys
 public:
     Q_INVOKABLE void resetInterface();  // Window > Reset the interface
 private:

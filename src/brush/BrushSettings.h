@@ -96,6 +96,10 @@ struct BrushSettings {
     bool keepOpacity = false;   // only paint where the layer already has paint
     BlendMode paintMode = BlendMode::Normal;
 
+    // How soft the pen feels for size, density and mixing, like SAI's "Prs. Hard <-> Soft":
+    // 100 = as the pressure curve says, less = needs a harder press, more = light pressure is enough.
+    double sizeSoftness = 100, densitySoftness = 100, blendSoftness = 100;  // 0..200
+
     // Per-brush pressure curve (otherwise the global one is used)
     bool customPressureCurve = false;
     QVector<QPointF> pressureCurve{QPointF(0, 0), QPointF(1, 1)};
@@ -106,6 +110,8 @@ struct BrushSettings {
     // brushes added in later versions (given to existing brush palettes once)
     static QVector<BrushSettings> defaultsSince(int version);
     static QVector<BrushSettings> decorDefaults();
+    static QVector<BrushSettings> customDefaults();  // the owner's brushes from SAI 2 (tab "Custom brushes")
+    static QString customGroup() { return QStringLiteral("Custom brushes"); }
     static QStringList groups();                       // the built-in palette tabs, in order
     static QString defaultGroupFor(const QString& name);  // for palettes saved before tabs existed
 };

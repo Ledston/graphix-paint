@@ -73,6 +73,7 @@ BrushSlots::BrushSlots(QWidget* parent) : QWidget(parent) {
     });
     connect(app()->tools(), &ToolManager::currentChanged, this, [this] { update(); });
     connect(app(), &App::colorsChanged, this, [this] { update(); });
+    connect(&Shortcuts::instance(), &Shortcuts::changed, this, [this] { update(); });
     setToolTip(T("Brushes. Click a tab to see its brushes. Double-click a brush for all its settings, right-click for more."));
 }
 
@@ -200,6 +201,13 @@ void BrushSlots::paintEvent(QPaintEvent*) {
         p.drawText(t.second, Qt::AlignCenter, T(t.first));
     }
     const bool brushActive = app()->tools()->current() && app()->tools()->current()->id() == "brush";
+    // the quick key of each brush (A S D Z C B...), shown in the corner of its cell
+    QHash<QString, QString> keyOf;
+    for (int q = 0; q < kQuickBrushes; ++q) {
+        const QKeySequence ks = Shortcuts::instance().get(QStringLiteral("brush.quick%1").arg(q + 1));
+        const QString n = quickBrushName(q);
+        if (!ks.isEmpty() && !n.isEmpty()) keyOf.insert(n, ks.toString(QKeySequence::NativeText));
+    }
     for (int k = 0; k < l.cells.size(); ++k) {
         const int i = l.cells[k];
         QRect r = cell(l, k, width());
@@ -211,8 +219,14 @@ void BrushSlots::paintEvent(QPaintEvent*) {
         const BrushSettings& b = lib->at(i);
         p.drawPixmap(QRect(r.left() + 3, r.top() + 2, 16, 16), Theme::iconPixmap(b.iconKey, 16, fg));
         p.setPen(fg);
-        QString name = p.fontMetrics().elidedText(T(b.name), Qt::ElideRight, r.width() - 24);
-        p.drawText(QRect(r.left() + 21, r.top() + 1, r.width() - 23, 18), Qt::AlignLeft | Qt::AlignVCenter, name);
+        const QString key = keyOf.value(b.name);
+        const int kw = key.isEmpty() ? 0 : p.fontMetrics().horizontalAdvance(key) + 6;
+        QString name = p.fontMetrics().elidedText(T(b.name), Qt::ElideRight, r.width() - 24 - kw);
+        p.drawText(QRect(r.left() + 21, r.top() + 1, r.width() - 23 - kw, 18), Qt::AlignLeft | Qt::AlignVCenter, name);
+        if (!key.isEmpty()) {
+            p.setPen(cur ? c.accentText : c.dim);
+            p.drawText(QRect(r.right() - kw - 2, r.top() + 1, kw, 18), Qt::AlignRight | Qt::AlignVCenter, key);
+        }
         // size and a small sample stroke
         QString size = QString::number(b.size, 'f', b.size < 10 ? 1 : 0);
         p.setPen(cur ? c.accentText : c.dim);
@@ -264,10 +278,14 @@ bool BrushSlots::event(QEvent* e) {
         const int i = indexAt(he->pos(), &addCell, &tab);
         if (i >= 0) {
             const BrushSettings& b = app()->brushes()->at(i);
-            QToolTip::showText(he->globalPos(), QStringLiteral("<b>%1</b><br>%2 px<br><i>%3</i>")
+            QString key;
+            for (int q = 0; q < kQuickBrushes; ++q)
+                if (quickBrushName(q) == b.name) key = Shortcuts::instance().get(QStringLiteral("brush.quick%1").arg(q + 1)).toString(QKeySequence::NativeText);
+            QToolTip::showText(he->globalPos(), QStringLiteral("<b>%1</b>%4<br>%2 px<br><i>%3</i>")
                                                     .arg(T(b.name).toHtmlEscaped())
                                                     .arg(b.size, 0, 'f', b.size < 10 ? 1 : 0)
-                                                    .arg(T("Double-click for all settings").toHtmlEscaped()),
+                                                    .arg(T("Double-click for all settings").toHtmlEscaped())
+                                                    .arg(key.isEmpty() ? QString() : QStringLiteral("  (%1)").arg(key.toHtmlEscaped())),
                                this);
             return true;
         }
@@ -301,8 +319,9 @@ void BrushSlots::menu(int i, const QPoint& global) {
         }
         add->addAction(Theme::icon(d.iconKey), T(d.name), this, [this, lib, d] {
             BrushSettings b = d;
-            b.group = m_group;  // goes into the tab that is open
+            b.group = BrushSettings::customGroup();  // the person's own brushes live in "Custom brushes"
             int idx = lib->add(b);
+            setGroup(b.group);
             app()->tools()->selectBrushSlot(idx);
         });
     }
@@ -313,9 +332,31 @@ void BrushSlots::menu(int i, const QPoint& global) {
             QString n = QInputDialog::getText(this, T("Rename brush"), T("Name:"), QLineEdit::Normal, T(lib->at(i).name), &ok);
             if (ok && !n.trimmed().isEmpty()) {
                 BrushSettings s = lib->at(i);
+                const QString old = s.name;
                 s.name = n.trimmed();
+                for (int q = 0; q < kQuickBrushes; ++q)
+                    if (quickBrushName(q) == old) setQuickBrush(q, s.name);  // the key stays with the brush
                 lib->update(i, s);
             }
+        });
+        QMenu* quick = m.addMenu(T("Quick key"));
+        for (int q = 0; q < kQuickBrushes; ++q) {
+            const QKeySequence ks = Shortcuts::instance().get(QStringLiteral("brush.quick%1").arg(q + 1));
+            const QString other = quickBrushName(q);
+            QString label = ks.isEmpty() ? T("Quick brush %1 (no key yet)").arg(q + 1) : ks.toString(QKeySequence::NativeText);
+            if (!other.isEmpty() && other != lib->at(i).name) label += "   " + T("now: %1").arg(T(other));
+            QAction* a = quick->addAction(label, this, [this, lib, i, q] {
+                setQuickBrush(q, lib->at(i).name);
+                update();
+            });
+            a->setCheckable(true);
+            a->setChecked(other == lib->at(i).name);
+        }
+        quick->addSeparator();
+        quick->addAction(T("No key"), this, [this, lib, i] {
+            for (int q = 0; q < kQuickBrushes; ++q)
+                if (quickBrushName(q) == lib->at(i).name) app()->settings().setValue(QStringLiteral("brushes/quick%1").arg(q + 1), QString());
+            update();
         });
         QMenu* icon = m.addMenu(T("Icon"));
         for (const char* k : {"pen", "ink", "pencil", "airbrush", "brush", "watercolor", "marker", "chalk", "bristle", "binary",
@@ -325,6 +366,13 @@ void BrushSlots::menu(int i, const QPoint& global) {
                 BrushSettings s = lib->at(i);
                 s.iconKey = k;
                 lib->update(i, s);
+            });
+        if (lib->at(i).group != BrushSettings::customGroup())
+            m.addAction(T("Move to \"Custom brushes\""), this, [this, lib, i] {
+                BrushSettings s = lib->at(i);
+                s.group = BrushSettings::customGroup();
+                lib->update(i, s);
+                setGroup(s.group);
             });
         QMenu* tabs = m.addMenu(T("Move to tab"));
         QStringList all = BrushSettings::groups();

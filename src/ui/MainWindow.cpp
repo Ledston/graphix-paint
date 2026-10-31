@@ -154,6 +154,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     createDocks();
     createStatusBar();
     Shortcuts::instance().load(app()->settings());
+    applySaiKeysOnce();
     Recorder::instance().setWindow(this);
 
     QSettings& s = app()->settings();
@@ -503,13 +504,14 @@ void MainWindow::createActions() {
 
     // View
     act("view.newview", "New view window", "View", {}, [this] { newView(); });
-    act("view.zoomin", "Zoom in", "View", QKeySequence(Qt::CTRL | Qt::Key_Plus), [view] { view()->zoomIn(); }, "plus");
+    act("view.zoomin", "Zoom in", "View", QKeySequence(Qt::Key_W), [view] { view()->zoomIn(); }, "plus");
     act("view.zoomin2", "Zoom in (=)", "View", QKeySequence(Qt::CTRL | Qt::Key_Equal), [view] { view()->zoomIn(); });
-    act("view.zoomout", "Zoom out", "View", QKeySequence(Qt::CTRL | Qt::Key_Minus), [view] { view()->zoomOut(); }, "minus");
+    act("view.zoomout", "Zoom out", "View", QKeySequence(Qt::Key_Q), [view] { view()->zoomOut(); }, "minus");
+    act("view.zoomout2", "Zoom out (-)", "View", QKeySequence(Qt::CTRL | Qt::Key_Minus), [view] { view()->zoomOut(); });
     act("view.fit", "Fit to window", "View", QKeySequence(Qt::CTRL | Qt::Key_0), [view] { view()->fitToWindow(); }, "zoom");
     act("view.actual", "Actual pixels", "View", QKeySequence(Qt::CTRL | Qt::Key_1), [view] { view()->actualPixels(); }, "image");
-    act("view.rotl", "Rotate view left", "View", QKeySequence(Qt::Key_Minus), [view] { view()->rotateBy(-app()->prefs().rotateStepDeg); });
-    act("view.rotr", "Rotate view right", "View", QKeySequence(Qt::Key_Equal), [view] { view()->rotateBy(app()->prefs().rotateStepDeg); });
+    act("view.rotl", "Rotate view left", "View", QKeySequence(Qt::Key_E), [view] { view()->rotateBy(-app()->prefs().rotateStepDeg); });
+    act("view.rotr", "Rotate view right", "View", QKeySequence(Qt::Key_R), [view] { view()->rotateBy(app()->prefs().rotateStepDeg); });
     act("view.rotreset", "Reset rotation", "View", QKeySequence(Qt::Key_Backspace), [view] { view()->setRotation(0); }, "rotate");
     act("view.reset", "Reset view", "View", QKeySequence(Qt::Key_Home), [view] { view()->resetView(); }, "reset");
     act("view.flip", "Flip view horizontally", "View", QKeySequence(Qt::Key_H), [view] { view()->setFlipped(!view()->isFlipped()); }, "flip");
@@ -578,12 +580,13 @@ void MainWindow::createActions() {
 
     // Tools
     const QList<QPair<QString, QKeySequence>> toolKeys = {
-        {"brush", QKeySequence(Qt::Key_B)}, {"eyedropper", QKeySequence(Qt::Key_I)}, {"move", QKeySequence(Qt::Key_V)},
+        // single letters W Q R E H F, A S D Z C B and the digits are taken by the SAI-style keys below
+        {"brush", {}}, {"eyedropper", QKeySequence(Qt::Key_I)}, {"move", QKeySequence(Qt::Key_V)},
         {"select-rect", QKeySequence(Qt::Key_M)}, {"select-ellipse", QKeySequence(Qt::SHIFT | Qt::Key_M)},
-        {"lasso", QKeySequence(Qt::Key_L)}, {"magic-wand", QKeySequence(Qt::Key_W)}, {"select-brush", QKeySequence(Qt::Key_Q)},
-        {"fill", QKeySequence(Qt::Key_G)}, {"gradient", QKeySequence(Qt::SHIFT | Qt::Key_G)}, {"lasso-fill", QKeySequence(Qt::Key_F)},
-        {"text", QKeySequence(Qt::Key_T)}, {"hand", {}}, {"zoom", QKeySequence(Qt::Key_Z)}, {"rotate", QKeySequence(Qt::Key_R)},
-        {"vpen", QKeySequence(Qt::Key_P)}, {"curve", QKeySequence(Qt::SHIFT | Qt::Key_P)}, {"vedit", QKeySequence(Qt::Key_A)},
+        {"lasso", QKeySequence(Qt::Key_L)}, {"magic-wand", QKeySequence(Qt::SHIFT | Qt::Key_W)}, {"select-brush", QKeySequence(Qt::SHIFT | Qt::Key_Q)},
+        {"fill", QKeySequence(Qt::Key_G)}, {"gradient", QKeySequence(Qt::SHIFT | Qt::Key_G)}, {"lasso-fill", QKeySequence(Qt::SHIFT | Qt::Key_F)},
+        {"text", QKeySequence(Qt::Key_T)}, {"hand", {}}, {"zoom", {}}, {"rotate", QKeySequence(Qt::SHIFT | Qt::Key_R)},
+        {"vpen", QKeySequence(Qt::Key_P)}, {"curve", QKeySequence(Qt::SHIFT | Qt::Key_P)}, {"vedit", QKeySequence(Qt::SHIFT | Qt::Key_A)},
         {"vpressure", {}}, {"vweight", {}}, {"vcolor", {}}, {"veraser", {}}, {"ruler", QKeySequence(Qt::Key_U)},
         {"transform", {}}, {"warp", {}}, {"liquify", {}}};
     for (const auto& tk : toolKeys) {
@@ -592,7 +595,7 @@ void MainWindow::createActions() {
         QString id = tk.first;
         act("tool." + id, t->name(), "Tools", tk.second, [id] { app()->tools()->setCurrent(id); }, t->iconName(), false);
     }
-    act("tool.eraser", "Eraser (toggle)", "Tools", QKeySequence(Qt::Key_E), [] {
+    act("tool.eraser", "Eraser (toggle)", "Tools", QKeySequence(Qt::Key_F), [] {
         BrushLibrary* b = app()->brushes();
         static int last = 0;
         int er = b->eraserIndex();
@@ -603,24 +606,41 @@ void MainWindow::createActions() {
             app()->tools()->selectBrushSlot(er);
         }
     }, "eraser", false);
-    act("brush.smaller", "Smaller brush", "Tools", QKeySequence(Qt::Key_BracketLeft), [] {
+    // [ and ]: the previous / next size of SAI's size list
+    act("brush.smaller", "Previous brush size", "Tools", QKeySequence(Qt::Key_BracketLeft), [] {
         BrushLibrary* b = app()->brushes();
         BrushSettings s = b->current();
-        s.size = std::max(0.5, s.size / (1.0 + app()->prefs().brushStepPercent / 100.0));
+        s.size = brushSizeStep(s.size, -1);
         b->update(b->currentIndex(), s);
+        app()->showStatus(T("Brush size %1 px").arg(s.size, 0, 'g', 4), 1200);
     }, {}, false);
-    act("brush.bigger", "Bigger brush", "Tools", QKeySequence(Qt::Key_BracketRight), [] {
+    act("brush.bigger", "Next brush size", "Tools", QKeySequence(Qt::Key_BracketRight), [] {
         BrushLibrary* b = app()->brushes();
         BrushSettings s = b->current();
-        s.size = std::min(5000.0, s.size * (1.0 + app()->prefs().brushStepPercent / 100.0));
+        s.size = brushSizeStep(s.size, +1);
         b->update(b->currentIndex(), s);
+        app()->showStatus(T("Brush size %1 px").arg(s.size, 0, 'g', 4), 1200);
     }, {}, false);
     act("color.swap", "Swap main and sub color", "Tools", QKeySequence(Qt::Key_X), [] { app()->swapColors(); }, "swap", false);
-    act("color.reset", "Reset colors (black / white)", "Tools", QKeySequence(Qt::Key_D), [] { app()->resetColors(); }, {}, false);
+    act("color.reset", "Reset colors (black / white)", "Tools", QKeySequence(Qt::SHIFT | Qt::Key_D), [] { app()->resetColors(); }, {}, false);
     act("color.transparent", "Transparent color", "Tools", {}, [] { app()->setTransparentColor(!app()->transparentColor()); }, {}, false);
-    for (int i = 0; i < 9; ++i)
-        act(QStringLiteral("brush.slot%1").arg(i + 1), T("Brush slot %1").arg(i + 1), "Tools", QKeySequence(Qt::Key_1 + i),
-            [i] { if (i < app()->brushes()->count()) app()->tools()->selectBrushSlot(i); }, {}, false);
+    // 1..9, 0: the opacity of the brush, 10% .. 100% (like SAI)
+    for (int i = 1; i <= 10; ++i)
+        act(QStringLiteral("brush.opacity%1").arg(i * 10), T("Brush opacity %1%").arg(i * 10), "Tools",
+            QKeySequence(i == 10 ? Qt::Key_0 : Qt::Key(Qt::Key_0 + i)), [i] {
+                BrushLibrary* b = app()->brushes();
+                BrushSettings s = b->current();
+                s.opacity = i / 10.0;
+                b->update(b->currentIndex(), s);
+                if (app()->tools()->current() && app()->tools()->current()->id() != "brush") app()->tools()->setCurrent("brush");
+                app()->showStatus(T("Brush opacity %1%").arg(i * 10), 1200);
+            }, {}, false);
+    // quick keys for brushes (A S D Z C B for the SAI brushes); a brush gets a key from its right-click menu
+    for (int i = 0; i < kQuickBrushes; ++i) {
+        static const Qt::Key keys[6] = {Qt::Key_A, Qt::Key_S, Qt::Key_D, Qt::Key_Z, Qt::Key_C, Qt::Key_B};
+        act(QStringLiteral("brush.quick%1").arg(i + 1), T("Quick brush %1").arg(i + 1), "Tools",
+            i < 6 ? QKeySequence(keys[i]) : QKeySequence(), [i] { selectQuickBrush(i); }, {}, false);
+    }
 
     // Help
     act("help.textures", "Open textures folder", "Help", {}, [] { QDesktopServices::openUrl(QUrl::fromLocalFile(app()->texturesDir())); }, {}, false);
@@ -1940,6 +1960,29 @@ void MainWindow::resetInterface() {
     app()->settings().remove("toolpanel/split");
     app()->preferencesChanged();
     app()->showStatus(T("The interface is back as it was at the start."));
+}
+
+void MainWindow::applySaiKeysOnce() {
+    // The owner's SAI keys win once over keys set earlier by hand (later changes in
+    // Settings > Keyboard shortcuts are kept).
+    QSettings& s = app()->settings();
+    if (s.value("keys/saiLayout", 0).toInt() >= 1) return;
+    Shortcuts& sc = Shortcuts::instance();
+    QList<QPair<QString, QKeySequence>> keys = {
+        {"view.zoomin", QKeySequence(Qt::Key_W)},       {"view.zoomout", QKeySequence(Qt::Key_Q)},
+        {"view.rotr", QKeySequence(Qt::Key_R)},         {"view.rotl", QKeySequence(Qt::Key_E)},
+        {"view.flip", QKeySequence(Qt::Key_H)},         {"brush.smaller", QKeySequence(Qt::Key_BracketLeft)},
+        {"brush.bigger", QKeySequence(Qt::Key_BracketRight)}, {"tool.eraser", QKeySequence(Qt::Key_F)},
+        {"brush.quick1", QKeySequence(Qt::Key_A)},      {"brush.quick2", QKeySequence(Qt::Key_S)},
+        {"brush.quick3", QKeySequence(Qt::Key_D)},      {"brush.quick4", QKeySequence(Qt::Key_Z)},
+        {"brush.quick5", QKeySequence(Qt::Key_C)},      {"brush.quick6", QKeySequence(Qt::Key_B)}};
+    for (int i = 1; i <= 10; ++i) keys << qMakePair(QStringLiteral("brush.opacity%1").arg(i * 10), QKeySequence(i == 10 ? Qt::Key_0 : Qt::Key(Qt::Key_0 + i)));
+    for (const auto& k : keys) {
+        for (QString other = sc.conflict(k.first, k.second); !other.isEmpty(); other = sc.conflict(k.first, k.second)) sc.set(other, {});
+        sc.set(k.first, k.second);
+    }
+    s.setValue("keys/saiLayout", 1);
+    sc.save(s);
 }
 
 void MainWindow::togglePanels() {

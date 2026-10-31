@@ -1300,3 +1300,28 @@ The interface is back as it was at the start.	Интерфейс вернулс�
 Toolbar	Панель инструментов сверху
 Tools in the tool panel	Инструменты на панели
 Window	Окно
+AirBrush (SAI)	Аэрограф (SAI)
+Pencil (SAI)	Карандаш (SAI)
+blur	blur
+b blur	b blur
+111	111
+333	333
+Fabric 01	Fabric 01
+Brush opacity %1%	Прозрачность кисти %1%
+Brush size %1 px	Размер кисти %1 px
+Custom brushes	Пользовательские
+Like "Prs. Hard <-> Soft" in SAI: 100 = as the pressure curve, less = needs a harder press, more = a light touch is enough.	Как «Prs. Hard ⇔ Soft» в SAI: 100 — как по кривой нажима, меньше — нужно давить сильнее, больше — хватает лёгкого касания.
+Like "Prs. Hard <-> Soft: Blending" in SAI: 100 = as the pressure curve, more = a light touch is enough.	Как «Prs. Hard ⇔ Soft: Blending» в SAI: 100 — как по кривой нажима, больше — хватает лёгкого касания.
+Next brush size	Следующий размер кисти
+Previous brush size	Предыдущий размер кисти
+Pressure softness: density	Мягкость нажима: плотность
+Pressure softness: mixing	Мягкость нажима: смешивание
+Pressure softness: size	Мягкость нажима: размер
+Quick brush %1	Быстрая кисть %1
+Quick brush %1 (no key yet)	Быстрая кисть %1 (без клавиши)
+Quick key	Быстрая клавиша
+No key	Без клавиши
+now: %1	сейчас: %1
+Move to "Custom brushes"	Перенести в «Пользовательские»
+No brush on this key yet: right-click a brush and choose Quick key.	На этой клавише пока нет кисти: правый щелчок по кисти → «Быстрая клавиша».
+Zoom out (-)	Отдалить (-)

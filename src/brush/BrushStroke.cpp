@@ -120,9 +120,17 @@ float BrushStroke::mapPressure(double p) const {
     return clamp01(float(p));
 }
 
+// SAI's "Prs. Hard <-> Soft": 100 leaves the pressure as it is, 200 = a light touch is enough,
+// 0 = it takes a hard press.
+static double soften(double pr, double softness) {
+    pr = std::clamp(pr, 0.0, 1.0);
+    if (std::abs(softness - 100.0) < 0.5) return pr;
+    return std::pow(pr, std::pow(2.0, (100.0 - softness) / 50.0));
+}
+
 double BrushStroke::diameterFor(double pr, double taper) const {
     const BrushSettings& b = m_ctx.brush;
-    double f = b.sizePressure ? b.minSize + (1.0 - b.minSize) * pr : 1.0;
+    double f = b.sizePressure ? b.minSize + (1.0 - b.minSize) * soften(pr, b.sizeSoftness) : 1.0;
     return std::max(0.0, b.size * f * taper);
 }
 
@@ -306,7 +314,7 @@ void BrushStroke::dab(Emitter& e, const PathPoint& p, const QPointF& dir) {
         double a = m_uni(m_rng) * 2 * M_PI, r = std::sqrt(m_uni(m_rng)) * b.scatter * diameter;
         c += QPointF(std::cos(a) * r, std::sin(a) * r);
     }
-    double density = b.density * (b.densityPressure ? b.minDensity + (1.0 - b.minDensity) * pr : 1.0);
+    double density = b.density * (b.densityPressure ? b.minDensity + (1.0 - b.minDensity) * soften(pr, b.densitySoftness) : 1.0);
     if (b.opacityJitter > 0) density *= 1.0 - b.opacityJitter * m_uni(m_rng);
     if (density <= 0) return;
 
@@ -387,7 +395,7 @@ void BrushStroke::dab(Emitter& e, const PathPoint& p, const QPointF& dir) {
     }
     if (b.particles > 0) {
         // stipple: dots scattered inside the brush; light pressure = fewer dots
-        double want = b.particles * (b.densityPressure ? b.minDensity + (1.0 - b.minDensity) * pr : 1.0);
+        double want = b.particles * (b.densityPressure ? b.minDensity + (1.0 - b.minDensity) * soften(pr, b.densitySoftness) : 1.0);
         int count = int(want);
         if (m_uni(m_rng) < want - count) ++count;
         for (int k = 0; k < count; ++k) {
@@ -619,9 +627,12 @@ void BrushStroke::directDab(Carry& carry, const float* base, const DabParams& d,
                 M[0] = c[0]; M[1] = c[1]; M[2] = c[2]; M[3] = 1;
             }
             float bl = float(b.blending);
-            if (b.blendingPressure) bl = clamp01(bl * (1.5f - pr));
+            if (b.blendingPressure) bl = clamp01(bl * (1.5f - float(soften(pr, b.blendSoftness))));
+            // Dilution waters down the brush's own color only (as in SAI): with full blending the
+            // brush moves the colors under it and does not wash them away.
+            const float dil = 1.f - float(b.dilution);
             float target[4];
-            for (int k = 0; k < 4; ++k) target[k] = M[k] * (1 - bl) + s[k] * bl;
+            for (int k = 0; k < 4; ++k) target[k] = M[k] * dil * (1 - bl) + s[k] * bl;
             float pers = float(b.persistence);
             if (!carry.has) {
                 std::copy(target, target + 4, carry.c);
@@ -629,8 +640,7 @@ void BrushStroke::directDab(Carry& carry, const float* base, const DabParams& d,
             } else {
                 for (int k = 0; k < 4; ++k) carry.c[k] = target[k] * (1 - pers) + carry.c[k] * pers;
             }
-            float dil = 1.f - float(b.dilution);
-            for (int k = 0; k < 4; ++k) paint[k] = carry.c[k] * dil;
+            for (int k = 0; k < 4; ++k) paint[k] = carry.c[k];
         } else {  // Smudge
             float pers = float(b.persistence);
             if (!carry.has) {

@@ -67,6 +67,9 @@ QJsonObject BrushSettings::toJson() const {
     o["dilution"] = dilution;
     o["persistence"] = persistence;
     o["blendingPressure"] = blendingPressure;
+    o["sizeSoftness"] = sizeSoftness;
+    o["densitySoftness"] = densitySoftness;
+    o["blendSoftness"] = blendSoftness;
     o["fringe"] = fringe;
     o["sizeJitter"] = sizeJitter;
     o["angleJitter"] = angleJitter;
@@ -136,6 +139,9 @@ BrushSettings BrushSettings::fromJson(const QJsonObject& o) {
     b.dilution = std::clamp(d("dilution", b.dilution), 0.0, 1.0);
     b.persistence = std::clamp(d("persistence", b.persistence), 0.0, 1.0);
     b.blendingPressure = bl("blendingPressure", b.blendingPressure);
+    b.sizeSoftness = std::clamp(d("sizeSoftness", 100), 0.0, 200.0);
+    b.densitySoftness = std::clamp(d("densitySoftness", 100), 0.0, 200.0);
+    b.blendSoftness = std::clamp(d("blendSoftness", 100), 0.0, 200.0);
     b.fringe = std::clamp(d("fringe", b.fringe), 0.0, 1.0);
     b.sizeJitter = std::clamp(d("sizeJitter", 0), 0.0, 1.0);
     b.angleJitter = std::clamp(d("angleJitter", 0), 0.0, 1.0);
@@ -236,6 +242,7 @@ QVector<BrushSettings> BrushSettings::defaults() {
     }
     v << defaultsSince(2);
     v << defaultsSince(3);
+    v << defaultsSince(4);
     for (BrushSettings& b : v)
         if (b.group.isEmpty()) b.group = defaultGroupFor(b.name);
     return v;
@@ -244,7 +251,8 @@ QVector<BrushSettings> BrushSettings::defaults() {
 QVector<BrushSettings> BrushSettings::defaultsSince(int version) {
     QVector<BrushSettings> v;
     if (version == 3) return decorDefaults();
-    if (version > 3) return v;
+    if (version == 4) return customDefaults();
+    if (version > 4) return v;
     // ---- hatching: one stroke draws a bundle of lines
     {
         BrushSettings b; b.name = "Hatching"; b.iconKey = "hatching"; b.group = "Hatching";
@@ -423,7 +431,100 @@ QVector<BrushSettings> BrushSettings::decorDefaults() {
     return v;
 }
 
-QStringList BrushSettings::groups() { return {"Basic", "Paint", "Hatching", "Effects", "Decor", "Backgrounds", "Erasers"}; }
+QStringList BrushSettings::groups() {
+    return {customGroup(), "Basic", "Paint", "Hatching", "Effects", "Decor", "Backgrounds", "Erasers"};
+}
+
+// The owner's SAI 2 brushes, from the screenshots of SAI's brush and Tool Preference windows.
+// SAI -> GraphiX: Density -> stroke opacity, Min Density -> the density at no pressure,
+// the 5 edge shapes -> hardness 0 / .25 / .5 / .75 / 1, texture Intensity (plus half the
+// paper Messiness) -> texture strength, Scale % -> texture scale, Blending / Dilution /
+// Persistence -> the same (persistence 100 kept just under 1 so the brush still picks up color),
+// "Prs. Hard <-> Soft" -> the softness of size, density and mixing.
+QVector<BrushSettings> BrushSettings::customDefaults() {
+    QVector<BrushSettings> v;
+    auto sai = [](const char* name, const char* icon, BrushEngine e, double size, double minSize, double density, double edge) {
+        BrushSettings b;
+        b.name = name;
+        b.iconKey = icon;
+        b.group = customGroup();
+        b.engine = e;
+        b.size = size;
+        b.minSize = minSize;
+        b.sizePressure = minSize < 1.0;
+        b.opacity = density;
+        b.density = 1.0;
+        b.minDensity = 0.0;
+        b.densityPressure = true;
+        b.hardness = edge;
+        b.spacing = 0.05;
+        return b;
+    };
+    auto texture = [](BrushSettings& b, const char* tex, double intensity, double mess, double scalePct, bool invert) {
+        b.texture = tex;
+        b.textureStrength = std::clamp((intensity + mess * 0.5) / 100.0, 0.0, 1.0);
+        b.textureScale = scalePct / 100.0;
+        b.textureInvert = invert;
+    };
+    auto mixing = [](BrushSettings& b, double blending, double dilution, double persistence) {
+        b.blending = blending / 100.0;
+        b.dilution = dilution / 100.0;
+        b.persistence = std::min(0.97, persistence / 100.0);
+        // full blending only moves the colors (pressure would let water in and thin them)
+        b.blendingPressure = blending < 100;
+    };
+    {   // A: the main brush, line art and sketches
+        BrushSettings b = sai("Pencil (SAI)", "pencil", BrushEngine::Paint, 9, 0.15, 1.0, 1.0);
+        b.sizeSoftness = 100;
+        b.densitySoftness = 100;
+        b.spacing = 0.06;
+        v << b;
+    }
+    {   // S: smears the colors
+        BrushSettings b = sai("111", "blender", BrushEngine::Mix, 40, 0.51, 0.40, 0.5);
+        texture(b, "Paper", 28, 20, 67, true);
+        mixing(b, 100, 100, 100);
+        b.sizeSoftness = 118;
+        b.densitySoftness = 70;
+        b.blendSoftness = 135;
+        v << b;
+    }
+    {   // D: an ordinary hard brush for the base colors
+        BrushSettings b = sai("333", "brush", BrushEngine::Mix, 10, 0.25, 0.60, 0.25);
+        texture(b, "Paper", 40, 10, 59, true);
+        mixing(b, 19, 32, 72);
+        b.sizeSoftness = 129;
+        b.densitySoftness = 38;
+        b.blendSoftness = 10;
+        v << b;
+    }
+    {   // Z: soft blur, softly melts the colors together
+        BrushSettings b = sai("blur", "blur", BrushEngine::Mix, 350, 1.0, 0.20, 0.0);
+        texture(b, "Paper", 30, 15, 51, true);
+        mixing(b, 100, 100, 91);
+        b.sizeSoftness = 200;
+        b.densitySoftness = 99;
+        b.blendSoftness = 171;
+        v << b;
+    }
+    {   // C: airbrush to spread colors
+        BrushSettings b = sai("AirBrush (SAI)", "airbrush", BrushEngine::Paint, 8, 0.35, 0.30, 0.25);
+        texture(b, "Fabric 01", 20, 7, 70, false);
+        b.sizeSoftness = 144;
+        b.densitySoftness = 0;
+        v << b;
+    }
+    {   // B: a little firmer than the soft blur, softer than the smearing brush
+        BrushSettings b = sai("b blur", "blender", BrushEngine::Mix, 35, 1.0, 0.40, 0.25);
+        texture(b, "Paper", 45, 20, 56, true);
+        mixing(b, 100, 100, 100);
+        b.sizeSoftness = 200;
+        b.densitySoftness = 71;
+        b.blendSoftness = 50;
+        v << b;
+    }
+    return v;
+}
 
 QString BrushSettings::defaultGroupFor(const QString& name) {
     static const QHash<QString, QString> map = {

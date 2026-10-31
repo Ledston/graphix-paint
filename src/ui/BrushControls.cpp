@@ -199,6 +199,10 @@ QList<BrushControls::Page> BrushControls::build(QWidget* parent, bool compact) {
         pr->addWidget(check(w, T("Density"), &s.densityPressure));
         pr->addStretch();
         v->addLayout(pr);
+        const QString softTip = T("Like \"Prs. Hard <-> Soft\" in SAI: 100 = as the pressure curve, less = needs a harder press, "
+                                  "more = a light touch is enough.");
+        v->addWidget(bar(w, T("Pressure softness: size"), 0, 200, 0, &s.sizeSoftness, 1, "", false, softTip));
+        v->addWidget(bar(w, T("Pressure softness: density"), 0, 200, 0, &s.densitySoftness, 1, "", false, softTip));
         pages << Page{"basic", T("Brush"), "brush", w, always};
     }
     // ---- mixing
@@ -210,6 +214,8 @@ QList<BrushControls::Page> BrushControls::build(QWidget* parent, bool compact) {
         v->addWidget(bar(w, T("Persistence"), 0, 1, 2, &s.persistence, 100, "%", false, T("How long the picked up color stays in the brush")));
         v->addWidget(bar(w, T("Fringe"), 0, 1, 2, &s.fringe, 100, "%", false, T("Darker edges, like watercolor")));
         v->addWidget(check(w, T("Light pressure mixes more"), &s.blendingPressure));
+        v->addWidget(bar(w, T("Pressure softness: mixing"), 0, 200, 0, &s.blendSoftness, 1, "", false,
+                         T("Like \"Prs. Hard <-> Soft: Blending\" in SAI: 100 = as the pressure curve, more = a light touch is enough.")));
         pages << Page{"mixing", T("Mixing"), "blender", w,
                       [](const BrushSettings& b) { return b.engine == BrushEngine::Mix || b.engine == BrushEngine::Smudge; }};
     }

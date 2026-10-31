@@ -47,6 +47,8 @@
 #include "ui/MaterialsPanel.h"
 #include "tools/FocusLinesTool.h"
 #include "tools/SelectTools.h"
+#include "app/Shortcuts.h"
+#include "core/Textures.h"
 #include "ui/ColorPanel.h"
 #include <QScrollArea>
 #include <QScrollBar>
@@ -1142,6 +1144,112 @@ int main(int argc, char** argv) {
             for (QWidget* c : cp->findChildren<QWidget*>())
                 if (QString(c->metaObject()->className()).contains("GradientSlider") && c->isVisibleTo(cp)) ++visibleSliders;
         CHECK(visibleSliders == 6);
+    }, w);
+
+    scenario("SAI keys and the owner's brushes", [](MainWindow& w) {
+        BrushLibrary* lib = app()->brushes();
+        // the six brushes from SAI 2, in the "Custom brushes" tab
+        const QStringList mine = {"Pencil (SAI)", "111", "333", "blur", "AirBrush (SAI)", "b blur"};
+        for (const QString& n : mine) {
+            const int i = lib->indexOfName(n);
+            CHECK(i >= 0 && lib->at(i).group == BrushSettings::customGroup());
+        }
+        CHECK(TextureLibrary::instance().get(TextureKind::Brush, "Paper") && TextureLibrary::instance().get(TextureKind::Paper, "Fabric 01"));
+        // every key is on exactly one command
+        QHash<QString, QAction*> byId;
+        for (const ShortcutInfo& i : Shortcuts::instance().all())
+            if (i.action) byId.insert(i.id, i.action);
+        const QList<QPair<QString, QKeySequence>> want = {
+            {"view.zoomin", QKeySequence(Qt::Key_W)},  {"view.zoomout", QKeySequence(Qt::Key_Q)}, {"view.rotr", QKeySequence(Qt::Key_R)},
+            {"view.rotl", QKeySequence(Qt::Key_E)},    {"view.flip", QKeySequence(Qt::Key_H)},    {"brush.smaller", QKeySequence(Qt::Key_BracketLeft)},
+            {"brush.bigger", QKeySequence(Qt::Key_BracketRight)}, {"tool.eraser", QKeySequence(Qt::Key_F)},
+            {"brush.quick1", QKeySequence(Qt::Key_A)}, {"brush.quick2", QKeySequence(Qt::Key_S)}, {"brush.quick3", QKeySequence(Qt::Key_D)},
+            {"brush.quick4", QKeySequence(Qt::Key_Z)}, {"brush.quick5", QKeySequence(Qt::Key_C)}, {"brush.quick6", QKeySequence(Qt::Key_B)},
+            {"brush.opacity40", QKeySequence(Qt::Key_4)}, {"brush.opacity100", QKeySequence(Qt::Key_0)}};
+        for (const auto& k : want) {
+            QAction* a = byId.value(k.first);
+            CHECK(a && a->shortcut() == k.second);
+            int same = 0;
+            for (QAction* o : w.findChildren<QAction*>())
+                if (o->shortcut() == k.second) ++same;
+            if (same != 1) std::fprintf(stderr, "NOTE key %s is on %d commands\n", qPrintable(k.second.toString()), same);
+            CHECK(same == 1);
+        }
+        auto run = [&](const char* id) {
+            if (QAction* a = byId.value(id)) a->trigger();
+            pump(20);
+        };
+        // brushes on A S D Z C B
+        run("brush.quick1");
+        CHECK(lib->current().name == "Pencil (SAI)" && app()->tools()->current()->id() == "brush");
+        run("brush.quick2");
+        CHECK(lib->current().name == "111");
+        run("brush.quick6");
+        CHECK(lib->current().name == "b blur");
+        // digits: opacity
+        run("brush.opacity40");
+        CHECK(std::abs(lib->current().opacity - 0.4) < 1e-9);
+        run("brush.opacity100");
+        CHECK(std::abs(lib->current().opacity - 1.0) < 1e-9);
+        // [ ]: SAI's sizes
+        run("brush.quick1");
+        CHECK(std::abs(lib->current().size - 9) < 1e-9);
+        run("brush.bigger");
+        CHECK(std::abs(lib->current().size - 10) < 1e-9);
+        run("brush.bigger");
+        CHECK(std::abs(lib->current().size - 12) < 1e-9);
+        run("brush.smaller");
+        run("brush.smaller");
+        CHECK(std::abs(lib->current().size - 9) < 1e-9);
+        // F: eraser and back
+        run("tool.eraser");
+        CHECK(lib->current().engine == BrushEngine::Erase);
+        run("tool.eraser");
+        CHECK(lib->current().name == "Pencil (SAI)");
+        // W Q R E H: the view
+        const double z = view()->zoom();
+        run("view.zoomin");
+        const double z1 = view()->zoom();
+        CHECK(z1 > z);
+        run("view.zoomout");
+        CHECK(view()->zoom() < z1);
+        const double r0 = view()->rotation();
+        run("view.rotr");
+        CHECK(view()->rotation() > r0);
+        run("view.rotl");
+        CHECK(std::abs(view()->rotation() - r0) < 1e-6);
+        const bool f0 = view()->isFlipped();
+        run("view.flip");
+        CHECK(view()->isFlipped() != f0);
+        run("view.flip");
+        // the brush tab of the owner's brushes, and a quick key moved to another brush
+        if (auto* bs = w.findChild<BrushSlots*>()) {
+            bs->setGroup(BrushSettings::customGroup());
+            pump(40);
+            if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/custom_brushes.png");
+        }
+        setQuickBrush(0, "333");
+        CHECK(quickBrushName(0) == "333" && quickBrushName(2).isEmpty());
+        setQuickBrush(0, "Pencil (SAI)");
+        setQuickBrush(2, "333");
+        // the owner's brushes paint: the smearing brush moves color without washing it out
+        Document* d = view()->doc();
+        auto* l = static_cast<RasterLayer*>(d->currentLayer());
+        l->pixels.fillRect(QRect(100, 100, 300, 200), 0xffdd2222u);
+        l->pixels.fillRect(QRect(400, 100, 300, 200), 0xff2244ddu);
+        d->pixelsChanged(d->bounds(), l);
+        run("brush.quick2");
+        dragCanvas(QPointF(300, 200), QPointF(500, 200));
+        pump(30);
+        int holes = 0;
+        for (int x = 280; x <= 520; x += 4)
+            if ((l->pixels.pixel(x, 200) >> 24) < 250) ++holes;
+        const quint32 mid = l->pixels.pixel(420, 200);
+        std::fprintf(stderr, "INFO after smearing: %d see-through pixels, at 420: %08x\n", holes, mid);
+        CHECK(holes == 0);
+        CHECK(((mid >> 16) & 0xff) > 0x30);  // red carried into the blue
+        d->undo();
+        if (QAction* a = byId.value("brush.opacity100")) a->trigger();
     }, w);
 
     scenario("reference over everything", [](MainWindow& w) {
