@@ -11,7 +11,7 @@ class QVBoxLayout;
 
 namespace gx {
 
-// SAI-style value bar: a slim bar with the label and value drawn inside.
+// Value bar: a slim bar with the label and value drawn inside.
 // Click or drag to set, wheel to step, double-click to type a number.
 class ValueBar : public QWidget {
     Q_OBJECT
@@ -24,6 +24,7 @@ public:
     void setSuffix(const QString& s) { m_suffix = s; update(); }
     void setDisplayScale(double s) { m_displayScale = s; update(); }  // e.g. 100 for percent of 0..1
     void setLabel(const QString& l) { m_label = l; update(); }
+    QString label() const { return m_label; }
     QSize sizeHint() const override { return QSize(160, 20); }
     QSize minimumSizeHint() const override { return QSize(60, 18); }
 

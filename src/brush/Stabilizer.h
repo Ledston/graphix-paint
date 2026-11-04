@@ -13,7 +13,7 @@ struct InputSample {
     double timeMs = 0;
 };
 
-// Smooths raw pen input. Modes follow PaintTool SAI:
+// Smooths raw pen input. Modes:
 //  - Average: numeric levels; a moving average over recent samples, the stroke
 //    catches up with the pen when it is lifted.
 //  - Speed ("S" levels): smoothing depends on speed. Slow careful lines get a lot

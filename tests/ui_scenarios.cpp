@@ -61,6 +61,13 @@
 #include <QTemporaryDir>
 #include <QWheelEvent>
 #include "core/LiquifyField.h"
+#include "app/LayoutKeys.h"
+#include "ui/RadialMenu.h"
+#include <QCheckBox>
+#include <QListWidget>
+#include <QLineEdit>
+#include <QSpinBox>
+#include <QEnterEvent>
 #include "app/Shortcuts.h"
 #include "core/Textures.h"
 #include "ui/ColorPanel.h"
@@ -1168,9 +1175,9 @@ int main(int argc, char** argv) {
         CHECK(visibleSliders == 6);
     }, w);
 
-    scenario("SAI keys and the owner's brushes", [](MainWindow& w) {
+    scenario("drawing keys and the owner's brushes", [](MainWindow& w) {
         BrushLibrary* lib = app()->brushes();
-        // the six brushes from SAI 2, in the "Custom brushes" tab
+        // the owner's six brushes, in the "Custom brushes" tab
         const QStringList mine = {"Pencil (SAI)", "111", "333", "blur", "AirBrush (SAI)", "b blur"};
         for (const QString& n : mine) {
             const int i = lib->indexOfName(n);
@@ -1202,8 +1209,10 @@ int main(int argc, char** argv) {
             pump(20);
         };
         // brushes on A S D Z C B
-        run("brush.quick1");
-        CHECK(lib->current().name == "Pencil (SAI)" && app()->tools()->current()->id() == "brush");
+        run("brush.quick1");  // A: "333", D: the pencil
+        CHECK(lib->current().name == "333" && app()->tools()->current()->id() == "brush");
+        run("brush.quick3");
+        CHECK(lib->current().name == "Pencil (SAI)");
         run("brush.quick2");
         CHECK(lib->current().name == "111");
         run("brush.quick6");
@@ -1213,8 +1222,8 @@ int main(int argc, char** argv) {
         CHECK(std::abs(lib->current().opacity - 0.4) < 1e-9);
         run("brush.opacity100");
         CHECK(std::abs(lib->current().opacity - 1.0) < 1e-9);
-        // [ ]: SAI's sizes
-        run("brush.quick1");
+        // [ ]: the size list
+        run("brush.quick3");
         CHECK(std::abs(lib->current().size - 9) < 1e-9);
         run("brush.bigger");
         CHECK(std::abs(lib->current().size - 10) < 1e-9);
@@ -1250,10 +1259,11 @@ int main(int argc, char** argv) {
             pump(40);
             if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/custom_brushes.png");
         }
+        CHECK(quickBrushName(0) == "333" && quickBrushName(2) == "Pencil (SAI)");
+        setQuickBrush(0, "Pencil (SAI)");  // one key per brush: D loses the pencil
+        CHECK(quickBrushName(0) == "Pencil (SAI)" && quickBrushName(2).isEmpty());
         setQuickBrush(0, "333");
-        CHECK(quickBrushName(0) == "333" && quickBrushName(2).isEmpty());
-        setQuickBrush(0, "Pencil (SAI)");
-        setQuickBrush(2, "333");
+        setQuickBrush(2, "Pencil (SAI)");
         // the owner's brushes paint: the smearing brush moves color without washing it out
         Document* d = view()->doc();
         auto* l = static_cast<RasterLayer*>(d->currentLayer());
@@ -1272,6 +1282,298 @@ int main(int argc, char** argv) {
         CHECK(((mid >> 16) & 0xff) > 0x30);  // red carried into the blue
         d->undo();
         if (QAction* a = byId.value("brush.opacity100")) a->trigger();
+    }, w);
+
+    scenario("shortcuts on a Russian keyboard layout; opacity of mixing brushes", [](MainWindow& w) {
+        BrushLibrary* lib = app()->brushes();
+        CHECK(LayoutKeys::latinKeyFor(0x0425) == Qt::Key_BracketLeft && LayoutKeys::latinKeyFor(0x042a) == Qt::Key_BracketRight);
+        CHECK(LayoutKeys::latinKeyFor(0x0424) == Qt::Key_A && LayoutKeys::latinKeyFor(0x0426) == Qt::Key_W);
+        CHECK(LayoutKeys::latinKeyFor(Qt::Key_A) == 0 && LayoutKeys::latinKeyFor(Qt::Key_F5) == 0);
+        view()->setFocus();
+        pump(20);
+        auto press = [&](int key, QWidget* to) {  // as Qt delivers a key: shortcut override, press, release
+            QKeyEvent so(QEvent::ShortcutOverride, key, Qt::NoModifier, QString(QChar(key)));
+            QCoreApplication::sendEvent(to, &so);
+            QKeyEvent p(QEvent::KeyPress, key, Qt::NoModifier, QString(QChar(key)));
+            QCoreApplication::sendEvent(to, &p);  // Qt asks the shortcut override once more here: it must not run twice
+            QKeyEvent r(QEvent::KeyRelease, key, Qt::NoModifier, QString(QChar(key)));
+            QCoreApplication::sendEvent(to, &r);
+            pump(20);
+        };
+        press(0x0412, view());  // "В" = D: the pencil
+        CHECK(lib->current().name == "Pencil (SAI)");
+        const double s0 = lib->current().size;
+        press(0x042a, view());  // "Ъ" = ]
+        CHECK(std::abs(lib->current().size - brushSizeStep(s0, +1)) < 1e-9);  // one step, not two
+        press(0x0425, view());  // "Х" = [
+        CHECK(std::abs(lib->current().size - s0) < 1e-9);
+        press(0x0424, view());  // "Ф" = A: "333"
+        CHECK(lib->current().name == "333");
+        // typing in a text field stays typing
+        QLineEdit* hex = nullptr;
+        for (QLineEdit* e : w.findChildren<QLineEdit*>())
+            if (e->isVisible()) { hex = e; break; }
+        CHECK(hex != nullptr);
+        if (hex) {
+            hex->setFocus();
+            pump(20);
+            press(0x0412, hex);
+            CHECK(lib->current().name == "333");
+            view()->setFocus();
+        }
+        // the number field gives the keys back when the pen comes to the canvas
+        for (QSpinBox* sb : w.findChildren<QSpinBox*>())
+            if (sb->isVisible() && sb->toolTip() == T("Stabilizer strength")) {
+                sb->setFocus();
+                pump(20);
+                QEnterEvent en(QPointF(50, 50), QPointF(50, 50), view()->mapToGlobal(QPointF(50, 50)));
+                QCoreApplication::sendEvent(view(), &en);
+                pump(20);
+                CHECK(QApplication::focusWidget() == view());
+                break;
+            }
+        // the opacity keys work on mixing brushes too ("333" mixes)
+        Document* d = view()->doc();
+        auto* l = static_cast<RasterLayer*>(d->currentLayer());
+        auto alphaAt = [&](int x, int y) { return int(l->pixels.pixel(x, y) >> 24); };
+        press(Qt::Key_0, view());
+        CHECK(std::abs(lib->current().opacity - 1.0) < 1e-9);
+        dragCanvas(QPointF(150, 200), QPointF(650, 200));
+        press(Qt::Key_3, view());
+        CHECK(std::abs(lib->current().opacity - 0.3) < 1e-9);
+        dragCanvas(QPointF(150, 400), QPointF(650, 400));
+        const int full = alphaAt(400, 200), third = alphaAt(400, 400);
+        std::fprintf(stderr, "INFO mixing brush alpha: 100%% -> %d, 30%% -> %d\n", full, third);
+        CHECK(full > 150 && third > 20 && third < full * 0.45);
+        press(Qt::Key_0, view());
+        d->undo();
+        d->undo();
+    }, w);
+
+    scenario("brush panel, brush settings window, own stabilizer, cursor, hold keys, quick menu", [](MainWindow& w) {
+        BrushLibrary* lib = app()->brushes();
+        QHash<QString, QAction*> byId;
+        for (const ShortcutInfo& i : Shortcuts::instance().all())
+            if (i.action) byId.insert(i.id, i.action);
+        auto run = [&](const char* id) {
+            if (QAction* a = byId.value(id)) a->trigger();
+            pump(30);
+        };
+        run("brush.quick1");  // "333"
+        // the panel under the brushes: size (with the quick sizes), the edge buttons, opacity; nothing else
+        auto* panel = w.findChild<BrushSettingsWidget*>();
+        CHECK(panel != nullptr);
+        if (panel) {
+            QStringList bars;
+            for (ValueBar* b : panel->findChildren<ValueBar*>())
+                if (b->isVisibleTo(panel)) bars << b->label();
+            std::fprintf(stderr, "INFO panel bars: %s\n", qPrintable(bars.join(", ")));
+            CHECK(bars.size() == 2 && bars.contains(T("Size")) && bars.contains(T("Opacity")));
+            QWidget* edges = nullptr;
+            for (QWidget* c : panel->findChildren<QWidget*>())
+                if (c->toolTip() == T("Edge: from very soft to very hard")) edges = c;
+            CHECK(edges != nullptr);
+            if (edges) {
+                const int n = int(BrushSettings::hardnessPresets().size());
+                CHECK(n == 7);
+                auto clickAt = [&](int i) {
+                    const QPointF p((i + 0.5) * edges->width() / double(n), edges->height() / 2.0);
+                    QMouseEvent pr(QEvent::MouseButtonPress, p, edges->mapToGlobal(p), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+                    QCoreApplication::sendEvent(edges, &pr);
+                    QMouseEvent rl(QEvent::MouseButtonRelease, p, edges->mapToGlobal(p), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+                    QCoreApplication::sendEvent(edges, &rl);
+                    pump(20);
+                };
+                const double h0 = lib->current().hardness;
+                clickAt(0);
+                CHECK(std::abs(lib->current().hardness - 0.0) < 1e-9);
+                clickAt(6);
+                CHECK(std::abs(lib->current().hardness - 1.0) < 1e-9);
+                clickAt(3);
+                CHECK(std::abs(lib->current().hardness - BrushSettings::hardnessPresets()[3]) < 1e-9);
+                BrushSettings b = lib->current();
+                b.hardness = h0;
+                lib->update(lib->currentIndex(), b);
+            }
+            if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/brush_panel.png");
+        }
+        // the settings window: everything still there, the rare things under "Advanced"
+        BrushEditorDialog::open(lib->currentIndex(), &w);
+        pump(150);
+        QDialog* ed = nullptr;
+        for (QWidget* t : QApplication::topLevelWidgets())
+            if (t->isVisible() && t->objectName() == "brushEditor") ed = qobject_cast<QDialog*>(t);
+        CHECK(ed != nullptr);
+        if (ed) {
+            auto* list = ed->findChild<QListWidget*>();
+            QStringList rows;
+            for (int i = 0; list && i < list->count(); ++i) rows << list->item(i)->text();
+            std::fprintf(stderr, "INFO brush window pages: %s\n", qPrintable(rows.join(" | ")));
+            CHECK(rows.size() == 9 && rows[0] == T("Brush") && rows[1] == T("Stabilizer and cursor") && rows[2] == T("Advanced"));
+            QStringList labels;
+            for (ValueBar* b : ed->findChildren<ValueBar*>()) labels << b->label();
+            for (const char* want : {"Size", "Min size", "Opacity", "Density", "Min density", "Edge hardness", "Shape strength", "Strength",
+                                     "Texture size", "Blending", "Dilution", "Persistence", "Fringe", "Spacing", "Roundness", "Angle",
+                                     "Texture density", "Lines", "Dots", "Size jitter", "Scatter", "Taper start", "Spray rate", "Stabilizer strength"})
+                if (!labels.contains(T(want))) {
+                    std::fprintf(stderr, "NOTE missing setting %s\n", want);
+                    CHECK(false);
+                }
+            // an own stabilizer for this brush, and the toolbar follows it
+            QCheckBox* own = nullptr;
+            for (QCheckBox* c : ed->findChildren<QCheckBox*>())
+                if (c->text() == T("Own stabilizer for this brush")) own = c;
+            CHECK(own != nullptr && !own->isChecked());
+            QSpinBox* level = nullptr;
+            for (QSpinBox* sb : w.findChildren<QSpinBox*>())
+                if (sb->toolTip() == T("Stabilizer strength")) level = sb;
+            CHECK(level != nullptr);
+            if (own && level) {
+                const int global = app()->stabilizerLevel();
+                own->setChecked(true);
+                pump(30);
+                CHECK(lib->current().stabilizerMode >= 0);
+                for (ValueBar* b : ed->findChildren<ValueBar*>())
+                    if (b->label() == T("Stabilizer strength")) {
+                        b->setValue(22);
+                        Q_EMIT b->valueChanged(22);
+                    }
+                pump(30);
+                CHECK(lib->current().stabilizerLevel == 22 && level->value() == 22 && app()->stabilizerLevel() == global);
+                level->setValue(18);  // the toolbar edits the brush's own one
+                pump(30);
+                CHECK(lib->current().stabilizerLevel == 18 && app()->stabilizerLevel() == global);
+                if (qEnvironmentVariableIsSet("GX_SHOTS")) {
+                    ed->grab().save(qEnvironmentVariable("GX_SHOTS") + "/brush_window.png");
+                    list->setCurrentRow(1);
+                    pump(30);
+                    ed->grab().save(qEnvironmentVariable("GX_SHOTS") + "/brush_window_stab.png");
+                }
+                run("brush.quick2");  // "111" has none: the toolbar shows the common one
+                CHECK(level->value() == global);
+                run("brush.quick1");
+                CHECK(level->value() == 18);
+            }
+            ed->accept();
+            pump(50);
+        }
+        // the brush's own cursor
+        app()->tools()->setCurrent("brush");
+        pump(30);
+        {
+            BrushSettings b = lib->current();
+            b.cursorStyle = 4;
+            lib->update(lib->currentIndex(), b);
+            pump(20);
+            const auto look = view()->cursorLook();
+            CHECK(look.dot && !look.outline && !look.cross);
+            b.cursorStyle = 3;
+            lib->update(lib->currentIndex(), b);
+            CHECK(view()->cursorLook().cross && !view()->cursorLook().outline);
+            b.cursorStyle = 0;
+            b.stabilizerMode = -1;
+            lib->update(lib->currentIndex(), b);
+        }
+        // hold a quick key: the pencil only while D is held ("only while held" is on for it)
+        const int pencil = lib->indexOfName("Pencil (SAI)");
+        {
+            BrushSettings p = lib->at(pencil);
+            p.holdReturns = true;
+            lib->update(pencil, p);
+        }
+        auto release = [&](int key) {
+            QKeyEvent r(QEvent::KeyRelease, key, Qt::NoModifier);
+            QCoreApplication::sendEvent(view(), &r);
+            pump(30);
+        };
+        run("brush.quick1");
+        CHECK(lib->current().name == "333");
+        run("brush.quick3");
+        CHECK(lib->current().name == "Pencil (SAI)");
+        pump(420);
+        release(Qt::Key_D);
+        CHECK(lib->current().name == "333");  // held: back to "333"
+        run("brush.quick3");
+        release(Qt::Key_D);  // a tap: the pencil stays
+        CHECK(lib->current().name == "Pencil (SAI)");
+        {   // brushes without the option stay picked
+            run("brush.quick1");
+            run("brush.quick2");
+            pump(420);
+            release(Qt::Key_S);
+            CHECK(lib->current().name == "111");
+        }
+        {
+            BrushSettings p = lib->at(pencil);
+            p.holdReturns = false;
+            lib->update(pencil, p);
+        }
+        // a held F does not flip the eraser on and off (Russian layout: "А")
+        view()->setFocus();
+        run("brush.quick1");
+        auto override = [&](int key, bool repeat) {
+            QKeyEvent so(QEvent::ShortcutOverride, key, Qt::NoModifier, QString(QChar(key)), repeat);
+            QCoreApplication::sendEvent(view(), &so);
+            QKeyEvent p(QEvent::KeyPress, key, Qt::NoModifier, QString(QChar(key)), repeat);
+            QCoreApplication::sendEvent(view(), &p);
+            pump(20);
+        };
+        override(0x0410, false);
+        CHECK(lib->current().engine == BrushEngine::Erase);
+        override(0x0410, true);
+        override(0x0410, true);
+        override(0x0410, true);
+        CHECK(lib->current().engine == BrushEngine::Erase);
+        release(0x0410);
+        run("tool.eraser");
+        CHECK(lib->current().name == "333");
+        // the quick menu: held, pointed at, let go
+        QCursor::setPos(view()->mapToGlobal(QPoint(view()->width() / 2, view()->height() / 2)));
+        run("view.quickmenu");
+        RadialMenu* m = w.quickMenu();
+        CHECK(m && m->isVisible() && m->count() == 12);
+        if (m) {
+            if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/quick_menu.png");
+            const QPointF at = m->itemCenter(2);  // the third quick brush: the pencil
+            QMouseEvent mv(QEvent::MouseMove, at, m->mapToGlobal(at), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(m, &mv);
+            CHECK(m->highlighted() == 2);
+            pump(300);
+            release(Qt::Key_QuoteLeft);
+            pump(30);
+            CHECK(lib->current().name == "Pencil (SAI)" && !w.quickMenu());
+        }
+        // tapped: stays open, a click picks (the fill tool)
+        run("view.quickmenu");
+        release(Qt::Key_QuoteLeft);
+        m = w.quickMenu();
+        CHECK(m && m->isVisible());
+        if (m) {
+            int fill = -1;
+            for (int i = 0; i < m->count(); ++i) {
+                const QPointF at = m->itemCenter(i);
+                QMouseEvent mv(QEvent::MouseMove, at, m->mapToGlobal(at), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+                QCoreApplication::sendEvent(m, &mv);
+                if (m->highlighted() != i) CHECK(false);
+            }
+            fill = 7;  // six brushes, the eraser, then the fill tool
+            const QPointF at = m->itemCenter(fill);
+            QMouseEvent pr(QEvent::MouseButtonPress, at, m->mapToGlobal(at), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(m, &pr);
+            QMouseEvent rl(QEvent::MouseButtonRelease, at, m->mapToGlobal(at), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(m, &rl);
+            pump(40);
+            CHECK(app()->tools()->current()->id() == "fill" && !w.quickMenu());
+        }
+        run("view.quickmenu");  // Esc closes it
+        if ((m = w.quickMenu())) {
+            QKeyEvent esc(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+            QCoreApplication::sendEvent(m, &esc);
+            pump(30);
+            CHECK(!w.quickMenu());
+        }
+        app()->tools()->setCurrent("brush");
+        run("brush.quick1");
     }, w);
 
     scenario("smart selection stays inside the object; mesh warp lines added and removed", [](MainWindow& w) {

@@ -29,7 +29,7 @@ struct Preferences {
     QColor workspaceDark = QColor(48, 49, 54);
     QColor workspaceGray = QColor(128, 128, 128);
     QColor workspaceLight = QColor(222, 223, 226);
-    bool pixelatedZoomIn = true;     // nearest-neighbour above 200% like SAI
+    bool pixelatedZoomIn = true;     // nearest-neighbour above 200%
     bool showPixelGrid = false;      // at very high zoom
     int zoomStepPercent = 20;        // one mouse wheel step
     int rotateStepDeg = 15;          // rotate view keys / Alt + wheel
@@ -50,7 +50,7 @@ struct Preferences {
     bool hideCursorWhilePainting = false;
 
     // Input
-    QString tabletApi = "wintab";    // wintab (like SAI) or ink (Windows Ink)
+    QString tabletApi = "wintab";    // wintab or ink (Windows Ink)
     double pressureThreshold = 0.0;  // lighter touches count as no pressure
     double mousePressure = 1.0;
     bool rightClickEyedropper = true;  // right mouse button / pen side button

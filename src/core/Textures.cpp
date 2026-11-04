@@ -706,7 +706,7 @@ void TextureLibrary::generateDefaults(const QString& root) {
         });
     });
     generateDecor(root);
-    // ---- the SAI textures of the user's own brushes ("Paper", "Fabric 01"), as paper and brush textures
+    // ---- the textures of the user's own brushes ("Paper", "Fabric 01"), as paper and brush textures
     if (!QFileInfo::exists(brush + "/.defaults4_written")) {
         for (const QString& name : {QStringLiteral("Paper"), QStringLiteral("Fabric 01")})
             for (const QString& dir : {paper, brush}) {
@@ -715,7 +715,7 @@ void TextureLibrary::generateDefaults(const QString& root) {
                 QFile(path).setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ReadUser | QFileDevice::WriteUser);
             }
         QFile f(brush + "/.defaults4_written");
-        if (f.open(QIODevice::WriteOnly)) f.write("Delete this file to copy the SAI textures (Paper, Fabric 01) again.\n");
+        if (f.open(QIODevice::WriteOnly)) f.write("Delete this file to copy the textures (Paper, Fabric 01) again.\n");
     }
     for (const QString& d : {paper, brush, shapes}) {
         QFile f(d + "/.defaults2_written");

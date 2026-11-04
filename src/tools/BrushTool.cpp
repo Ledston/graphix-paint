@@ -77,7 +77,10 @@ void BrushTool::press(const PointerEvent& e) {
     if (doc->symmetry.isOn()) ctx.symmetry = doc->symmetry.transforms();
     ctx.wrap = doc->seamless;  // seamless: what goes over an edge comes back on the other side
 
-    m_stab.configure(Stabilizer::Mode(app()->stabilizerMode()), app()->stabilizerLevel(), app()->pressureSmoothing());
+    // the brush's own stabilizer, or the common one of the toolbar
+    const bool ownStab = ctx.brush.stabilizerMode >= 0;
+    m_stab.configure(Stabilizer::Mode(ownStab ? ctx.brush.stabilizerMode : app()->stabilizerMode()),
+                     ownStab ? ctx.brush.stabilizerLevel : app()->stabilizerLevel(), app()->pressureSmoothing());
     doc->pushUndo(m_usingEraser || ctx.brush.engine == BrushEngine::Erase ? T("Erase") : T("Brush stroke"));
     m_stroke = std::make_unique<BrushStroke>(ctx);
 

@@ -56,10 +56,21 @@ BrushEditorDialog::BrushEditorDialog(int slot, QWidget* parent) : QDialog(parent
     // ---- sections
     m_list = new QListWidget(this);
     m_list->setObjectName("prefsSidebar");
-    m_list->setFixedWidth(170);
+    m_list->setFixedWidth(215);
     m_list->setIconSize(QSize(18, 18));
     m_stack = new QStackedWidget(this);
+    bool advancedShown = false;
     for (const BrushControls::Page& p : pages) {
+        if (p.advanced && !advancedShown) {  // the rarely used pages, under a heading
+            advancedShown = true;
+            auto* head = new QListWidgetItem(T("Advanced"), m_list);
+            head->setFlags(Qt::NoItemFlags);
+            QFont hf = m_list->font();
+            hf.setBold(true);
+            head->setFont(hf);
+            head->setData(Qt::UserRole, QStringLiteral("-advanced"));
+            m_stack->addWidget(new QWidget(m_stack));  // keeps the rows and the pages in step
+        }
         auto* it = new QListWidgetItem(Theme::icon(p.icon), p.title, m_list);
         it->setData(Qt::UserRole, p.id);
         auto* scroll = new QScrollArea(m_stack);
@@ -135,7 +146,7 @@ BrushEditorDialog::BrushEditorDialog(int slot, QWidget* parent) : QDialog(parent
         if (d.name == m_original.name) isDefault = true;
     reset->setEnabled(isDefault);
     reset->setToolTip(T("The settings this brush came with"));
-    bb->addButton(QDialogButtonBox::Cancel);
+    bb->addButton(QDialogButtonBox::Cancel)->setText(T("Cancel"));
     QPushButton* ok = bb->addButton(QDialogButtonBox::Ok);
     ok->setText(T("Done"));
     ok->setDefault(true);
@@ -177,18 +188,11 @@ BrushEditorDialog::BrushEditorDialog(int slot, QWidget* parent) : QDialog(parent
     m_pad->setBrush(m_original);
     updatePages();
     m_list->setCurrentRow(0);
-    resize(1080, 640);
+    resize(1100, 720);
 }
 
 void BrushEditorDialog::updatePages() {
-    // pages that do not apply to this kind of brush are hidden (mixing for a pen...)
-    for (int i = 0; i < m_list->count(); ++i) {
-        const QString id = m_list->item(i)->data(Qt::UserRole).toString();
-        bool vis = true;
-        if (id == "mixing") vis = m_controls->settings.engine == BrushEngine::Mix || m_controls->settings.engine == BrushEngine::Smudge;
-        m_list->item(i)->setHidden(!vis);
-        if (!vis && m_list->currentRow() == i) m_list->setCurrentRow(0);
-    }
+    // every page stays listed; the parts that do not apply (mixing for a pen...) hide inside the pages
 }
 
 void BrushEditorDialog::apply() {

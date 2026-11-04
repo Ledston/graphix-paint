@@ -100,6 +100,12 @@ BrushStroke::BrushStroke(const StrokeContext& ctx) : m_ctx(ctx), m_rng(std::rand
     if (m_engine == BrushEngine::Mix && !ctx.targetMask && ctx.layer->isRaster())
         m_origin = std::make_unique<RasterSurface>(static_cast<RasterLayer*>(ctx.layer)->pixels);
 
+    const bool directEngine = m_engine == BrushEngine::Mix || m_engine == BrushEngine::Blur || m_engine == BrushEngine::Smudge;
+    if (directEngine && !ctx.targetMask && ctx.layer->isRaster() && ctx.brush.opacity < 0.999) {
+        m_start = std::make_unique<RasterSurface>(static_cast<RasterLayer*>(ctx.layer)->pixels);
+        m_work = std::make_unique<RasterSurface>(static_cast<RasterLayer*>(ctx.layer)->pixels);
+    }
+
     const bool buffered = m_engine == BrushEngine::Paint || m_engine == BrushEngine::Erase;
     if (buffered) {
         if (ctx.targetMask) ctx.layer->previewMask = std::make_shared<MaskSurface>(ctx.layer->mask);
@@ -120,7 +126,7 @@ float BrushStroke::mapPressure(double p) const {
     return clamp01(float(p));
 }
 
-// SAI's "Prs. Hard <-> Soft": 100 leaves the pressure as it is, 200 = a light touch is enough,
+// Pressure "hard <-> soft": 100 leaves the pressure as it is, 200 = a light touch is enough,
 // 0 = it takes a hard press.
 static double soften(double pr, double softness) {
     pr = std::clamp(pr, 0.0, 1.0);
@@ -611,8 +617,9 @@ void BrushStroke::directDab(Carry& carry, const float* base, const DabParams& d,
         readMask(m_ctx.doc->selection(), box, tlSel.data());
         for (size_t i = 0; i < n; ++i) tlCov[i] *= tlSel[i];
     }
+    RasterSurface& work = m_work ? *m_work : rl->pixels;
     if (tlDst.size() < n * 4) tlDst.resize(n * 4);
-    readFloat(rl->pixels, box, tlDst.data());
+    readFloat(work, box, tlDst.data());
     const BrushSettings& b = m_ctx.brush;
 
     float paint[4] = {0, 0, 0, 0};
@@ -650,7 +657,7 @@ void BrushStroke::directDab(Carry& carry, const float* base, const DabParams& d,
             }
             float bl = float(b.blending);
             if (b.blendingPressure) bl = clamp01(bl * (1.5f - float(soften(pr, b.blendSoftness))));
-            // Dilution waters down the brush's own color only (as in SAI): with full blending the
+            // Dilution waters down the brush's own color only: with full blending the
             // brush moves the colors under it and does not wash them away.
             const float dil = 1.f - float(b.dilution);
             float target[4];
@@ -691,7 +698,7 @@ void BrushStroke::directDab(Carry& carry, const float* base, const DabParams& d,
         int rad = std::max(1, int(std::lround(d.diameter * 0.12)));
         QRect big = box.adjusted(-rad * 3, -rad * 3, rad * 3, rad * 3) & m_ctx.doc->bounds();
         std::vector<float> src(size_t(big.width()) * big.height() * 4);
-        readFloat(rl->pixels, big, src.data());
+        readFloat(work, big, src.data());
         gaussianBlur(src.data(), big.width(), big.height(), 4, float(rad));
         for (int y = 0; y < box.height(); ++y)
             for (int x = 0; x < box.width(); ++x) {
@@ -717,6 +724,19 @@ void BrushStroke::directDab(Carry& carry, const float* base, const DabParams& d,
             size_t i = size_t(y) * box.width() + x;
             out[i] = packDither(&tlDst[i * 4], x + ox, y + oy);
         }
+    if (m_work) {
+        // full strength into the working copy, the layer gets it at the brush opacity
+        m_work->writeRect(box, out.data(), box.width());
+        if (tlAux.size() < n * 4) tlAux.resize(n * 4);
+        readFloat(*m_start, box, tlAux.data());
+        const float op = float(std::clamp(b.opacity, 0.0, 1.0));
+        for (size_t i = 0; i < n * 4; ++i) tlDst[i] = tlAux[i] + (tlDst[i] - tlAux[i]) * op;
+        for (int y = 0; y < box.height(); ++y)
+            for (int x = 0; x < box.width(); ++x) {
+                size_t i = size_t(y) * box.width() + x;
+                out[i] = packDither(&tlDst[i * 4], x + ox, y + oy);
+            }
+    }
     rl->pixels.writeRect(box, out.data(), box.width());
     m_dirty |= box;
     m_bounds |= box;

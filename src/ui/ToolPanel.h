@@ -23,7 +23,7 @@ class ValueBar;
 class BrushControls;
 class Section;
 
-// Grid of brush slots, like SAI's custom tool palette, sorted into tabs
+// Grid of brush slots, sorted into tabs
 // (Basic, Paint, Hatching, Effects, Erase and the user's own).
 class BrushSlots : public QWidget {
     Q_OBJECT

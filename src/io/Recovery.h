@@ -11,7 +11,7 @@ namespace gx {
 
 class Document;
 
-// "Recover work" like SAI: every few minutes changed documents are written in the
+// "Recover work": every few minutes changed documents are written in the
 // background to a per-session folder. If the program does not close normally,
 // the next start offers to restore them.
 class Recovery : public QObject {

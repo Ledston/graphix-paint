@@ -29,6 +29,7 @@
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTimer>
+#include <QDateTime>
 #include <QToolBar>
 #include <QToolButton>
 #include <QUrl>
@@ -51,6 +52,8 @@
 #include "io/VideoWriter.h"
 #include "app/BrushLibrary.h"
 #include "app/I18n.h"
+#include "app/LayoutKeys.h"
+#include "ui/RadialMenu.h"
 #include "app/Shortcuts.h"
 #include "core/Compositor.h"
 #include "core/ImageOps.h"
@@ -160,7 +163,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     createDocks();
     createStatusBar();
     Shortcuts::instance().load(app()->settings());
-    applySaiKeysOnce();
+    applyDefaultKeysOnce();
+    fixQuickBrushesOnce();
     Recorder::instance().setWindow(this);
 
     QSettings& s = app()->settings();
@@ -197,6 +201,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             if (auto* cw = dynamic_cast<CanvasWindow*>(sw)) cw->view()->doc()->setUndoLimit(app()->prefs().undoLimit);
     });
     qApp->installEventFilter(this);
+    qApp->installEventFilter(new LayoutKeys(this));  // shortcuts by the physical key on any keyboard layout
     updateActions();
 }
 
@@ -649,7 +654,7 @@ void MainWindow::createActions() {
 
     // Tools
     const QList<QPair<QString, QKeySequence>> toolKeys = {
-        // single letters W Q R E H F, A S D Z C B and the digits are taken by the SAI-style keys below
+        // single letters W Q R E H F, A S D Z C B and the digits are taken by the drawing keys below
         {"brush", {}}, {"eyedropper", QKeySequence(Qt::Key_I)}, {"move", QKeySequence(Qt::Key_V)},
         {"select-rect", QKeySequence(Qt::Key_M)}, {"select-ellipse", QKeySequence(Qt::SHIFT | Qt::Key_M)},
         {"lasso", QKeySequence(Qt::Key_L)}, {"magic-wand", QKeySequence(Qt::SHIFT | Qt::Key_W)}, {"select-brush", QKeySequence(Qt::SHIFT | Qt::Key_Q)},
@@ -664,18 +669,21 @@ void MainWindow::createActions() {
         QString id = tk.first;
         act("tool." + id, t->name(), "Tools", tk.second, [id] { app()->tools()->setCurrent(id); }, t->iconName(), false);
     }
-    act("tool.eraser", "Eraser (toggle)", "Tools", QKeySequence(Qt::Key_F), [] {
+    act("tool.eraser", "Eraser (toggle)", "Tools", QKeySequence(Qt::Key_F), [this] {
         BrushLibrary* b = app()->brushes();
         static int last = 0;
         int er = b->eraserIndex();
         if (er < 0) return;
         if (b->currentIndex() == er && app()->tools()->current()->id() == "brush") app()->tools()->selectBrushSlot(last);
         else {
-            last = b->currentIndex();
+            const int prev = b->currentIndex();
+            const QString prevTool = app()->tools()->current() ? app()->tools()->current()->id() : QString();
+            last = prev;
             app()->tools()->selectBrushSlot(er);
+            beginHold("tool.eraser", prev, prevTool);
         }
-    }, "eraser", false);
-    // [ and ]: the previous / next size of SAI's size list
+    }, "eraser", false)->setProperty("noRepeat", true);
+    // [ and ]: the previous / next size of the size list
     act("brush.smaller", "Previous brush size", "Tools", QKeySequence(Qt::Key_BracketLeft), [] {
         BrushLibrary* b = app()->brushes();
         BrushSettings s = b->current();
@@ -690,10 +698,12 @@ void MainWindow::createActions() {
         b->update(b->currentIndex(), s);
         app()->showStatus(T("Brush size %1 px").arg(s.size, 0, 'g', 4), 1200);
     }, {}, false);
+    act("view.quickmenu", "Quick menu (brushes and tools)", "Tools", QKeySequence(Qt::Key_QuoteLeft), [this] { openQuickMenu(); },
+        {}, false)->setProperty("noRepeat", true);
     act("color.swap", "Swap main and sub color", "Tools", QKeySequence(Qt::Key_X), [] { app()->swapColors(); }, "swap", false);
     act("color.reset", "Reset colors (black / white)", "Tools", QKeySequence(Qt::SHIFT | Qt::Key_D), [] { app()->resetColors(); }, {}, false);
     act("color.transparent", "Transparent color", "Tools", {}, [] { app()->setTransparentColor(!app()->transparentColor()); }, {}, false);
-    // 1..9, 0: the opacity of the brush, 10% .. 100% (like SAI)
+    // 1..9, 0: the opacity of the brush, 10% .. 100%
     for (int i = 1; i <= 10; ++i)
         act(QStringLiteral("brush.opacity%1").arg(i * 10), T("Brush opacity %1%").arg(i * 10), "Tools",
             QKeySequence(i == 10 ? Qt::Key_0 : Qt::Key(Qt::Key_0 + i)), [i] {
@@ -704,11 +714,17 @@ void MainWindow::createActions() {
                 if (app()->tools()->current() && app()->tools()->current()->id() != "brush") app()->tools()->setCurrent("brush");
                 app()->showStatus(T("Brush opacity %1%").arg(i * 10), 1200);
             }, {}, false);
-    // quick keys for brushes (A S D Z C B for the SAI brushes); a brush gets a key from its right-click menu
+    // quick keys for brushes (A S D Z C B for the owner's brushes); a brush gets a key from its right-click menu
     for (int i = 0; i < kQuickBrushes; ++i) {
         static const Qt::Key keys[6] = {Qt::Key_A, Qt::Key_S, Qt::Key_D, Qt::Key_Z, Qt::Key_C, Qt::Key_B};
         act(QStringLiteral("brush.quick%1").arg(i + 1), T("Quick brush %1").arg(i + 1), "Tools",
-            i < 6 ? QKeySequence(keys[i]) : QKeySequence(), [i] { selectQuickBrush(i); }, {}, false);
+            i < 6 ? QKeySequence(keys[i]) : QKeySequence(), [this, i] {
+                const int prev = app()->brushes()->currentIndex();
+                const QString prevTool = app()->tools()->current() ? app()->tools()->current()->id() : QString();
+                selectQuickBrush(i);
+                if (app()->brushes()->currentIndex() != prev || prevTool != "brush")
+                    beginHold(QStringLiteral("brush.quick%1").arg(i + 1), prev, prevTool);
+            }, {}, false)->setProperty("noRepeat", true);
     }
 
     // Help
@@ -876,7 +892,7 @@ void MainWindow::createMenus() {
     });
     QMenu* tabM = setM->addMenu(Theme::icon("tablet"), T("Pen input"));
     auto* tabGroup = new QActionGroup(tabM);
-    for (const auto& t : {qMakePair(QStringLiteral("wintab"), T("Wintab (like SAI, recommended)")), qMakePair(QStringLiteral("ink"), T("Windows Ink"))}) {
+    for (const auto& t : {qMakePair(QStringLiteral("wintab"), T("Wintab (recommended)")), qMakePair(QStringLiteral("ink"), T("Windows Ink"))}) {
         QAction* a = tabM->addAction(t.second);
         a->setCheckable(true);
         tabGroup->addAction(a);
@@ -929,7 +945,7 @@ void MainWindow::createToolbar() {
     m_stabMode->addItem(T("Average"), 1);
     m_stabMode->addItem(T("Speed (S)"), 2);
     m_stabMode->addItem(T("Rope"), 3);
-    m_stabMode->setToolTip(T("Stabilizer: Average = SAI 1-15 levels, Speed = SAI S-levels, Rope = pulled string"));
+    m_stabMode->setToolTip(T("Stabilizer: Average = levels 1-15, Speed = S-levels, Rope = pulled string"));
     tb->addWidget(m_stabMode);
     m_stabLevel = new QSpinBox(tb);
     m_stabLevel->setRange(0, 30);
@@ -941,14 +957,36 @@ void MainWindow::createToolbar() {
     m_pressSmooth = new QSpinBox(tb);
     m_pressSmooth->setRange(0, 20);
     tb->addWidget(m_pressSmooth);
-    auto syncStab = [this] {
-        m_stabMode->setCurrentIndex(std::max(0, m_stabMode->findData(app()->stabilizerMode())));
-        m_stabLevel->setValue(app()->stabilizerLevel());
+    // The toolbar shows the stabilizer the current brush paints with: its own one, or the common one.
+    auto syncStab = [this, stabLabel] {
+        const BrushSettings& b = app()->brushes()->current();
+        const bool own = b.stabilizerMode >= 0;
+        const QSignalBlocker b1(m_stabMode), b2(m_stabLevel), b3(m_pressSmooth);
+        m_stabMode->setCurrentIndex(std::max(0, m_stabMode->findData(own ? b.stabilizerMode : app()->stabilizerMode())));
+        m_stabLevel->setValue(own ? b.stabilizerLevel : app()->stabilizerLevel());
         m_pressSmooth->setValue(app()->pressureSmoothing());
+        stabLabel->setText(own ? T("Stabilizer (brush)") : T("Stabilizer"));
+        stabLabel->setToolTip(own ? T("This brush has its own stabilizer (brush settings > Stabilizer and cursor)") : QString());
     };
     syncStab();
-    connect(m_stabMode, &QComboBox::activated, this, [this](int i) { app()->setStabilizer(m_stabMode->itemData(i).toInt(), m_stabLevel->value()); });
-    connect(m_stabLevel, &QSpinBox::valueChanged, this, [this](int v) { app()->setStabilizer(m_stabMode->currentData().toInt(), v); });
+    auto setStab = [](int mode, int level) {
+        BrushLibrary* lib = app()->brushes();
+        BrushSettings b = lib->current();
+        if (b.stabilizerMode >= 0) {
+            b.stabilizerMode = std::clamp(mode, 0, 3);
+            b.stabilizerLevel = std::clamp(level, 0, 30);
+            lib->update(lib->currentIndex(), b);
+        } else {
+            app()->setStabilizer(mode, level);
+        }
+    };
+    connect(m_stabMode, &QComboBox::activated, this, [this, setStab](int i) { setStab(m_stabMode->itemData(i).toInt(), m_stabLevel->value()); });
+    connect(m_stabLevel, &QSpinBox::valueChanged, this, [this, setStab](int v) { setStab(m_stabMode->currentData().toInt(), v); });
+    connect(app()->brushes(), &BrushLibrary::currentChanged, this, syncStab);
+    connect(app(), &App::stabilizerChanged, this, syncStab);
+    connect(app()->brushes(), &BrushLibrary::brushChanged, this, [syncStab](int i) {
+        if (i == app()->brushes()->currentIndex()) syncStab();
+    });
     connect(m_pressSmooth, &QSpinBox::valueChanged, this, [](int v) { app()->setPressureSmoothing(v); });
     tb->addSeparator();
 
@@ -2062,8 +2100,8 @@ void MainWindow::resetInterface() {
     app()->showStatus(T("The interface is back as it was at the start."));
 }
 
-void MainWindow::applySaiKeysOnce() {
-    // The owner's SAI keys win once over keys set earlier by hand (later changes in
+void MainWindow::applyDefaultKeysOnce() {
+    // The owner's keys win once over keys set earlier by hand (later changes in
     // Settings > Keyboard shortcuts are kept).
     QSettings& s = app()->settings();
     if (s.value("keys/saiLayout", 0).toInt() >= 1) return;
@@ -2098,7 +2136,7 @@ void MainWindow::togglePanels() {
 void MainWindow::about() {
     QMessageBox::about(this, T("About GraphiX Paint"),
                        QStringLiteral("<h3>GraphiX Paint %1</h3><p>%2</p><p>%3</p>")
-                           .arg(GX_VERSION, T("A drawing program in the spirit of PaintTool SAI 2."),
+                           .arg(GX_VERSION, T("A light, fast drawing program for pen tablets."),
                                 T("Textures folder:") + "<br>" + app()->texturesDir().toHtmlEscaped()));
 }
 
@@ -2225,7 +2263,100 @@ void MainWindow::dropEvent(QDropEvent* e) {
     }
 }
 
+void MainWindow::beginHold(const QString& actionId, int prevBrush, const QString& prevTool) {
+    const QKeySequence seq = Shortcuts::instance().get(actionId);
+    m_hold = Hold{};
+    if (seq.isEmpty() || prevBrush < 0) return;
+    m_hold.key = seq[0].key();
+    m_hold.prevBrush = prevBrush;
+    m_hold.prevTool = prevTool;
+    m_hold.brush = app()->brushes()->currentIndex();
+    m_hold.at = QDateTime::currentMSecsSinceEpoch();
+}
+
+void MainWindow::endHold(int) {
+    const Hold h = m_hold;
+    m_hold = Hold{};
+    BrushLibrary* lib = app()->brushes();
+    if (h.brush < 0 || h.brush >= lib->count() || lib->currentIndex() != h.brush) return;  // something else was picked meanwhile
+    if (!lib->at(h.brush).holdReturns) return;
+    if (QDateTime::currentMSecsSinceEpoch() - h.at < 350) return;  // a tap: the brush stays
+    auto back = [h] {
+        BrushLibrary* l = app()->brushes();
+        if (l->currentIndex() != h.brush || h.prevBrush < 0 || h.prevBrush >= l->count()) return;
+        app()->tools()->selectBrushSlot(h.prevBrush);
+        if (!h.prevTool.isEmpty() && h.prevTool != "brush") app()->tools()->setCurrent(h.prevTool);
+    };
+    if (!app()->tools()->isDragging()) {
+        back();
+        return;
+    }
+    // still painting: back when the stroke ends
+    auto* t = new QTimer(this);
+    t->setInterval(40);
+    const qint64 until = QDateTime::currentMSecsSinceEpoch() + 20000;
+    connect(t, &QTimer::timeout, this, [t, back, until] {
+        if (app()->tools()->isDragging() && QDateTime::currentMSecsSinceEpoch() < until) return;
+        t->stop();
+        t->deleteLater();
+        back();
+    });
+    t->start();
+}
+
+RadialMenu* MainWindow::quickMenu() const { return m_quickMenu.data(); }
+
+void MainWindow::openQuickMenu() {
+    CanvasView* v = activeView();
+    if (!v) return;
+    if (m_quickMenu) m_quickMenu->close();
+    auto* menu = new RadialMenu(v);
+    QList<RadialMenu::Item> items;
+    BrushLibrary* lib = app()->brushes();
+    for (int q = 0; q < kQuickBrushes && items.size() < 6; ++q) {
+        const int idx = lib->indexOfName(quickBrushName(q));
+        if (idx < 0) continue;
+        const BrushSettings& b = lib->at(idx);
+        items << RadialMenu::Item{Theme::icon(b.iconKey), T(b.name), [idx] { app()->tools()->selectBrushSlot(idx); }};
+    }
+    if (QAction* er = m_actions.value("tool.eraser")) items << RadialMenu::Item{Theme::icon("eraser"), T("Eraser"), [er] { er->trigger(); }};
+    for (const char* id : {"fill", "lasso", "eyedropper", "move", "transform"}) {
+        Tool* t = app()->tools()->tool(id);
+        if (!t) continue;
+        const QString tid = t->id();
+        items << RadialMenu::Item{Theme::icon(t->iconName()), T(t->name()), [tid] { app()->tools()->setCurrent(tid); }};
+    }
+    menu->setItems(items);
+    m_quickMenu = menu;
+    m_quickMenuAt = QDateTime::currentMSecsSinceEpoch();
+    menu->popup(v->mapFromGlobal(QCursor::pos()));
+}
+
 bool MainWindow::eventFilter(QObject* o, QEvent* e) {
+    if (e->type() == QEvent::ShortcutOverride || e->type() == QEvent::KeyRelease) {
+        auto* k = static_cast<QKeyEvent*>(e);
+        const int key = LayoutKeys::latinKey(k) ? LayoutKeys::latinKey(k) : k->key();
+        if (e->type() == QEvent::ShortcutOverride && k->isAutoRepeat()) {
+            // keys that pick a brush or a tool do not repeat while held (F would flip the eraser on and off)
+            const QKeySequence seq(QKeyCombination(k->modifiers() & (Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier), Qt::Key(key)));
+            for (QAction* a : std::as_const(m_actions))
+                if (a->property("noRepeat").toBool() && a->shortcut() == seq) {
+                    e->accept();
+                    return true;
+                }
+        }
+        if (e->type() == QEvent::KeyRelease && !k->isAutoRepeat()) {
+            if (m_quickMenu && m_quickMenu->isVisible()) {
+                const QKeySequence qs = Shortcuts::instance().get("view.quickmenu");
+                if (!qs.isEmpty() && qs[0].key() == key) {
+                    // held and let go over an item: that item; a quick tap leaves the ring open for a click
+                    if (QDateTime::currentMSecsSinceEpoch() - m_quickMenuAt > 250) m_quickMenu->chooseHighlighted();
+                    return true;
+                }
+            }
+            if (m_hold.key && key == m_hold.key) endHold(key);
+        }
+    }
     // Keep held keys (Space, Alt...) working even when the canvas does not have focus
     // but the mouse is over it.
     if (e->type() == QEvent::KeyPress || e->type() == QEvent::KeyRelease) {

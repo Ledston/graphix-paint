@@ -26,12 +26,14 @@ public:
         QString icon;
         QWidget* widget;
         std::function<bool(const BrushSettings&)> visible;  // e.g. mixing only for mixing brushes
+        bool advanced = false;  // listed under "Advanced" in the brush settings window
     };
 
     BrushControls(QWidget* parent, std::function<void()> changed);
     BrushSettings settings;
 
-    // compact = the tool panel (no engine row on the first page, it has its own header)
+    // compact = the tool panel: only size, edge hardness and opacity (everything else is in
+    // the brush settings window)
     QList<Page> build(QWidget* parent, bool compact);
     void load(const BrushSettings& b);  // shows b in the controls
     bool loading() const { return m_loading; }

@@ -99,7 +99,7 @@ CanvasView::CanvasView(std::shared_ptr<Document> doc, QWidget* parent, bool scra
     connect(app()->tools(), &ToolManager::activeChanged, this, [this] { refreshCursor(); update(); });
     connect(app(), &App::prefsChanged, this, [this] { invalidateAll(); refreshCursor(); });
     connect(app(), &App::viewOptionsChanged, this, [this] { invalidateAll(); });
-    connect(app()->brushes(), &BrushLibrary::brushChanged, this, [this] { if (m_inside) update(); });
+    connect(app()->brushes(), &BrushLibrary::brushChanged, this, [this] { refreshCursor(); if (m_inside) update(); });
     connect(app()->brushes(), &BrushLibrary::currentChanged, this, [this] { refreshCursor(); if (m_inside) update(); });
 
     m_ants.setInterval(150);
@@ -679,23 +679,40 @@ void CanvasView::drawSelection(QPainter& p) {
     p.restore();
 }
 
+CanvasView::CursorLook CanvasView::cursorLook() const {
+    CursorLook l{app()->prefs().showBrushOutline, app()->prefs().crosshair, false};
+    Tool* t = app()->tools()->active();
+    if (!t || !t->showsBrushOutline()) return {false, false, false};
+    if (t->id() == "brush") {  // the brush may have its own pointer
+        switch (app()->brushes()->current().cursorStyle) {
+        case 1: l = {true, false, false}; break;
+        case 2: l = {true, true, false}; break;
+        case 3: l = {false, true, false}; break;
+        case 4: l = {false, false, true}; break;
+        default: break;
+        }
+    }
+    return l;
+}
+
 void CanvasView::drawBrushOutline(QPainter& p) {
     if (!m_inside) return;
     Tool* t = app()->tools()->active();
-    if (!t || !t->showsBrushOutline() || !app()->prefs().showBrushOutline) return;
+    const CursorLook look = cursorLook();
+    if (!t || !(look.outline || look.cross || look.dot)) return;
     if (app()->prefs().hideCursorWhilePainting && app()->tools()->isDragging() && (m_tabletDown || m_mouseDown)) return;
     double r = t->outlineDiameter() * 0.5 * m_zoom;
     QPointF c = m_hover;
     p.save();
     p.setRenderHint(QPainter::Antialiasing, true);
     p.setBrush(Qt::NoBrush);
-    if (r >= 3) {
+    if (look.outline && r >= 3) {
         p.setPen(QPen(QColor(0, 0, 0, 160), 1.6));
         p.drawEllipse(c, r, r);
         p.setPen(QPen(QColor(255, 255, 255, 220), 0.8));
         p.drawEllipse(c, r, r);
     }
-    if (app()->prefs().crosshair || r < 3) {
+    if (look.cross || (look.outline && r < 3)) {
         p.setPen(QPen(QColor(0, 0, 0, 180), 1.5));
         p.drawLine(c - QPointF(4, 0), c + QPointF(4, 0));
         p.drawLine(c - QPointF(0, 4), c + QPointF(0, 4));
@@ -703,12 +720,18 @@ void CanvasView::drawBrushOutline(QPainter& p) {
         p.drawLine(c - QPointF(4, 0), c + QPointF(4, 0));
         p.drawLine(c - QPointF(0, 4), c + QPointF(0, 4));
     }
+    if (look.dot) {
+        p.setPen(QPen(QColor(255, 255, 255, 230), 1.0));
+        p.setBrush(QColor(0, 0, 0, 220));
+        p.drawEllipse(c, 2.0, 2.0);
+    }
     p.restore();
 }
 
 void CanvasView::refreshCursor() {
     Tool* t = app()->tools()->active();
-    if (t && t->showsBrushOutline() && app()->prefs().showBrushOutline) setCursor(Qt::BlankCursor);
+    const CursorLook look = cursorLook();
+    if (t && (look.outline || look.cross || look.dot)) setCursor(Qt::BlankCursor);
     else setCursor(t ? t->cursor(this) : QCursor(Qt::ArrowCursor));
 }
 
@@ -869,9 +892,19 @@ bool CanvasView::event(QEvent* e) {
 void CanvasView::enterEvent(QEnterEvent*) {
     m_inside = true;
     QWidget* f = QApplication::focusWidget();
-    // Do not steal focus from text fields
-    if (!f || !(f->inherits("QLineEdit") || f->inherits("QTextEdit") || f->inherits("QPlainTextEdit") || f->inherits("QAbstractSpinBox")))
+    // Do not steal focus from text fields. Number fields (stabilizer, sizes...) give it back:
+    // otherwise they keep eating the shortcut keys ([ ], digits) after a click on them.
+    const bool numberField = f && f->parentWidget() && f->parentWidget()->inherits("QAbstractSpinBox");
+    const bool takeFocus = !f || numberField || f->inherits("QAbstractSpinBox") ||
+                           !(f->inherits("QLineEdit") || f->inherits("QTextEdit") || f->inherits("QPlainTextEdit"));
+    // Taking the focus can activate another document window, which re-lays out the windows and
+    // sends enter events again: never from inside one of those.
+    static bool entering = false;
+    if (takeFocus && f != this && !entering) {
+        entering = true;
         setFocus();
+        entering = false;
+    }
     refreshCursor();
     update();
 }

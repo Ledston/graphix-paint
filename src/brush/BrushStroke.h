@@ -24,7 +24,7 @@ struct StrokeContext {
     BrushSettings brush;
     QColor color = Qt::black;
     QColor subColor = Qt::white;  // the second color (lines / dots / dabs given to it by subColorShare)
-    bool transparentColor = false;  // SAI style "transparent" color: paints transparency
+    bool transparentColor = false;  // "Transparent" color: paints transparency
     const PressureCurve* pressureCurve = nullptr;
     QVector<QTransform> symmetry;  // extra mirrored copies
     bool wrap = false;             // seamless canvas: dabs over an edge are drawn again on the other side
@@ -107,6 +107,9 @@ private:
     StrokeContext m_ctx;
     BrushEngine m_engine;
     std::unique_ptr<RasterSurface> m_origin;  // layer pixels at stroke start (shared tiles, no copy)
+    // Opacity of the direct engines (mixing, blur, smudge): the stroke is painted at full
+    // strength into m_work and the layer shows start + (work - start) * opacity.
+    std::unique_ptr<RasterSurface> m_start, m_work;
     std::vector<Emitter> m_emitters;
     std::deque<PathPoint> m_pending;  // held back for taper out
     double m_pathLen = 0;

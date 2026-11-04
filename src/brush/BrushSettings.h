@@ -52,7 +52,7 @@ struct BrushSettings {
     double shapeStrength = 1.0;
     bool shapeAsTip = false;    // use the shape as the whole tip instead of modulating the round tip
 
-    // Grain texture (in canvas space, like SAI brush textures)
+    // Grain texture (in canvas space)
     QString texture;
     double textureStrength = 0.0;
     double textureScale = 1.0;
@@ -96,9 +96,19 @@ struct BrushSettings {
     bool keepOpacity = false;   // only paint where the layer already has paint
     BlendMode paintMode = BlendMode::Normal;
 
-    // How soft the pen feels for size, density and mixing, like SAI's "Prs. Hard <-> Soft":
+    // How soft the pen feels for size, density and mixing ("hard <-> soft"):
     // 100 = as the pressure curve says, less = needs a harder press, more = light pressure is enough.
     double sizeSoftness = 100, densitySoftness = 100, blendSoftness = 100;  // 0..200
+
+    // Stabilizer of this brush: -1 = the common one (toolbar), else Off / Average / Speed / Rope
+    int stabilizerMode = -1;
+    int stabilizerLevel = 3;
+    // Holding the brush's quick key picks it only while the key is held (a tap still switches)
+    bool holdReturns = false;
+    // Cursor over the canvas: 0 = as in Settings, 1 outline, 2 outline + cross, 3 cross, 4 dot
+    int cursorStyle = 0;
+    // The edge hardness presets of the brush panel (very soft .. very hard)
+    static const QVector<double>& hardnessPresets();
 
     // Per-brush pressure curve (otherwise the global one is used)
     bool customPressureCurve = false;
@@ -110,7 +120,7 @@ struct BrushSettings {
     // brushes added in later versions (given to existing brush palettes once)
     static QVector<BrushSettings> defaultsSince(int version);
     static QVector<BrushSettings> decorDefaults();
-    static QVector<BrushSettings> customDefaults();  // the owner's brushes from SAI 2 (tab "Custom brushes")
+    static QVector<BrushSettings> customDefaults();  // the owner's brushes (tab "Custom brushes")
     static QString customGroup() { return QStringLiteral("Custom brushes"); }
     static QStringList groups();                       // the built-in palette tabs, in order
     static QString defaultGroupFor(const QString& name);  // for palettes saved before tabs existed

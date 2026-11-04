@@ -124,7 +124,7 @@ std::vector<InputSample> Stabilizer::finish() {
     if (!m_active) return out;
     m_active = false;
     if (m_mode == None || m_level == 0) return out;
-    // Catch up with the pen so the line ends where the pen was lifted (like SAI).
+    // Catch up with the pen so the line ends where the pen was lifted.
     InputSample target = m_last;
     double d = dist(m_out.pos, target.pos);
     if (m_mode == Average) {

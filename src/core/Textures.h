@@ -40,7 +40,7 @@ enum class TextureKind { Paper = 0, Brush = 1, Shape = 2, Ribbon = 3 };
 //   textures/ribbons patterns drawn along the stroke (lace, chain...), as wide as the brush
 //   textures/stamps/<set>  stamp sets: every dab of a stamp brush is one of these pictures
 // Any PNG, BMP, JPG or TIFF works. Images with transparency use their alpha,
-// others use brightness (white = full paint, dark = less paint, like SAI).
+// others use brightness (white = full paint, dark = less paint).
 class TextureLibrary {
 public:
     static TextureLibrary& instance();

@@ -21,7 +21,7 @@
 4K UHD 3840 x 2160	4K UHD 3840 x 2160
 90° left	⟲ 90°
 90° right	⟳ 90°
-A drawing program in the spirit of PaintTool SAI 2.	Программа для рисования в духе PaintTool SAI 2.
+A light, fast drawing program for pen tablets.	Лёгкая и быстрая программа для рисования на планшете.
 A layer in this file is too large.	Слой в этом файле слишком большой.
 A4 landscape, 300 dpi	A4 альбомная, 300 dpi
 A4 portrait, 300 dpi	A4 книжная, 300 dpi
@@ -762,7 +762,7 @@ Select two or more layers to merge.	Выберите два или больше 
 Selection pen	Кисть выделения
 Settings	Настройки
 Settings and brushes	Настройки и кисти
-Shade	Затенение (SAI)
+Shade	Затенение
 Shadows	Тени
 Shape	Форма
 Shape is the whole tip	Форма — весь кончик
@@ -771,8 +771,8 @@ Sharpen	Резкость
 Shift	Shift
 Shift + click picks the background color.	Shift + щелчок берёт фоновый цвет.
 Shift adds, Alt subtracts, Shift+Alt intersects.	Shift добавляет, Alt вычитает, Shift+Alt пересекает.
-Shine & Shade	Свечение и затенение (SAI)
-Shine (SAI Luminosity)	Свечение (SAI)
+Shine & Shade	Свечение и затенение
+Shine	Свечение
 Shortcut	Сочетание
 Shortcut in use	Сочетание занято
 Show / hide layer	Показать / скрыть слой
@@ -780,7 +780,7 @@ Show brush outline	Показывать контур кисти
 Show grid	Показать сетку
 Show perspective ruler	Показать линейку перспективы
 Show selection edges	Показывать границы выделения
-Show sharp pixels when zoomed in (like SAI)	Чёткие пиксели при увеличении (как в SAI)
+Show sharp pixels when zoomed in	Чёткие пиксели при увеличении
 Show the picture instead of the selection	Показать картинку вместо выделения
 Show transparency as a checkerboard	Показывать прозрачность шахматкой
 Showing the canvas in grays. The picture is not changed.	Холст показан в оттенках серого. Сама картинка не меняется.
@@ -825,7 +825,7 @@ Square 4000 x 4000	Квадрат 4000 x 4000
 Squares	Квадраты
 Stabilizer	Стабилизатор
 Stabilizer strength	Сила стабилизатора
-Stabilizer: Average = SAI 1-15 levels, Speed = SAI S-levels, Rope = pulled string	Стабилизатор: Среднее = уровни SAI 1-15, Скорость = S-уровни SAI, Верёвка = тянущаяся нить
+Stabilizer: Average = levels 1-15, Speed = S-levels, Rope = pulled string	Стабилизатор: Среднее = уровни 1–15, Скорость = S-уровни, Верёвка = тянущаяся нить
 Start	Начало
 Stop color	Цвет точки
 Strength	Сила
@@ -943,7 +943,7 @@ Width in pixels:	Ширина в пикселях:
 Windows Ink	Windows Ink
 Windows Ink (recommended)	Windows Ink (рекомендуется)
 Windows video encoding (Media Foundation) is not available.	Кодирование видео Windows (Media Foundation) недоступно.
-Wintab (like SAI, recommended)	Wintab (как в SAI, рекомендуется)
+Wintab (recommended)	Wintab (рекомендуется)
 Wintab (older drivers)	Wintab (старые драйверы)
 Wintab works with Windows Ink switched off in the tablet driver. If the pen has no pressure, try the other option: the change works immediately.	Wintab работает и при выключенном Windows Ink в драйвере планшета. Если нажима нет, попробуйте другой вариант — переключение срабатывает сразу.
 Wobble	Дрожание
@@ -1310,8 +1310,8 @@ Fabric 01	Fabric 01
 Brush opacity %1%	Прозрачность кисти %1%
 Brush size %1 px	Размер кисти %1 px
 Custom brushes	Пользовательские
-Like "Prs. Hard <-> Soft" in SAI: 100 = as the pressure curve, less = needs a harder press, more = a light touch is enough.	Как «Prs. Hard ⇔ Soft» в SAI: 100 — как по кривой нажима, меньше — нужно давить сильнее, больше — хватает лёгкого касания.
-Like "Prs. Hard <-> Soft: Blending" in SAI: 100 = as the pressure curve, more = a light touch is enough.	Как «Prs. Hard ⇔ Soft: Blending» в SAI: 100 — как по кривой нажима, больше — хватает лёгкого касания.
+How soft the pen feels: 100 = as the pressure curve, less = needs a harder press, more = a light touch is enough.	Насколько мягко ощущается перо: 100 — как по кривой нажима, меньше — нужно давить сильнее, больше — хватает лёгкого касания.
+How soft the pen feels for mixing: 100 = as the pressure curve, more = a light touch is enough.	Насколько мягко ощущается перо для смешивания: 100 — как по кривой нажима, больше — хватает лёгкого касания.
 Next brush size	Следующий размер кисти
 Previous brush size	Предыдущий размер кисти
 Pressure softness: density	Мягкость нажима: плотность
@@ -1464,3 +1464,33 @@ Panel frames	Рамки панелей
 Cut frames	Разрезать рамки
 Page of frames	Страница рамок
 Distort	Искажение
+Advanced	Дополнительно
+As in Settings	Как в настройках
+Average = levels 1-15, Speed = S-levels, Rope = pulled string. Without its own stabilizer the brush follows the toolbar, and the toolbar shows the stabilizer of the brush that has one.	Среднее — уровни 1–15, Скорость — S-уровни, Верёвка — тянущаяся нить. Без своего стабилизатора кисть берёт его с верхней панели, а панель показывает стабилизатор кисти, у которой он свой.
+Brush outline	Контур кисти
+Brush shape	Форма кисти
+Brush texture	Текстура кисти
+Cross	Крестик
+Distance between the dabs, a part of the brush size	Расстояние между отпечатками, доля размера кисти
+Dot	Точка
+Edge hardness	Жёсткость края
+Edge: from very soft to very hard	Край: от очень мягкого до очень жёсткого
+Fine tuning between the edge buttons above	Точная настройка между кнопками края выше
+Hard <-> soft: density	Жёстко ↔ мягко: плотность
+Hard <-> soft: mixing	Жёстко ↔ мягко: смешивание
+Hard <-> soft: size	Жёстко ↔ мягко: размер
+Hold the brush's quick key (or F for the eraser), paint, let go: the brush you had comes back. A short tap still switches as usual.	Зажми быструю клавишу кисти (или F для ластика), порисуй, отпусти — вернётся прежняя кисть. Короткое нажатие переключает как обычно.
+Hold the key: only while it is held	Зажатая клавиша: только пока держишь
+How much paint every dab puts down	Сколько краски кладёт каждый отпечаток
+How the pointer looks over the canvas with this brush	Как выглядит курсор над холстом с этой кистью
+Off: hard pixel edges (pixel art, binary pen)	Выкл.: жёсткие пиксельные края (пиксель-арт, бинарное перо)
+Off: the brush uses the stabilizer of the toolbar	Выкл.: кисть использует стабилизатор с верхней панели
+Outline and cross	Контур и крестик
+Own stabilizer for this brush	Свой стабилизатор у этой кисти
+Paint only where the layer already has paint	Рисовать только там, где на слое уже есть краска
+Quick menu (brushes and tools)	Быстрое меню (кисти и инструменты)
+Stabilizer (brush)	Стабилизатор (кисти)
+Stabilizer and cursor	Стабилизатор и курсор
+Stroke	Штрих
+The whole stroke is never more opaque than this (the digit keys 1..0 set it)	Весь штрих никогда не плотнее этого (меняется цифрами 1..0)
+This brush has its own stabilizer (brush settings > Stabilizer and cursor)	У этой кисти свой стабилизатор (настройки кисти > Стабилизатор и курсор)

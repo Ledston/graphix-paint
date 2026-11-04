@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
         a.installTranslator(&qtTranslator);
     gx::Theme::apply(app.prefs().theme, app.prefs().uiFontSize);
     gx::Recovery::instance().start(app.dataDir() + "/recovery", app.prefs().autosaveMinutes);
-    gx::TabletInput::apply(app.prefs().tabletApi);  // Wintab like SAI, Windows Ink as fallback
+    gx::TabletInput::apply(app.prefs().tabletApi);  // Wintab, Windows Ink as fallback
 
     gx::MainWindow w;
     if (!app.settings().contains("window/geometry")) {

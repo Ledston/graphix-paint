@@ -7,7 +7,7 @@ class QTabletEvent;
 namespace gx {
 
 // Chooses how the pen talks to the program on Windows:
-//  - "wintab": the classic tablet driver interface used by PaintTool SAI. Works with
+//  - "wintab": the classic tablet driver interface used by most drawing programs. Works with
 //    Windows Ink switched off in the tablet driver.
 //  - "ink":    Windows Ink (pointer messages).
 // Wintab is switched on and off while the program runs; if it is not available

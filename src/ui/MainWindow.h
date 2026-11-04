@@ -16,6 +16,7 @@ class QMenu;
 class QDockWidget;
 
 namespace gx {
+class RadialMenu;
 
 class CanvasView;
 class Document;
@@ -98,12 +99,26 @@ private:
     void togglePanels();
     void setDockFolded(QDockWidget* d, bool folded);  // the arrow on a panel title
     void applyDefaultDockSizes();
-    void applySaiKeysOnce();  // W Q R E H [ ] F, A S D Z C B and the digits, once over older keys
+    void applyDefaultKeysOnce();  // W Q R E H [ ] F, A S D Z C B and the digits, once over older keys
+    // A quick key held down: the brush it picked can give way to the one before when the key
+    // is let go (if the brush has "only while held" on).
+    void beginHold(const QString& actionId, int prevBrush, const QString& prevTool);
+    void endHold(int key);
+    struct Hold {
+        int key = 0, prevBrush = -1, brush = -1;
+        QString prevTool;
+        qint64 at = 0;
+    } m_hold;
 public:
     Q_INVOKABLE void resetInterface();  // Window > Reset the interface
+    // The quick menu (a ring of brushes and tools under the pointer)
+    Q_INVOKABLE void openQuickMenu();
+    RadialMenu* quickMenu() const;
 private:
     void about();
 
+    QPointer<RadialMenu> m_quickMenu;
+    qint64 m_quickMenuAt = 0;
     QMdiArea* m_mdi;
     QHash<QString, QAction*> m_actions;
     QList<QAction*> m_docActions;

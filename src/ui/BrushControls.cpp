@@ -4,6 +4,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <cmath>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
@@ -19,7 +20,7 @@
 namespace gx {
 
 namespace {
-// Two rows of common sizes (SAI's size palette).
+// Two rows of common sizes.
 class QuickSizes : public QWidget {
 public:
     explicit QuickSizes(std::function<void(double)> pick, QWidget* parent) : QWidget(parent), m_pick(std::move(pick)) {
@@ -75,6 +76,92 @@ private:
     std::function<void(double)> m_pick;
     double m_cur = 0;
 };
+
+// A row of round tips from very soft to very hard: one click sets the edge hardness.
+class EdgePresets : public QWidget {
+public:
+    explicit EdgePresets(std::function<void(double)> pick, QWidget* parent) : QWidget(parent), m_pick(std::move(pick)) {
+        setFixedHeight(30);
+        setMouseTracking(true);
+        setToolTip(T("Edge: from very soft to very hard"));
+    }
+    void setCurrent(double h) {
+        m_cur = h;
+        update();
+    }
+    static int nearest(double h) {
+        const QVector<double>& v = BrushSettings::hardnessPresets();
+        int best = 0;
+        for (int i = 1; i < v.size(); ++i)
+            if (std::abs(v[i] - h) < std::abs(v[best] - h)) best = i;
+        return best;
+    }
+
+protected:
+    QRectF cell(int i) const {
+        const int n = int(BrushSettings::hardnessPresets().size());
+        const double cw = width() / double(n);
+        return QRectF(i * cw + 1, 1, cw - 2, height() - 2);
+    }
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        const ThemeColors& c = Theme::colors();
+        const QVector<double>& v = BrushSettings::hardnessPresets();
+        const int cur = nearest(m_cur);
+        const bool exact = std::abs(v[cur] - m_cur) < 0.02;
+        for (int i = 0; i < v.size(); ++i) {
+            const QRectF r = cell(i);
+            const bool on = i == cur;
+            p.setPen(on ? QPen(c.accent, exact ? 2.0 : 1.2) : QPen(c.border, 1));
+            p.setBrush(i == m_hover ? c.button.lighter(115) : c.base);
+            p.drawRoundedRect(r, 4, 4);
+            // the tip: solid inside the hardness radius, fading to the edge
+            const double rad = std::min(r.width(), r.height()) * 0.36;
+            QRadialGradient g(r.center(), rad);
+            QColor ink = c.text;
+            g.setColorAt(0, ink);
+            g.setColorAt(std::clamp(v[i] * 0.97, 0.0, 0.97), ink);
+            ink.setAlpha(0);
+            g.setColorAt(1, ink);
+            p.setPen(Qt::NoPen);
+            p.setBrush(g);
+            p.drawEllipse(r.center(), rad, rad);
+        }
+    }
+    void mousePressEvent(QMouseEvent* e) override {
+        for (int i = 0; i < BrushSettings::hardnessPresets().size(); ++i)
+            if (cell(i).contains(e->position())) m_pick(BrushSettings::hardnessPresets()[i]);
+    }
+    void mouseMoveEvent(QMouseEvent* e) override {
+        int h = -1;
+        for (int i = 0; i < BrushSettings::hardnessPresets().size(); ++i)
+            if (cell(i).contains(e->position())) h = i;
+        if (h != m_hover) {
+            m_hover = h;
+            update();
+        }
+    }
+    void leaveEvent(QEvent*) override {
+        m_hover = -1;
+        update();
+    }
+
+private:
+    std::function<void(double)> m_pick;
+    double m_cur = 0.9;
+    int m_hover = -1;
+};
+
+QLabel* title(QWidget* parent, const QString& text) {
+    auto* l = new QLabel(text, parent);
+    l->setObjectName("sectionTitle");
+    QFont f = l->font();
+    f.setBold(true);
+    l->setFont(f);
+    l->setContentsMargins(0, 6, 0, 0);
+    return l;
+}
 
 QLabel* hint(QWidget* parent, const QString& text) {
     auto* l = new QLabel(text, parent);
@@ -148,8 +235,36 @@ QList<BrushControls::Page> BrushControls::build(QWidget* parent, bool compact) {
     QList<Page> pages;
     BrushSettings& s = settings;
     auto always = [](const BrushSettings&) { return true; };
+    auto edges = [this](QWidget* w) {
+        auto* e = new EdgePresets([this](double h) {
+            settings.hardness = h;
+            changed();
+            load(settings);
+        }, w);
+        m_loaders << [this, e] { e->setCurrent(settings.hardness); };
+        return e;
+    };
 
-    // ---- the basics
+    // ---- the tool panel: only what is changed all the time
+    if (compact) {
+        QVBoxLayout* v;
+        QWidget* w = page(parent, &v);
+        v->addWidget(bar(w, T("Size"), 0.5, 5000, 1, &s.size, 1, " px", true));
+        auto* quick = new QuickSizes([this](double sz) {
+            settings.size = sz;
+            changed();
+            load(settings);
+        }, w);
+        m_loaders << [this, quick] { quick->setCurrent(settings.size); };
+        v->addWidget(quick);
+        v->addWidget(edges(w));
+        v->addWidget(bar(w, T("Opacity"), 0, 1, 2, &s.opacity, 100, "%"));
+        pages << Page{"basic", T("Brush"), "brush", w, always};
+        refreshLists();
+        return pages;
+    }
+
+    // ---- the brush: everything that makes the brush, in one place
     {
         QVBoxLayout* v;
         QWidget* w = page(parent, &v);
@@ -175,49 +290,176 @@ QList<BrushControls::Page> BrushControls::build(QWidget* parent, bool compact) {
         m_loaders << [this, engine, mode] {
             engine->setCurrentIndex(std::max(0, engine->findData(int(settings.engine))));
             mode->setCurrentIndex(std::max(0, mode->findData(int(settings.paintMode))));
-            mode->setVisible(settings.engine == BrushEngine::Paint);
+            mode->setEnabled(settings.engine == BrushEngine::Paint);
         };
         v->addWidget(bar(w, T("Size"), 0.5, 5000, 1, &s.size, 1, " px", true));
-        if (compact) {
-            auto* quick = new QuickSizes([this](double sz) {
-                settings.size = sz;
-                changed();
-                load(settings);
-            }, w);
-            m_loaders << [this, quick] { quick->setCurrent(settings.size); };
-            v->addWidget(quick);
-        }
         v->addWidget(bar(w, T("Min size"), 0, 1, 2, &s.minSize, 100, "%", false, T("Size with the lightest pressure")));
-        v->addWidget(bar(w, T("Opacity"), 0, 1, 2, &s.opacity, 100, "%"));
-        v->addWidget(bar(w, T("Density"), 0, 1, 2, &s.density, 100, "%"));
+        v->addWidget(bar(w, T("Opacity"), 0, 1, 2, &s.opacity, 100, "%", false,
+                         T("The whole stroke is never more opaque than this (the digit keys 1..0 set it)")));
+        v->addWidget(bar(w, T("Density"), 0, 1, 2, &s.density, 100, "%", false, T("How much paint every dab puts down")));
         v->addWidget(bar(w, T("Min density"), 0, 1, 2, &s.minDensity, 100, "%", false, T("Density with the lightest pressure")));
-        v->addWidget(bar(w, T("Hardness"), 0, 1, 2, &s.hardness, 100, "%"));
-        v->addWidget(bar(w, T("Spacing"), 0.01, 2, 2, &s.spacing, 100, "%"));
+
+        v->addWidget(title(w, T("Brush shape")));
+        auto* shape = new QComboBox(w);
+        m_shapeCombos << shape;
+        v->addWidget(shape);
+        connect(shape, &QComboBox::activated, this, [this, shape](int i) {
+            settings.shape = shape->itemData(i).toString();
+            changed();
+            load(settings);
+        });
+        m_loaders << [this, shape] { shape->setCurrentIndex(std::max(0, shape->findData(settings.shape))); };
+        v->addWidget(edges(w));
+        v->addWidget(bar(w, T("Edge hardness"), 0, 1, 2, &s.hardness, 100, "%", false, T("Fine tuning between the edge buttons above")));
+        auto* shapeStrength = bar(w, T("Shape strength"), 0, 1, 2, &s.shapeStrength, 100, "%");
+        v->addWidget(shapeStrength);
+        m_loaders << [this, shapeStrength] { shapeStrength->setEnabled(!settings.shape.isEmpty()); };
+
+        v->addWidget(title(w, T("Brush texture")));
+        auto* tex = new QComboBox(w);
+        m_textureCombos << tex;
+        v->addWidget(tex);
+        connect(tex, &QComboBox::activated, this, [this, tex](int i) {
+            settings.texture = tex->itemData(i).toString();
+            if (!settings.texture.isEmpty() && settings.textureStrength <= 0) settings.textureStrength = 0.5;
+            changed();
+            load(settings);
+        });
+        m_loaders << [this, tex] { tex->setCurrentIndex(std::max(0, tex->findData(settings.texture))); };
+        auto* texBox = new QWidget(w);
+        auto* tv = new QVBoxLayout(texBox);
+        tv->setContentsMargins(0, 0, 0, 0);
+        tv->setSpacing(3);
+        tv->addWidget(bar(texBox, T("Strength"), 0, 1, 2, &s.textureStrength, 100, "%"));
+        tv->addWidget(bar(texBox, T("Texture size"), 0.05, 20, 2, &s.textureScale, 100, "%", true));
+        v->addWidget(texBox);
+        m_loaders << [this, texBox] { texBox->setEnabled(!settings.texture.isEmpty()); };
+
+        // mixing: only for the brushes that pick up color
+        auto* mix = new QWidget(w);
+        auto* mv = new QVBoxLayout(mix);
+        mv->setContentsMargins(0, 0, 0, 0);
+        mv->setSpacing(3);
+        mv->addWidget(title(mix, T("Mixing")));
+        mv->addWidget(bar(mix, T("Blending"), 0, 1, 2, &s.blending, 100, "%", false, T("How much of the colors under the brush it picks up. 0 = a plain brush.")));
+        mv->addWidget(bar(mix, T("Dilution"), 0, 1, 2, &s.dilution, 100, "%", false, T("Water: makes the paint transparent")));
+        mv->addWidget(bar(mix, T("Persistence"), 0, 1, 2, &s.persistence, 100, "%", false, T("How long the picked up color stays in the brush")));
+        mv->addWidget(bar(mix, T("Fringe"), 0, 1, 2, &s.fringe, 100, "%", false, T("Darker edges, like watercolor")));
+        v->addWidget(mix);
+        m_loaders << [this, mix] { mix->setVisible(settings.engine == BrushEngine::Mix || settings.engine == BrushEngine::Smudge); };
+        v->addWidget(check(w, T("Keep opacity"), &s.keepOpacity, T("Paint only where the layer already has paint")));
+
+        v->addWidget(title(w, T("Pressure")));
         auto* pr = new QHBoxLayout;
-        pr->addWidget(new QLabel(T("Pressure:"), w));
         pr->addWidget(check(w, T("Size"), &s.sizePressure));
         pr->addWidget(check(w, T("Density"), &s.densityPressure));
+        auto* mixPr = check(w, T("Mixing"), &s.blendingPressure, T("Light pressure mixes more"));
+        pr->addWidget(mixPr);
         pr->addStretch();
         v->addLayout(pr);
-        const QString softTip = T("Like \"Prs. Hard <-> Soft\" in SAI: 100 = as the pressure curve, less = needs a harder press, "
+        const QString softTip = T("How soft the pen feels: 100 = as the pressure curve, less = needs a harder press, "
                                   "more = a light touch is enough.");
-        v->addWidget(bar(w, T("Pressure softness: size"), 0, 200, 0, &s.sizeSoftness, 1, "", false, softTip));
-        v->addWidget(bar(w, T("Pressure softness: density"), 0, 200, 0, &s.densitySoftness, 1, "", false, softTip));
+        v->addWidget(bar(w, T("Hard <-> soft: size"), 0, 200, 0, &s.sizeSoftness, 1, "", false, softTip));
+        v->addWidget(bar(w, T("Hard <-> soft: density"), 0, 200, 0, &s.densitySoftness, 1, "", false, softTip));
+        auto* mixSoft = bar(w, T("Hard <-> soft: mixing"), 0, 200, 0, &s.blendSoftness, 1, "", false,
+                            T("How soft the pen feels for mixing: 100 = as the pressure curve, more = a light touch is enough."));
+        v->addWidget(mixSoft);
+        m_loaders << [this, mixPr, mixSoft] {
+            const bool mixing = settings.engine == BrushEngine::Mix || settings.engine == BrushEngine::Smudge;
+            mixPr->setVisible(mixing);
+            mixSoft->setVisible(mixing);
+        };
+        v->addWidget(title(w, T("Stroke")));
+        v->addWidget(bar(w, T("Spacing"), 0.01, 2, 2, &s.spacing, 100, "%", false, T("Distance between the dabs, a part of the brush size")));
         pages << Page{"basic", T("Brush"), "brush", w, always};
     }
-    // ---- mixing
+    // ---- stabilizer, cursor and the quick key
     {
         QVBoxLayout* v;
         QWidget* w = page(parent, &v);
-        v->addWidget(bar(w, T("Blending"), 0, 1, 2, &s.blending, 100, "%", false, T("How much of the colors under the brush it picks up. 0 = a plain brush.")));
-        v->addWidget(bar(w, T("Dilution"), 0, 1, 2, &s.dilution, 100, "%", false, T("Water: makes the paint transparent")));
-        v->addWidget(bar(w, T("Persistence"), 0, 1, 2, &s.persistence, 100, "%", false, T("How long the picked up color stays in the brush")));
-        v->addWidget(bar(w, T("Fringe"), 0, 1, 2, &s.fringe, 100, "%", false, T("Darker edges, like watercolor")));
-        v->addWidget(check(w, T("Light pressure mixes more"), &s.blendingPressure));
-        v->addWidget(bar(w, T("Pressure softness: mixing"), 0, 200, 0, &s.blendSoftness, 1, "", false,
-                         T("Like \"Prs. Hard <-> Soft: Blending\" in SAI: 100 = as the pressure curve, more = a light touch is enough.")));
-        pages << Page{"mixing", T("Mixing"), "blender", w,
-                      [](const BrushSettings& b) { return b.engine == BrushEngine::Mix || b.engine == BrushEngine::Smudge; }};
+        auto* own = new QCheckBox(T("Own stabilizer for this brush"), w);
+        own->setToolTip(T("Off: the brush uses the stabilizer of the toolbar"));
+        v->addWidget(own);
+        auto* smode = new QComboBox(w);
+        smode->addItem(T("Off"), 0);
+        smode->addItem(T("Average"), 1);
+        smode->addItem(T("Speed (S)"), 2);
+        smode->addItem(T("Rope"), 3);
+        v->addWidget(smode);
+        auto* slevel = new ValueBar(T("Stabilizer strength"), 0, 30, 0, w);
+        v->addWidget(slevel);
+        v->addWidget(hint(w, T("Average = levels 1-15, Speed = S-levels, Rope = pulled string. Without its own stabilizer "
+                               "the brush follows the toolbar, and the toolbar shows the stabilizer of the brush that has one.")));
+        connect(own, &QCheckBox::toggled, this, [this, smode](bool on) {
+            if (m_loading) return;
+            settings.stabilizerMode = on ? std::max(0, smode->currentData().toInt()) : -1;
+            changed();
+            load(settings);
+        });
+        connect(smode, &QComboBox::activated, this, [this, smode](int i) {
+            if (settings.stabilizerMode < 0) return;
+            settings.stabilizerMode = smode->itemData(i).toInt();
+            changed();
+        });
+        connect(slevel, &ValueBar::valueChanged, this, [this](double x) {
+            if (m_loading) return;
+            settings.stabilizerLevel = int(std::lround(x));
+            changed();
+        });
+        m_loaders << [this, own, smode, slevel] {
+            const bool on = settings.stabilizerMode >= 0;
+            own->setChecked(on);
+            smode->setCurrentIndex(std::max(0, smode->findData(on ? settings.stabilizerMode : 1)));
+            slevel->setValue(settings.stabilizerLevel);
+            smode->setEnabled(on);
+            slevel->setEnabled(on);
+        };
+
+        v->addWidget(title(w, T("Cursor")));
+        auto* cur = new QComboBox(w);
+        cur->addItem(T("As in Settings"), 0);
+        cur->addItem(T("Brush outline"), 1);
+        cur->addItem(T("Outline and cross"), 2);
+        cur->addItem(T("Cross"), 3);
+        cur->addItem(T("Dot"), 4);
+        cur->setToolTip(T("How the pointer looks over the canvas with this brush"));
+        v->addWidget(cur);
+        connect(cur, &QComboBox::activated, this, [this, cur](int i) {
+            settings.cursorStyle = cur->itemData(i).toInt();
+            changed();
+        });
+        m_loaders << [this, cur] { cur->setCurrentIndex(std::max(0, cur->findData(settings.cursorStyle))); };
+
+        v->addWidget(title(w, T("Quick key")));
+        v->addWidget(check(w, T("Hold the key: only while it is held"), &s.holdReturns,
+                           T("Hold the brush's quick key (or F for the eraser), paint, let go: the brush you had comes back. "
+                             "A short tap still switches as usual.")));
+        pages << Page{"control", T("Stabilizer and cursor"), "cursor", w, always};
+    }
+    // ---- tip shape (more)
+    {
+        QVBoxLayout* v;
+        QWidget* w = page(parent, &v);
+        v->addWidget(check(w, T("Shape is the whole tip"), &s.shapeAsTip));
+        v->addWidget(bar(w, T("Roundness"), 0.02, 1, 2, &s.roundness, 100, "%"));
+        v->addWidget(bar(w, T("Angle"), -180, 180, 0, &s.angle, 1, QString(QChar(0xB0))));
+        v->addWidget(check(w, T("Angle follows the stroke"), &s.angleFollowsStroke));
+        v->addWidget(check(w, T("Angle from pen tilt"), &s.angleFromTilt));
+        v->addWidget(check(w, T("Anti-aliasing"), &s.antialias, T("Off: hard pixel edges (pixel art, binary pen)")));
+        pages << Page{"tip", T("Tip shape"), "brush", w, always, true};
+    }
+    // ---- texture (more)
+    {
+        QVBoxLayout* v;
+        QWidget* w = page(parent, &v);
+        v->addWidget(bar(w, T("Texture density"), 0, 1, 2, &s.textureDensity, 100, "%", false,
+                         T("Lower: only the high grain takes paint. Higher: the grain fills in.")));
+        v->addWidget(check(w, T("Texture follows the stroke"), &s.textureFollowsStroke,
+                           T("The texture runs along the stroke (hatching lines, bristles) instead of lying still on the paper")));
+        v->addWidget(check(w, T("Invert"), &s.textureInvert));
+        v->addWidget(check(w, T("Texture every dab"), &s.textureEachDab));
+        v->addWidget(hint(w, T("Add your own textures: Help > Open textures folder.")));
+        pages << Page{"texture", T("Texture"), "image", w, always, true};
     }
     // ---- lines and dots (hatching, stipple) and the second color
     {
@@ -242,7 +484,7 @@ QList<BrushControls::Page> BrushControls::build(QWidget* parent, bool compact) {
                          T("This part of the lines, dots or dabs is painted with the second color (the back color of the color panel), "
                            "for example white lines in hatching.")));
         v->addWidget(hint(w, T("The second color is the back color of the color panel (X swaps the colors).")));
-        pages << Page{"lines", T("Lines and dots"), "hatching", w, always};
+        pages << Page{"lines", T("Lines and dots"), "hatching", w, always, true};
     }
     // ---- decor: stamps and ribbons
     {
@@ -275,53 +517,7 @@ QList<BrushControls::Page> BrushControls::build(QWidget* parent, bool compact) {
         v->addWidget(len);
         m_loaders << [this, len] { len->setEnabled(!settings.ribbon.isEmpty()); };
         v->addWidget(hint(w, T("Your own stamps: a folder of pictures in textures/stamps. Your own ribbons: pictures in textures/ribbons.")));
-        pages << Page{"decor", T("Stamps and ribbons"), "stamp", w, always};
-    }
-    // ---- tip shape
-    {
-        QVBoxLayout* v;
-        QWidget* w = page(parent, &v);
-        auto* shape = new QComboBox(w);
-        m_shapeCombos << shape;
-        v->addWidget(shape);
-        connect(shape, &QComboBox::activated, this, [this, shape](int i) {
-            settings.shape = shape->itemData(i).toString();
-            changed();
-        });
-        m_loaders << [this, shape] { shape->setCurrentIndex(std::max(0, shape->findData(settings.shape))); };
-        v->addWidget(bar(w, T("Shape strength"), 0, 1, 2, &s.shapeStrength, 100, "%"));
-        v->addWidget(check(w, T("Shape is the whole tip"), &s.shapeAsTip));
-        v->addWidget(bar(w, T("Roundness"), 0.02, 1, 2, &s.roundness, 100, "%"));
-        v->addWidget(bar(w, T("Angle"), -180, 180, 0, &s.angle, 1, QString(QChar(0xB0))));
-        v->addWidget(check(w, T("Angle follows the stroke"), &s.angleFollowsStroke));
-        v->addWidget(check(w, T("Angle from pen tilt"), &s.angleFromTilt));
-        v->addWidget(check(w, T("Anti-aliasing"), &s.antialias));
-        pages << Page{"tip", T("Tip shape"), "brush", w, always};
-    }
-    // ---- texture
-    {
-        QVBoxLayout* v;
-        QWidget* w = page(parent, &v);
-        auto* tex = new QComboBox(w);
-        m_textureCombos << tex;
-        v->addWidget(tex);
-        connect(tex, &QComboBox::activated, this, [this, tex](int i) {
-            settings.texture = tex->itemData(i).toString();
-            if (!settings.texture.isEmpty() && settings.textureStrength <= 0) settings.textureStrength = 0.5;
-            changed();
-            load(settings);
-        });
-        m_loaders << [this, tex] { tex->setCurrentIndex(std::max(0, tex->findData(settings.texture))); };
-        v->addWidget(bar(w, T("Strength"), 0, 1, 2, &s.textureStrength, 100, "%"));
-        v->addWidget(bar(w, T("Texture size"), 0.05, 20, 2, &s.textureScale, 100, "%", true));
-        v->addWidget(bar(w, T("Texture density"), 0, 1, 2, &s.textureDensity, 100, "%", false,
-                         T("Lower: only the high grain takes paint. Higher: the grain fills in.")));
-        v->addWidget(check(w, T("Texture follows the stroke"), &s.textureFollowsStroke,
-                           T("The texture runs along the stroke (hatching lines, bristles) instead of lying still on the paper")));
-        v->addWidget(check(w, T("Invert"), &s.textureInvert));
-        v->addWidget(check(w, T("Texture every dab"), &s.textureEachDab));
-        v->addWidget(hint(w, T("Add your own textures: Help > Open textures folder.")));
-        pages << Page{"texture", T("Texture"), "image", w, always};
+        pages << Page{"decor", T("Stamps and ribbons"), "stamp", w, always, true};
     }
     // ---- dynamics
     {
@@ -336,7 +532,7 @@ QList<BrushControls::Page> BrushControls::build(QWidget* parent, bool compact) {
         v->addWidget(bar(w, T("Value jitter"), 0, 1, 2, &s.valueJitter, 100, "%"));
         v->addWidget(bar(w, T("Taper start"), 0, 500, 0, &s.taperIn, 1, " px"));
         v->addWidget(bar(w, T("Taper end"), 0, 500, 0, &s.taperOut, 1, " px"));
-        pages << Page{"dynamics", T("Dynamics"), "speed", w, always};
+        pages << Page{"dynamics", T("Dynamics"), "speed", w, always, true};
     }
     // ---- behaviour
     {
@@ -345,7 +541,6 @@ QList<BrushControls::Page> BrushControls::build(QWidget* parent, bool compact) {
         v->addWidget(check(w, T("Build up (airbrush style)"), &s.buildup));
         v->addWidget(check(w, T("Spray while pen is still"), &s.airbrush));
         v->addWidget(bar(w, T("Spray rate"), 1, 200, 0, &s.airbrushRate, 1, "/s"));
-        v->addWidget(check(w, T("Keep opacity"), &s.keepOpacity));
         v->addWidget(check(w, T("Own pressure curve"), &s.customPressureCurve));
         auto* curveBtn = new QPushButton(T("Edit brush pressure curve..."), w);
         v->addWidget(curveBtn);
@@ -367,7 +562,7 @@ QList<BrushControls::Page> BrushControls::build(QWidget* parent, bool compact) {
                 load(settings);
             }
         });
-        pages << Page{"behaviour", T("Behaviour"), "settings", w, always};
+        pages << Page{"behaviour", T("Behaviour"), "settings", w, always, true};
     }
     // narrow panels: combo boxes shrink instead of widening the dock
     for (const Page& p : pages)

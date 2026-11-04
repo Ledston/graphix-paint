@@ -42,7 +42,7 @@ void Preferences::load(QSettings& s) {
     crosshair = s.value("crosshair", crosshair).toBool();
     hideCursorWhilePainting = s.value("hideCursorWhilePainting", hideCursorWhilePainting).toBool();
     tabletApi = s.value("tabletApi", tabletApi).toString();
-    if (version < 2) tabletApi = "wintab";  // 1.0 defaulted to Windows Ink; Wintab works like SAI
+    if (version < 2) tabletApi = "wintab";  // 1.0 defaulted to Windows Ink; Wintab works best
     if (tabletApi != "ink") tabletApi = "wintab";
     pressureThreshold = std::clamp(s.value("pressureThreshold", pressureThreshold).toDouble(), 0.0, 0.5);
     eraserEndUsesEraser = s.value("eraserEndUsesEraser", eraserEndUsesEraser).toBool();

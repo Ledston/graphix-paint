@@ -7,7 +7,7 @@
 
 namespace gx {
 
-// Settings shared by the linework pens (like SAI's vector pen).
+// Settings shared by the linework pens .
 struct LineworkOptions {
     double width = 4;
     double minWidth = 0.15;

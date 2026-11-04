@@ -152,7 +152,7 @@ bool BrushLibrary::exportFile(const QString& path, const QList<int>& indices, QS
     return f.commit();
 }
 
-// SAI's list of brush sizes: [ and ] step through it
+// The list of brush sizes: [ and ] step through it
 double brushSizeStep(double size, int dir) {
     static const double sizes[] = {0.5, 0.7, 1, 1.5, 2, 2.3, 2.6, 3, 3.5, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 20, 25, 30, 35, 40, 50,
                                    60, 70, 80, 100, 120, 160, 200, 250, 300, 350, 400, 450, 500, 600, 700, 800, 1000, 1200, 1600,
@@ -168,10 +168,27 @@ double brushSizeStep(double size, int dir) {
     return sizes[0];
 }
 
+QStringList defaultQuickBrushes() {
+    // keys 1..6 = A S D Z C B: the owner's brushes ("333" on A, the pencil on D)
+    return {QStringLiteral("333"), QStringLiteral("111"), QStringLiteral("Pencil (SAI)"), QStringLiteral("blur"),
+            QStringLiteral("AirBrush (SAI)"), QStringLiteral("b blur")};
+}
+
 QString quickBrushName(int i) {
-    const QVector<BrushSettings> mine = BrushSettings::customDefaults();
-    const QString def = i < mine.size() ? mine[i].name : QString();
-    return app()->settings().value(QStringLiteral("brushes/quick%1").arg(i + 1), def).toString();
+    const QStringList def = defaultQuickBrushes();
+    return app()->settings().value(QStringLiteral("brushes/quick%1").arg(i + 1), i < def.size() ? def[i] : QString()).toString();
+}
+
+void fixQuickBrushesOnce() {
+    // the first version had the pencil on A and "333" on D, the other way round
+    QSettings& s = app()->settings();
+    if (s.value("brushes/quickSwapAD", 0).toInt() >= 1) return;
+    s.setValue("brushes/quickSwapAD", 1);
+    const QString a = s.value("brushes/quick1").toString(), d = s.value("brushes/quick3").toString();
+    if (a == "Pencil (SAI)" && (d == "333" || d.isEmpty())) {
+        s.setValue("brushes/quick1", "333");
+        s.setValue("brushes/quick3", "Pencil (SAI)");
+    }
 }
 
 void setQuickBrush(int i, const QString& name) {

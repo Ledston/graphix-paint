@@ -12,7 +12,7 @@ class QToolButton;
 
 namespace gx {
 
-// Hue ring with a saturation/value square (SAI style).
+// Hue ring with a saturation/value square.
 class ColorWheel : public QWidget {
     Q_OBJECT
 public:

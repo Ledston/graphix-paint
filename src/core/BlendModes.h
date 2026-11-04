@@ -11,9 +11,9 @@ enum class BlendMode : int {
     Multiply = 1,
     Screen = 2,
     Overlay = 3,
-    Shine = 4,       // SAI "Luminosity": additive glow
-    Shade = 5,       // SAI "Shade": subtractive darkening
-    ShineShade = 6,  // SAI "Lum & Shade"
+    Shine = 4,       // "Luminosity": additive glow
+    Shade = 5,       // "Shade": subtractive darkening
+    ShineShade = 6,  // "Lum & Shade"
     Darken = 7,
     Lighten = 8,
     ColorDodge = 9,
@@ -54,7 +54,7 @@ QString blendModeName(BlendMode m);
 void dissolveRow(float* p, int n, int x, int y);
 QByteArray blendModePsdKey(BlendMode m);
 BlendMode blendModeFromPsdKey(const QByteArray& key, bool* passThrough = nullptr);
-// Order modes appear in the UI (SAI modes first, then Photoshop groups)
+// Order modes appear in the UI (light modes first, then Photoshop groups)
 QList<BlendMode> blendModeUiOrder();
 
 // Blends n premultiplied RGBA float pixels of src onto dst.

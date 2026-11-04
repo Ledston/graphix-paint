@@ -16,11 +16,16 @@ class Document;
 class Projection;
 
 // Shows a document and turns pen / mouse input into tool events.
-// Rendering is done on the CPU with all cores (like SAI): the screen is drawn
+// Rendering is done on the CPU with all cores: the screen is drawn
 // from the projection pyramid, and only changed parts are redrawn while painting.
 class CanvasView : public QWidget {
     Q_OBJECT
 public:
+    struct CursorLook {
+        bool outline, cross, dot;
+    };
+    CursorLook cursorLook() const;  // the pointer over the canvas (Settings, or the brush's own)
+
     explicit CanvasView(std::shared_ptr<Document> doc, QWidget* parent = nullptr, bool scratchpad = false);
     ~CanvasView() override;
 

@@ -14,7 +14,7 @@ const BlendModeInfo kInfos[] = {
     {BlendMode::Multiply, "Multiply", "mul ", false},
     {BlendMode::Screen, "Screen", "scrn", false},
     {BlendMode::Overlay, "Overlay", "over", false},
-    {BlendMode::Shine, "Shine (SAI Luminosity)", "lddg", false},
+    {BlendMode::Shine, "Shine", "lddg", false},
     {BlendMode::Shade, "Shade", "lbrn", false},
     {BlendMode::ShineShade, "Shine & Shade", "lLit", false},
     {BlendMode::Darken, "Darken", "dark", true},
@@ -212,7 +212,7 @@ void normalRow(float* d, const float* s, int n) {
     }
 }
 
-// SAI style "Luminosity" (Shine): premultiplied source is added to the backdrop, so a
+// "Luminosity" (Shine): premultiplied source is added to the backdrop, so a
 // soft glow brightens what is below and still shows on transparent areas.
 template <bool Atop>
 void shineRow(float* d, const float* s, int n) {
@@ -227,7 +227,7 @@ void shineRow(float* d, const float* s, int n) {
     }
 }
 
-// SAI style "Shade": darkens the backdrop by the inverse of the source.
+// "Shade": darkens the backdrop by the inverse of the source.
 template <bool Atop>
 void shadeRow(float* d, const float* s, int n) {
     for (int i = 0; i < n; ++i, d += 4, s += 4) {
@@ -303,7 +303,7 @@ QByteArray blendModePsdKey(BlendMode m) {
 
 BlendMode blendModeFromPsdKey(const QByteArray& key, bool* passThrough) {
     if (passThrough) *passThrough = (key == "pass");
-    // Prefer the Photoshop modes over the SAI aliases that share a key.
+    // Prefer the Photoshop modes over the aliases that share a key.
     static const BlendMode prefer[] = {BlendMode::LinearDodge, BlendMode::LinearBurn, BlendMode::LinearLight};
     for (BlendMode p : prefer)
         if (blendModePsdKey(p) == key) return p;

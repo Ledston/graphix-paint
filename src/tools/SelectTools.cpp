@@ -27,7 +27,7 @@ SelectionOptions& selectionOptions() {
 }
 
 ops::SelectMode selectModeFor(Qt::KeyboardModifiers m) {
-    // Shift adds, Ctrl or Alt subtracts (SAI and Photoshop), both together intersect
+    // Shift adds, Ctrl or Alt subtracts (as in most programs), both together intersect
     const bool sh = m & Qt::ShiftModifier, sub = (m & Qt::AltModifier) || (m & Qt::ControlModifier);
     if (sh && sub) return ops::SelectMode::Intersect;
     if (sh) return ops::SelectMode::Add;

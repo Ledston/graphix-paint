@@ -84,6 +84,10 @@ QJsonObject BrushSettings::toJson() const {
     o["paintMode"] = int(paintMode);
     o["customPressureCurve"] = customPressureCurve;
     o["pressureCurve"] = pointsToJson(pressureCurve);
+    o["stabilizerMode"] = stabilizerMode;
+    o["stabilizerLevel"] = stabilizerLevel;
+    o["holdReturns"] = holdReturns;
+    o["cursorStyle"] = cursorStyle;
     return o;
 }
 
@@ -157,7 +161,17 @@ BrushSettings BrushSettings::fromJson(const QJsonObject& o) {
     b.paintMode = (pm >= 0 && pm < int(BlendMode::Count)) ? BlendMode(pm) : BlendMode::Normal;
     b.customPressureCurve = bl("customPressureCurve", false);
     if (o.contains("pressureCurve")) b.pressureCurve = pointsFromJson(o.value("pressureCurve"));
+    b.stabilizerMode = std::clamp(o.value("stabilizerMode").toInt(-1), -1, 3);
+    b.stabilizerLevel = std::clamp(o.value("stabilizerLevel").toInt(3), 0, 30);
+    b.holdReturns = bl("holdReturns", false);
+    b.cursorStyle = std::clamp(o.value("cursorStyle").toInt(0), 0, 4);
     return b;
+}
+
+const QVector<double>& BrushSettings::hardnessPresets() {
+    // very soft, soft, softer, medium, firm, hard, very hard
+    static const QVector<double> v = {0.0, 0.2, 0.38, 0.55, 0.72, 0.88, 1.0};
+    return v;
 }
 
 QVector<BrushSettings> BrushSettings::defaults() {
@@ -435,15 +449,15 @@ QStringList BrushSettings::groups() {
     return {customGroup(), "Basic", "Paint", "Hatching", "Effects", "Decor", "Backgrounds", "Erasers"};
 }
 
-// The owner's SAI 2 brushes, from the screenshots of SAI's brush and Tool Preference windows.
-// SAI -> GraphiX: Density -> stroke opacity, Min Density -> the density at no pressure,
-// the 5 edge shapes -> hardness 0 / .25 / .5 / .75 / 1, texture Intensity (plus half the
-// paper Messiness) -> texture strength, Scale % -> texture scale, Blending / Dilution /
-// Persistence -> the same (persistence 100 kept just under 1 so the brush still picks up color),
-// "Prs. Hard <-> Soft" -> the softness of size, density and mixing.
+// The owner's own brushes, from the screenshots of their brush settings.
+// Density -> stroke opacity, Min Density -> the density at no pressure, the 5 edge shapes ->
+// hardness 0 / .25 / .5 / .75 / 1, texture Intensity (plus half the paper Messiness) -> texture
+// strength, Scale % -> texture scale, Blending / Dilution / Persistence -> the same (persistence 100
+// kept just under 1 so the brush still picks up color), pressure "hard <-> soft" -> the softness of
+// size, density and mixing.
 QVector<BrushSettings> BrushSettings::customDefaults() {
     QVector<BrushSettings> v;
-    auto sai = [](const char* name, const char* icon, BrushEngine e, double size, double minSize, double density, double edge) {
+    auto mine = [](const char* name, const char* icon, BrushEngine e, double size, double minSize, double density, double edge) {
         BrushSettings b;
         b.name = name;
         b.iconKey = icon;
@@ -474,14 +488,14 @@ QVector<BrushSettings> BrushSettings::customDefaults() {
         b.blendingPressure = blending < 100;
     };
     {   // A: the main brush, line art and sketches
-        BrushSettings b = sai("Pencil (SAI)", "pencil", BrushEngine::Paint, 9, 0.15, 1.0, 1.0);
+        BrushSettings b = mine("Pencil (SAI)", "pencil", BrushEngine::Paint, 9, 0.15, 1.0, 1.0);
         b.sizeSoftness = 100;
         b.densitySoftness = 100;
         b.spacing = 0.06;
         v << b;
     }
     {   // S: smears the colors
-        BrushSettings b = sai("111", "blender", BrushEngine::Mix, 40, 0.51, 0.40, 0.5);
+        BrushSettings b = mine("111", "blender", BrushEngine::Mix, 40, 0.51, 0.40, 0.5);
         texture(b, "Paper", 28, 20, 67, true);
         mixing(b, 100, 100, 100);
         b.sizeSoftness = 118;
@@ -490,7 +504,7 @@ QVector<BrushSettings> BrushSettings::customDefaults() {
         v << b;
     }
     {   // D: an ordinary hard brush for the base colors
-        BrushSettings b = sai("333", "brush", BrushEngine::Mix, 10, 0.25, 0.60, 0.25);
+        BrushSettings b = mine("333", "brush", BrushEngine::Mix, 10, 0.25, 0.60, 0.25);
         texture(b, "Paper", 40, 10, 59, true);
         mixing(b, 19, 32, 72);
         b.sizeSoftness = 129;
@@ -499,7 +513,7 @@ QVector<BrushSettings> BrushSettings::customDefaults() {
         v << b;
     }
     {   // Z: soft blur, softly melts the colors together
-        BrushSettings b = sai("blur", "blur", BrushEngine::Mix, 350, 1.0, 0.20, 0.0);
+        BrushSettings b = mine("blur", "blur", BrushEngine::Mix, 350, 1.0, 0.20, 0.0);
         texture(b, "Paper", 30, 15, 51, true);
         mixing(b, 100, 100, 91);
         b.sizeSoftness = 200;
@@ -508,14 +522,14 @@ QVector<BrushSettings> BrushSettings::customDefaults() {
         v << b;
     }
     {   // C: airbrush to spread colors
-        BrushSettings b = sai("AirBrush (SAI)", "airbrush", BrushEngine::Paint, 8, 0.35, 0.30, 0.25);
+        BrushSettings b = mine("AirBrush (SAI)", "airbrush", BrushEngine::Paint, 8, 0.35, 0.30, 0.25);
         texture(b, "Fabric 01", 20, 7, 70, false);
         b.sizeSoftness = 144;
         b.densitySoftness = 0;
         v << b;
     }
     {   // B: a little firmer than the soft blur, softer than the smearing brush
-        BrushSettings b = sai("b blur", "blender", BrushEngine::Mix, 35, 1.0, 0.40, 0.25);
+        BrushSettings b = mine("b blur", "blender", BrushEngine::Mix, 35, 1.0, 0.40, 0.25);
         texture(b, "Paper", 45, 20, 56, true);
         mixing(b, 100, 100, 100);
         b.sizeSoftness = 200;

@@ -407,7 +407,7 @@ QWidget* PreferencesDialog::canvasPage() {
     wr->addWidget(colorButton(&m_p.workspaceLight, w));
     wr->addStretch();
     f->addRow(T("Around the canvas"), wr);
-    f->addRow(check(T("Show sharp pixels when zoomed in (like SAI)"), &m_p.pixelatedZoomIn, w));
+    f->addRow(check(T("Show sharp pixels when zoomed in"), &m_p.pixelatedZoomIn, w));
     f->addRow(check(T("Pixel grid at high zoom"), &m_p.showPixelGrid, w));
 
     f = pb.group(T("Zoom and rotation"));
@@ -445,7 +445,7 @@ QWidget* PreferencesDialog::penPage() {
 
     auto* f = pb.group(T("Tablet connection"));
     auto* api = new QComboBox(w);
-    api->addItem(T("Wintab (like SAI, recommended)"), "wintab");
+    api->addItem(T("Wintab (recommended)"), "wintab");
     api->addItem(T("Windows Ink"), "ink");
     api->setCurrentIndex(std::max(0, api->findData(m_p.tabletApi)));
     m_tabletState = new QLabel(TabletInput::describe(), w);
@@ -519,7 +519,7 @@ QWidget* PreferencesDialog::brushesPage() {
     f->addRow(T("Mode"), mode);
     f->addRow(T("Strength"), spin(0, 30, &m_p.stabilizerLevel, w));
     f->addRow(T("Pressure smoothing"), spin(0, 20, &m_p.pressureSmoothing, w));
-    f->addRow(hint(T("Stabilizer: Average = SAI 1-15 levels, Speed = SAI S-levels, Rope = pulled string"), w));
+    f->addRow(hint(T("Stabilizer: Average = levels 1-15, Speed = S-levels, Rope = pulled string"), w));
 
     f = pb.group(T("Brush size"));
     f->addRow(T("[ and ] change the size by"), spin(2, 100, &m_p.brushStepPercent, w, " %"));
