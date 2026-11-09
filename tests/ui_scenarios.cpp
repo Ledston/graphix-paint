@@ -31,6 +31,10 @@
 #include "tools/FillTools.h"
 #include <QPainterPath>
 #include "ui/EffectFilterDialog.h"
+#include "ui/EffectsDialog.h"
+#include "core/Compositor.h"
+#include <QGroupBox>
+#include <QSet>
 #include "ui/BrushEditor.h"
 #include "ui/BrushPreview.h"
 #include "ui/ToolPanel.h"
@@ -773,9 +777,108 @@ int main(int argc, char** argv) {
         for (int y = 0; y < img.height() && !fringe; ++y)
             for (int x = 0; x < img.width(); ++x) {
                 QColor c = QColor::fromRgba(img.pixel(x, y));
-                if (c.alpha() > 40 && c.red() > c.blue() + 40) { fringe = true; break; }
+                // the red of the blue shape drifts out: a dark red edge on one side, no red on the other
+                if (c.alpha() > 40 && c.red() > 20 && c.blue() < 10 && c.green() < 10) { fringe = true; break; }
             }
         CHECK(fringe);
+    }, w);
+
+    scenario("color steps and dithering: menus, presets, live effect and filter; clipping arrow", [](MainWindow& w) {
+        Document* d = view()->doc();
+        auto* l = static_cast<RasterLayer*>(d->currentLayer());
+        {
+            QImage img(400, 200, QImage::Format_ARGB32_Premultiplied);
+            for (int y = 0; y < 200; ++y)
+                for (int x = 0; x < 400; ++x) img.setPixel(x, y, qRgb(x * 255 / 399, 120, 255 - x * 255 / 399));
+            imageToSurface(img, l->pixels, QPoint(200, 150));
+            d->pixelsChanged(QRect(200, 150, 400, 200), l);
+        }
+        // in the menus
+        QStringList fxItems;
+        for (QAction* a : w.menuBar()->actions())
+            if (a->menu())
+                for (QAction* b : a->menu()->actions())
+                    if (b->menu() && b->text().remove('&') == T("Effects"))
+                        for (QAction* c : b->menu()->actions()) fxItems << c->text();
+        CHECK(fxItems.contains(T("Color steps") + "...") && fxItems.contains(T("Dithering") + "..."));
+        // the layer effects window: dithering with the Game Boy preset, color steps on
+        {
+            EffectsDialog dlg(d, l->id, &w, "dither");
+            dlg.show();
+            pump(60);
+            QGroupBox* dbox = nullptr;
+            QGroupBox* sbox = nullptr;
+            for (QGroupBox* g : dlg.findChildren<QGroupBox*>()) {
+                if (g->title() == T("Dithering")) dbox = g;
+                if (g->title() == T("Color steps")) sbox = g;
+            }
+            CHECK(dbox && sbox);
+            if (dbox && sbox) {
+                dbox->setChecked(true);
+                for (QPushButton* b : dbox->findChildren<QPushButton*>())
+                    if (b->text() == T("Game Boy")) b->click();
+                pump(60);
+                QComboBox* pal = nullptr;
+                for (QComboBox* c : dbox->findChildren<QComboBox*>())
+                    if (c->count() == 4 && c->itemText(2) == T("Game Boy")) pal = c;
+                CHECK(pal && pal->currentIndex() == 2);  // the controls follow the preset
+                if (qEnvironmentVariableIsSet("GX_SHOTS")) dlg.grab().save(qEnvironmentVariable("GX_SHOTS") + "/effects_dither.png");
+                sbox->setChecked(true);
+                pump(30);
+            }
+            dlg.accept();
+        }
+        pump(100);
+        l = static_cast<RasterLayer*>(d->currentLayer());
+        CHECK(l->fx.dither && l->fx.ditherPalette == 2 && l->fx.ditherPixel == 2 && l->fx.steps);
+        {
+            Compositor::prepare(d->root(), QRect(200, 150, 400, 200));
+            QImage img = Compositor::renderImage(d->root(), QRect(200, 150, 400, 200));
+            const QSet<QRgb> gb = {qRgb(15, 56, 15), qRgb(48, 98, 48), qRgb(139, 172, 15), qRgb(155, 188, 15)};
+            bool only = true;
+            for (int y = 2; y < 198; y += 7)
+                for (int x = 2; x < 398; x += 5)
+                    if (!gb.contains(QColor::fromRgba(img.pixel(x, y)).rgb())) only = false;
+            CHECK(only);
+            if (qEnvironmentVariableIsSet("GX_SHOTS")) w.grab().save(qEnvironmentVariable("GX_SHOTS") + "/dither_canvas.png");
+        }
+        d->undo();
+        l = static_cast<RasterLayer*>(d->currentLayer());
+        CHECK(!l->fx.dither && !l->fx.steps);
+        // as a filter: baked into the pixels
+        {
+            EffectFilterDialog dlg(d, l->id, "steps", &w);
+            dlg.show();
+            QThreadPool::globalInstance()->waitForDone(5000);
+            pump(400);
+            QThreadPool::globalInstance()->waitForDone(5000);
+            pump(200);
+            dlg.setNewLayer(false);
+            dlg.accept();
+        }
+        pump(60);
+        {   // by brightness (the default): the hues stay, the brightness falls on a few steps
+            int onStep = 0, total = 0;
+            for (int x = 200; x < 600; ++x) {
+                const QRgb p = l->pixels.pixel(x, 250);
+                const double lum = 0.3 * qRed(p) + 0.59 * qGreen(p) + 0.11 * qBlue(p);
+                const double k = lum / 255.0 * 4.0;
+                if (std::abs(k - std::round(k)) < 0.04) ++onStep;
+                ++total;
+            }
+            std::fprintf(stderr, "INFO color steps filter: %d of %d pixels on a step\n", onStep, total);
+            CHECK(onStep > total * 3 / 4);  // the rest: the soft borders (10%)
+        }
+        // the clipping arrow in the layer panel
+        auto* clip = ops::addRasterLayer(*d, "clipped");
+        clip->clipping = true;
+        d->layerChanged(clip);
+        pump(60);
+        if (qEnvironmentVariableIsSet("GX_SHOTS")) {
+            if (auto* lp = w.findChild<LayerPanel*>()) lp->grab().save(qEnvironmentVariable("GX_SHOTS") + "/clip_arrow.png");
+        }
+        d->undo();
+        d->undo();
     }, w);
 
     scenario("lasso fill: closed areas inside the shape", [](MainWindow&) {

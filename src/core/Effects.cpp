@@ -2,6 +2,7 @@
 
 #include <QMutex>
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 #include "core/ImageOps.h"
@@ -69,6 +70,237 @@ void ensureEffects(Layer& l, const QRect& canvasRect) {
         l.fxCache->valid.insert(it.key());
     }
 }
+
+namespace {
+
+float smooth01(float e0, float e1, float x) {
+    if (e1 <= e0) return x < e0 ? 0.f : 1.f;
+    const float t = std::clamp((x - e0) / (e1 - e0), 0.f, 1.f);
+    return t * t * (3.f - 2.f * t);
+}
+
+// Color steps: smooth shading breaks into flat steps; noise on the borders makes them rough and grainy.
+void applySteps(std::vector<float>& o, int W, int H, const QRect& R, const LayerEffects& fx) {
+    const int n = std::clamp(fx.stepsCount, 2, 16);
+    const float soft = std::clamp(fx.stepsSoftness, 0.f, 1.f) * 0.5f;
+    const float noise = std::clamp(fx.stepsNoise, 0.f, 1.f);
+    const float lo = std::min(fx.stepsLow, fx.stepsHigh), hi = std::max(fx.stepsLow, fx.stepsHigh);
+    const float op = std::clamp(fx.stepsOpacity, 0.f, 1.f);
+    auto step = [&](float v, float nz) {
+        const float q = v * float(n - 1) + nz;
+        const float f = std::floor(q);
+        const float t = smooth01(0.5f - soft - 1e-4f, 0.5f + soft + 1e-4f, q - f);
+        return std::clamp((f + t) / float(n - 1), 0.f, 1.f);
+    };
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            float* p = &o[(size_t(y) * W + x) * 4];
+            const float a = p[3];
+            if (a <= 1e-4f) continue;
+            float col[3] = {p[0] / a, p[1] / a, p[2] / a};
+            const float lum = luminance(col[0], col[1], col[2]);
+            // where it works: the brightness range, and not on dark lines
+            float w = smooth01(lo - 0.04f, lo + 0.001f, lum) * (1.f - smooth01(hi - 0.001f, hi + 0.04f, lum));
+            if (lo <= 0.f) w = 1.f - smooth01(hi - 0.001f, hi + 0.04f, lum);
+            if (hi >= 1.f) w = lo <= 0.f ? 1.f : smooth01(lo - 0.04f, lo + 0.001f, lum);
+            if (fx.stepsKeepLines) w *= smooth01(0.1f, 0.2f, lum);
+            w *= op;
+            if (w <= 0.f) continue;
+            const double px = R.left() + x, py = R.top() + y;
+            const float nz = grainNoise(px, py, 7, unsigned(fx.stepsSeed), fx.stepsGrain) * 2.f * noise * 0.9f;  // about +-0.9 of a step
+            float out[3];
+            if (fx.stepsMode == 0) {
+                const float l2 = step(lum, nz);
+                if (lum > 1e-4f) {
+                    const float k = l2 / lum;
+                    for (int c = 0; c < 3; ++c) out[c] = std::clamp(col[c] * k, 0.f, 1.f);
+                } else {
+                    out[0] = out[1] = out[2] = l2;
+                }
+            } else {
+                for (int c = 0; c < 3; ++c) out[c] = step(col[c], nz);
+            }
+            for (int c = 0; c < 3; ++c) p[c] = (col[c] + (out[c] - col[c]) * w) * a;
+        }
+}
+
+// Chromatic aberration: red drifts one way, blue the other, green stays. Each channel keeps its
+// own coverage, so the colored fringes show outside the shape too (no white is added).
+void applyChromatic(std::vector<float>& o, int W, int H, const QRect& R, const LayerEffects& fx, const QRect& content) {
+    const size_t N = size_t(W) * size_t(H);
+    const double a = fx.chromaAngle * M_PI / 180.0;
+    const float shift = fx.chromaShift;
+    const QPointF cc = QRectF(content).center();
+    const double rad = std::max(1.0, 0.5 * std::hypot(content.width(), content.height()));
+    std::vector<float> rp(N * 2), bp(N * 2);  // premultiplied red / blue with their coverage
+    auto sample = [&](float sx, float sy, int ch, float* dst) {
+        const int x0 = int(std::floor(sx)), y0 = int(std::floor(sy));
+        const float tx = sx - float(x0), ty = sy - float(y0);
+        float v = 0, al = 0;
+        for (int j = 0; j < 2; ++j)
+            for (int i = 0; i < 2; ++i) {
+                const int xx = x0 + i, yy = y0 + j;
+                if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+                const float wgt = (i ? tx : 1 - tx) * (j ? ty : 1 - ty);
+                const float* p = &o[(size_t(yy) * W + xx) * 4];
+                v += p[ch] * wgt;
+                al += p[3] * wgt;
+            }
+        dst[0] = v;
+        dst[1] = al;
+    };
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            float dx, dy;
+            if (fx.chromaLens) {  // outward from the middle of the picture, growing toward the edges
+                const double vx = (R.left() + x + 0.5 - cc.x()) / rad, vy = (R.top() + y + 0.5 - cc.y()) / rad;
+                const double d = std::hypot(vx, vy);
+                const double f = std::pow(std::min(1.0, d), 1.5);
+                dx = d > 1e-6 ? float(vx / d * f * shift) : 0.f;
+                dy = d > 1e-6 ? float(vy / d * f * shift) : 0.f;
+            } else {
+                dx = float(std::cos(a) * shift);
+                dy = float(std::sin(a) * shift);
+            }
+            const size_t i = size_t(y) * W + x;
+            sample(float(x) - dx, float(y) - dy, 0, &rp[i * 2]);
+            sample(float(x) + dx, float(y) + dy, 2, &bp[i * 2]);
+        }
+    const float soft = std::clamp(fx.chromaSoftness, 0.f, 1.f);
+    if (soft > 0.01f) {
+        // Smooth only the color difference to green: fine noise stays gray noise (no colored specks),
+        // while the wide colored edges of the aberration stay.
+        for (size_t i = 0; i < N; ++i) {
+            const float g = o[i * 4 + 1], ga = o[i * 4 + 3];
+            rp[i * 2] -= g; rp[i * 2 + 1] -= ga;
+            bp[i * 2] -= g; bp[i * 2 + 1] -= ga;
+        }
+        const float sigma = 0.6f + soft * std::max(1.f, std::fabs(shift)) * 0.9f;
+        gaussianBlur(rp.data(), W, H, 2, sigma);
+        gaussianBlur(bp.data(), W, H, 2, sigma);
+        for (size_t i = 0; i < N; ++i) {
+            const float g = o[i * 4 + 1], ga = o[i * 4 + 3];
+            rp[i * 2] += g; rp[i * 2 + 1] = std::clamp(rp[i * 2 + 1] + ga, 0.f, 1.f);
+            bp[i * 2] += g; bp[i * 2 + 1] = std::clamp(bp[i * 2 + 1] + ga, 0.f, 1.f);
+        }
+    }
+    for (size_t i = 0; i < N; ++i) {
+        float* q = &o[i * 4];
+        const float ga = q[3];
+        const float al = std::max({rp[i * 2 + 1], ga, bp[i * 2 + 1]});
+        q[0] = std::clamp(rp[i * 2], 0.f, al);
+        q[2] = std::clamp(bp[i * 2], 0.f, al);
+        q[1] = std::clamp(q[1], 0.f, al);
+        q[3] = std::min(al, 1.f);
+    }
+}
+
+float bayer(int x, int y, int size) {
+    // ordered dither threshold in [0, 1) for a 2x2, 4x4 or 8x8 grid: the bits of (x^y, y) interleaved
+    // and reversed, which gives the classic Bayer matrix ([[0, 2], [3, 1]] for 2x2)
+    int r = 0, xx = x, yy = y;
+    for (int b = 1; b < size; b *= 2) {
+        r = r * 4 + ((((xx ^ yy) & 1) << 1) | (yy & 1));
+        xx >>= 1;
+        yy >>= 1;
+    }
+    return (float(r) + 0.5f) / float(size * size);
+}
+
+float ditherThreshold(int pattern, qint64 x, qint64 y) {
+    switch (pattern) {
+    case 0: return bayer(int(x & 1), int(y & 1), 2);
+    case 1: return bayer(int(x & 3), int(y & 3), 4);
+    case 2: return bayer(int(x & 7), int(y & 7), 8);
+    case 3: return grainNoise(double(x), double(y), 11, 3) + 0.5f;  // white noise
+    default: {  // smooth noise (interleaved gradient noise): even, without a visible grid
+        const double v = 52.9829189 * std::fmod(0.06711056 * double(x) + 0.00583715 * double(y), 1.0);
+        return float(v - std::floor(v));
+    }
+    }
+}
+
+// Dithering: few colors, the tones in between laid out as a pattern of dots.
+void applyDither(std::vector<float>& o, int W, int H, const QRect& R, const LayerEffects& fx) {
+    const int ps = std::clamp(fx.ditherPixel, 1, 8);
+    const int L = std::clamp(fx.ditherLevels, 2, 256);
+    const float str = std::clamp(fx.ditherStrength, 0.f, 1.f);
+    const float op = std::clamp(fx.ditherOpacity, 0.f, 1.f);
+    static const float gb[4][3] = {{15 / 255.f, 56 / 255.f, 15 / 255.f}, {48 / 255.f, 98 / 255.f, 48 / 255.f},
+                                   {139 / 255.f, 172 / 255.f, 15 / 255.f}, {155 / 255.f, 188 / 255.f, 15 / 255.f}};
+    std::vector<std::array<float, 3>> own;
+    for (const QColor& c : fx.ditherColors) own.push_back({float(c.redF()), float(c.greenF()), float(c.blueF())});
+    const bool ownPal = fx.ditherPalette == 3 && !own.empty();
+    const std::vector<float> src = o;  // big pixels read from the untouched picture
+    auto floorDiv = [](qint64 a, qint64 b) { return a >= 0 ? a / b : -((-a + b - 1) / b); };
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            const qint64 gx = R.left() + x, gy = R.top() + y;
+            float px[4];
+            if (ps > 1) {  // one big pixel: the average of its block (blocks sit on the canvas grid)
+                const qint64 bx = floorDiv(gx, ps) * ps - R.left(), by = floorDiv(gy, ps) * ps - R.top();
+                float acc[4] = {0, 0, 0, 0};
+                int cnt = 0;
+                for (int j = 0; j < ps; ++j)
+                    for (int i = 0; i < ps; ++i) {
+                        const qint64 xx = bx + i, yy = by + j;
+                        if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+                        const float* q = &src[(size_t(yy) * W + size_t(xx)) * 4];
+                        for (int k = 0; k < 4; ++k) acc[k] += q[k];
+                        ++cnt;
+                    }
+                for (int k = 0; k < 4; ++k) px[k] = cnt ? acc[k] / float(cnt) : 0.f;
+            } else {
+                for (int k = 0; k < 4; ++k) px[k] = src[(size_t(y) * W + x) * 4 + size_t(k)];
+            }
+            const float a = px[3];
+            float* q = &o[(size_t(y) * W + x) * 4];
+            if (a <= 1e-4f) {
+                if (ps > 1) q[0] = q[1] = q[2] = q[3] = 0.f;
+                continue;
+            }
+            const float col[3] = {px[0] / a, px[1] / a, px[2] / a};
+            const float t = ditherThreshold(fx.ditherPattern, floorDiv(gx, ps), floorDiv(gy, ps));
+            const float d = (t - 0.5f) * str;
+            float res[3];
+            if (fx.ditherPalette == 1 || fx.ditherPalette == 2) {
+                const float lum = luminance(col[0], col[1], col[2]);
+                const int lv = fx.ditherPalette == 2 ? 4 : L;
+                const int idx = std::clamp(int(std::floor(lum * float(lv - 1) + 0.5f + d)), 0, lv - 1);
+                if (fx.ditherPalette == 2) {
+                    for (int k = 0; k < 3; ++k) res[k] = gb[idx][k];
+                } else {
+                    for (int k = 0; k < 3; ++k) res[k] = float(idx) / float(lv - 1);
+                }
+            } else if (ownPal) {
+                const float spread = 0.6f / std::sqrt(float(own.size()));
+                float best = 1e9f;
+                int bi = 0;
+                for (size_t i = 0; i < own.size(); ++i) {
+                    float dd = 0;
+                    for (int k = 0; k < 3; ++k) {
+                        const float e = col[k] + d * spread - own[i][size_t(k)];
+                        dd += e * e;
+                    }
+                    if (dd < best) { best = dd; bi = int(i); }
+                }
+                for (int k = 0; k < 3; ++k) res[k] = own[size_t(bi)][size_t(k)];
+            } else {
+                for (int k = 0; k < 3; ++k)
+                    res[k] = float(std::clamp(int(std::floor(col[k] * float(L - 1) + 0.5f + d)), 0, L - 1)) / float(L - 1);
+            }
+            const float* orig = &src[(size_t(y) * W + x) * 4];
+            const float oa = orig[3];
+            for (int k = 0; k < 3; ++k) {
+                const float o0 = oa > 1e-4f ? orig[k] / oa : 0.f;
+                const float v = o0 + (res[k] - o0) * op;
+                q[k] = v * (ps > 1 ? (oa + (a - oa) * op) : oa);
+            }
+            if (ps > 1) q[3] = oa + (a - oa) * op;
+        }
+}
+
+}  // namespace
 
 void renderEffectsTile(const Layer& l, const QRect& tr, quint32* out) {
     const LayerEffects& fx = l.fx;
@@ -140,8 +372,9 @@ void renderEffectsTile(const Layer& l, const QRect& tr, quint32* out) {
         }
     }
 
-    if (fx.grain && fx.grainAmount > 0) {
-        // film grain, only where the layer has paint
+    // film grain, only where the layer has paint. With chromatic aberration it comes after the
+    // aberration (else its dots would drift apart into colored speckles).
+    auto grainOn = [&](std::vector<float>& buf) {
         const float amt = std::clamp(fx.grainAmount, 0.f, 1.f) * 2.f;
         std::vector<float> g(size_t(W) * 4);
         for (int y = 0; y < H; ++y) {
@@ -154,9 +387,12 @@ void renderEffectsTile(const Layer& l, const QRect& tr, quint32* out) {
                 }
                 g[size_t(x) * 4 + 3] = 1.f;
             }
-            blendRowAtop(BlendMode(fx.grainBlend), &c[size_t(y) * W * 4], g.data(), W);
+            blendRowAtop(BlendMode(fx.grainBlend), &buf[size_t(y) * W * 4], g.data(), W);
         }
-    }
+    };
+    const bool grainNow = fx.grain && fx.grainAmount > 0;
+    const bool grainLate = grainNow && fx.chromatic && std::fabs(fx.chromaShift) >= 0.25f;
+    if (grainNow && !grainLate) grainOn(c);
 
     if (fx.screentone) {
         // tones become printed dots / lines in one ink color (manga screentone)
@@ -287,45 +523,13 @@ void renderEffectsTile(const Layer& l, const QRect& tr, quint32* out) {
 
     blendRow(BlendMode::Normal, o.data(), c.data(), int(N));
 
+    if (fx.steps) applySteps(o, W, H, R, fx);
     if (fx.chromatic && std::fabs(fx.chromaShift) >= 0.25f) {
-        // chromatic aberration: the red channel drifts one way, blue the other, green stays.
-        // Alpha follows the widest channel so the colored fringes show outside the shape.
-        const double a = fx.chromaAngle * M_PI / 180.0;
-        const float sx = float(std::cos(a) * fx.chromaShift), sy = float(std::sin(a) * fx.chromaShift);
-        std::vector<float> res(N * 4);
-        auto at = [&](float fx_, float fy_, int ch) {
-            // bilinear sample of the straight color channel 'ch' (with its alpha) at a fractional position
-            const int x0 = int(std::floor(fx_)), y0 = int(std::floor(fy_));
-            const float tx = fx_ - float(x0), ty = fy_ - float(y0);
-            float v = 0, al = 0;
-            for (int j = 0; j < 2; ++j)
-                for (int i = 0; i < 2; ++i) {
-                    const int xx = x0 + i, yy = y0 + j;
-                    if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
-                    const float w = (i ? tx : 1 - tx) * (j ? ty : 1 - ty);
-                    const float* p = &o[(size_t(yy) * W + xx) * 4];
-                    v += p[ch] * w;
-                    al += p[3] * w;
-                }
-            return std::make_pair(v, al);
-        };
-        for (int y = 0; y < H; ++y)
-            for (int x = 0; x < W; ++x) {
-                const auto [r, ra] = at(float(x) - sx, float(y) - sy, 0);
-                const float* gp = &o[(size_t(y) * W + x) * 4];
-                const float g = gp[1], ga = gp[3];
-                const auto [b, ba] = at(float(x) + sx, float(y) + sy, 2);
-                const float al = std::max({ra, ga, ba});
-                float* q = &res[(size_t(y) * W + x) * 4];
-                // over transparent areas each channel fades in with its own coverage
-                q[0] = r + (al - ra);  // where only green/blue exist, the missing red counts as white
-                q[1] = g + (al - ga);
-                q[2] = b + (al - ba);
-                q[3] = al;
-                for (int k = 0; k < 3; ++k) q[k] = std::clamp(q[k], 0.f, al);
-            }
-        o.swap(res);
+        const QRect content = (l.fxCache && !l.fxCache->content.isEmpty()) ? l.fxCache->content : (surf ? surf->tileBounds() : R);
+        applyChromatic(o, W, H, R, fx, content);
     }
+    if (grainLate) grainOn(o);
+    if (fx.dither) applyDither(o, W, H, R, fx);
 
     for (int y = 0; y < TILE; ++y)
         for (int x = 0; x < TILE; ++x) out[y * TILE + x] = pack(&o[(size_t(y + m) * W + size_t(x + m)) * 4]);

@@ -1,5 +1,6 @@
 #include "core/Compositor.h"
 
+#include <algorithm>
 #include <cstring>
 
 #include "core/Effects.h"
@@ -154,6 +155,38 @@ void applyLayer(const Layer* l, const Ctx& c, float* acc, bool atop) {
     else blendRow(l->blend, acc, tmp.p, c.n);
 }
 
+// A layer clipped to a base: blends with everything below, limited to where the base has paint.
+void applyClipped(const Layer* l, const Ctx& c, float* acc, const float* clip) {
+    if (!shown(l, c)) return;
+    if (l->type() == LayerType::Adjustment) {
+        auto* a = static_cast<const AdjustmentLayer*>(l);
+        if (!a->processor || a->processor->isIdentity()) return;
+        Scratch tmp(size_t(c.n) * 4);
+        std::memcpy(tmp.p, acc, sizeof(float) * size_t(c.n) * 4);
+        a->processor->apply(tmp.p, c.n);
+        std::vector<float> w(clip, clip + c.n);
+        if (const MaskSurface* ms = a->displayMask()) {
+            std::vector<float>& m = maskScratch();
+            if (m.size() < size_t(c.n)) m.resize(size_t(c.n));
+            readMask(*ms, c.r, m.data());
+            for (int p = 0; p < c.n; ++p) w[size_t(p)] *= m[size_t(p)];
+        }
+        lerpInto(acc, tmp.p, c.n, a->opacity, w.data());
+        return;
+    }
+    Scratch tmp(size_t(c.n) * 4);
+    if (!renderContent(l, c, tmp.p)) return;
+    scale(tmp.p, c.n, l->opacity);
+    if (l->blend == BlendMode::Dissolve) dissolveRect(tmp.p, c.r);
+    for (int p = 0; p < c.n; ++p) {
+        const float k = clip[p];
+        if (k >= 1.f) continue;
+        float* q = tmp.p + p * 4;
+        q[0] *= k; q[1] *= k; q[2] *= k; q[3] *= k;
+    }
+    blendRow(l->blend, acc, tmp.p, c.n);
+}
+
 void compositeStack(const GroupLayer* g, const Ctx& c, float* acc) {
     const auto& ch = g->children;
     const int n = int(ch.size());
@@ -172,12 +205,17 @@ void compositeStack(const GroupLayer* g, const Ctx& c, float* acc) {
             i = j;
             continue;
         }
-        Scratch tmp(size_t(c.n) * 4);
-        if (renderContent(base, c, tmp.p)) {
-            for (int k = i + 1; k < j; ++k) applyLayer(ch[size_t(k)].get(), c, tmp.p, true);
-            scale(tmp.p, c.n, base->opacity);
-            if (base->blend == BlendMode::Dissolve) dissolveRect(tmp.p, c.r);
-            blendRow(base->blend, acc, tmp.p, c.n);
+        // A clipping group, the way Clip Studio and SAI do it: the base is drawn as usual, and
+        // every clipped layer blends with the whole picture below (its blend mode works on
+        // everything under it), only where the base has paint.
+        Scratch base_(size_t(c.n) * 4);
+        if (renderContent(base, c, base_.p)) {
+            std::vector<float> clip(size_t(c.n));
+            for (int p = 0; p < c.n; ++p) clip[size_t(p)] = std::clamp(base_.p[p * 4 + 3], 0.f, 1.f);
+            scale(base_.p, c.n, base->opacity);
+            if (base->blend == BlendMode::Dissolve) dissolveRect(base_.p, c.r);
+            blendRow(base->blend, acc, base_.p, c.n);
+            for (int k = i + 1; k < j; ++k) applyClipped(ch[size_t(k)].get(), c, acc, clip.data());
         }
         i = j;
     }

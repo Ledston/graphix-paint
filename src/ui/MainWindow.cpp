@@ -558,7 +558,8 @@ void MainWindow::createActions() {
         act("filter." + id, f.second + "...", "Filters", {}, [this, id] { filter(id); });
     }
     // layer effects as filters: set up with sliders, then drawn into the pixels
-    for (const char* key : {"chromatic", "outline", "shadow", "outerGlow", "innerShadow", "innerGlow", "overlay", "gradient", "texture"}) {
+    for (const char* key : {"chromatic", "steps", "dither", "outline", "shadow", "outerGlow", "innerShadow", "innerGlow", "overlay", "gradient",
+                            "texture"}) {
         QString k = key, name;
         for (const auto& e : effectKeys())
             if (e.first == k) name = e.second;
@@ -823,7 +824,7 @@ void MainWindow::createMenus() {
     add(adjM, "filter.liquify");
     QMenu* fxM = filt->addMenu(Theme::icon("fx"), T("Effects"));
     fxM->setToolTipsVisible(true);
-    for (const char* id : {"filter.fx.chromatic", "", "filter.fx.outline", "filter.fx.shadow", "filter.fx.outerGlow", "", "filter.fx.innerShadow",
+    for (const char* id : {"filter.fx.chromatic", "filter.fx.steps", "filter.fx.dither", "", "filter.fx.outline", "filter.fx.shadow", "filter.fx.outerGlow", "", "filter.fx.innerShadow",
                            "filter.fx.innerGlow", "", "filter.fx.overlay", "filter.fx.gradient", "filter.fx.texture"}) {
         if (!*id) fxM->addSeparator();
         else add(fxM, id);

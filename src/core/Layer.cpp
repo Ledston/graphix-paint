@@ -23,9 +23,27 @@ int LayerEffects::margin() const {
         m = std::max(m, int(std::ceil(innerShadowBlur * 3 + std::max(std::fabs(innerShadowOffset.x()), std::fabs(innerShadowOffset.y())))) + 2);
     if (outerGlow) m = std::max(m, int(std::ceil(outerGlowSize * 3)) + 2);
     if (innerGlow) m = std::max(m, int(std::ceil(innerGlowSize * 3)) + 2);
-    if (chromatic) m = std::max(m, int(std::ceil(std::fabs(chromaShift))) + 2);
+    if (chromatic)
+        m = std::max(m, int(std::ceil(std::fabs(chromaShift) * (1.f + 2.8f * std::clamp(chromaSoftness, 0.f, 1.f)) + (chromaSoftness > 0.01f ? 2.f : 0.f))) + 2);
+    if (dither && ditherPixel > 1) m = std::max(m, ditherPixel + 1);
     return m;
 }
+
+namespace {
+QJsonArray colorsJson(const QVector<QColor>& v) {
+    QJsonArray a;
+    for (const QColor& c : v) a << c.name(QColor::HexRgb);
+    return a;
+}
+QVector<QColor> colorsFrom(const QJsonValue& v) {
+    QVector<QColor> out;
+    for (const QJsonValue& x : v.toArray()) {
+        const QColor c(x.toString());
+        if (c.isValid() && out.size() < 64) out << c;
+    }
+    return out;
+}
+}  // namespace
 
 QJsonObject LayerEffects::toJson() const {
     return QJsonObject{
@@ -45,7 +63,12 @@ QJsonObject LayerEffects::toJson() const {
         {"grainSize", grainSize}, {"grainMono", grainMono}, {"grainBlend", grainBlend}, {"grainSeed", grainSeed},
         {"screentone", screentone}, {"toneCell", toneCell}, {"toneAngle", toneAngle}, {"toneShape", toneShape},
         {"toneColor", colorJson(toneColor)}, {"toneKeepWhite", toneKeepWhite}, {"chromatic", chromatic},
-        {"chromaShift", chromaShift}, {"chromaAngle", chromaAngle}};
+        {"chromaShift", chromaShift}, {"chromaAngle", chromaAngle}, {"chromaSoftness", chromaSoftness}, {"chromaLens", chromaLens},
+        {"dither", dither}, {"ditherLevels", ditherLevels}, {"ditherPattern", ditherPattern}, {"ditherStrength", ditherStrength},
+        {"ditherPixel", ditherPixel}, {"ditherPalette", ditherPalette}, {"ditherColors", colorsJson(ditherColors)},
+        {"ditherOpacity", ditherOpacity}, {"steps", steps}, {"stepsCount", stepsCount}, {"stepsMode", stepsMode},
+        {"stepsSoftness", stepsSoftness}, {"stepsNoise", stepsNoise}, {"stepsGrain", stepsGrain}, {"stepsLow", stepsLow},
+        {"stepsHigh", stepsHigh}, {"stepsKeepLines", stepsKeepLines}, {"stepsOpacity", stepsOpacity}, {"stepsSeed", stepsSeed}};
 }
 
 LayerEffects LayerEffects::fromJson(const QJsonObject& o) {
@@ -103,6 +126,27 @@ LayerEffects LayerEffects::fromJson(const QJsonObject& o) {
     e.chromatic = o.value("chromatic").toBool();
     e.chromaShift = f("chromaShift", e.chromaShift);
     e.chromaAngle = f("chromaAngle", e.chromaAngle);
+    e.chromaSoftness = std::clamp(f("chromaSoftness", 0.f), 0.f, 1.f);
+    e.chromaLens = o.value("chromaLens").toBool();
+    e.dither = o.value("dither").toBool();
+    e.ditherLevels = std::clamp(o.value("ditherLevels").toInt(e.ditherLevels), 2, 256);
+    e.ditherPattern = std::clamp(o.value("ditherPattern").toInt(e.ditherPattern), 0, 4);
+    e.ditherStrength = std::clamp(f("ditherStrength", e.ditherStrength), 0.f, 1.f);
+    e.ditherPixel = std::clamp(o.value("ditherPixel").toInt(e.ditherPixel), 1, 8);
+    e.ditherPalette = std::clamp(o.value("ditherPalette").toInt(e.ditherPalette), 0, 3);
+    e.ditherColors = colorsFrom(o.value("ditherColors"));
+    e.ditherOpacity = std::clamp(f("ditherOpacity", e.ditherOpacity), 0.f, 1.f);
+    e.steps = o.value("steps").toBool();
+    e.stepsCount = std::clamp(o.value("stepsCount").toInt(e.stepsCount), 2, 16);
+    e.stepsMode = std::clamp(o.value("stepsMode").toInt(e.stepsMode), 0, 1);
+    e.stepsSoftness = std::clamp(f("stepsSoftness", e.stepsSoftness), 0.f, 1.f);
+    e.stepsNoise = std::clamp(f("stepsNoise", e.stepsNoise), 0.f, 1.f);
+    e.stepsGrain = std::clamp(f("stepsGrain", e.stepsGrain), 1.f, 16.f);
+    e.stepsLow = std::clamp(f("stepsLow", e.stepsLow), 0.f, 1.f);
+    e.stepsHigh = std::clamp(f("stepsHigh", e.stepsHigh), 0.f, 1.f);
+    e.stepsKeepLines = o.value("stepsKeepLines").toBool(e.stepsKeepLines);
+    e.stepsOpacity = std::clamp(f("stepsOpacity", e.stepsOpacity), 0.f, 1.f);
+    e.stepsSeed = o.value("stepsSeed").toInt(e.stepsSeed);
     return e;
 }
 

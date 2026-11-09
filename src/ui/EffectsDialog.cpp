@@ -9,7 +9,9 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QVBoxLayout>
+#include <cmath>
 
+#include "app/App.h"
 #include "app/I18n.h"
 #include "core/BlendModes.h"
 #include "core/Document.h"
@@ -22,7 +24,8 @@ QList<QPair<QString, QString>> effectKeys() {
     return {{"outline", "Outline"},          {"shadow", "Drop shadow"},          {"outerGlow", "Outer glow"},
             {"innerShadow", "Inner shadow"}, {"innerGlow", "Inner glow"},        {"overlay", "Color overlay"},
             {"gradient", "Gradient overlay"}, {"blur", "Blur"},                  {"texture", "Paper texture"},
-            {"grain", "Grain (noise)"},      {"screentone", "Screentone"},       {"chromatic", "Chromatic aberration"}};
+            {"grain", "Grain (noise)"},      {"screentone", "Screentone"},       {"chromatic", "Chromatic aberration"},
+            {"steps", "Color steps"},        {"dither", "Dithering"}};
 }
 
 bool* effectSwitch(LayerEffects& fx, const QString& key) {
@@ -38,6 +41,8 @@ bool* effectSwitch(LayerEffects& fx, const QString& key) {
     if (key == "grain") return &fx.grain;
     if (key == "screentone") return &fx.screentone;
     if (key == "chromatic") return &fx.chromatic;
+    if (key == "steps") return &fx.steps;
+    if (key == "dither") return &fx.dither;
     return nullptr;
 }
 
@@ -79,6 +84,25 @@ void addEffectControls(const QString& key, LayerEffects* fx, QVBoxLayout* lay, Q
         QObject::connect(cb, &QComboBox::currentIndexChanged, ctx, [cb, field, changed] { *field = cb->currentData().toInt(); changed(); });
         row->addWidget(cb, 1);
         lay->addLayout(row);
+    };
+    auto intBar = [&](const QString& label, int min, int max, int* field, const QString& suffix = {}) {
+        auto* b = new ValueBar(label, min, max, 0, body);
+        b->setSuffix(suffix);
+        b->setValue(*field);
+        QObject::connect(b, &ValueBar::valueChanged, ctx, [field, changed](double x) { *field = int(std::lround(x)); changed(); });
+        lay->addWidget(b);
+        return b;
+    };
+    auto combo = [&](const QString& label, const QStringList& items, int* field) {
+        auto* row = new QHBoxLayout;
+        row->addWidget(new QLabel(label, body));
+        auto* cb = new QComboBox(body);
+        cb->addItems(items);
+        cb->setCurrentIndex(std::clamp(*field, 0, int(items.size()) - 1));
+        QObject::connect(cb, &QComboBox::currentIndexChanged, ctx, [field, changed](int i) { *field = i; changed(); });
+        row->addWidget(cb, 1);
+        lay->addLayout(row);
+        return cb;
     };
     auto checkBox = [&](const QString& text, bool* field) {
         auto* c = new QCheckBox(text, body);
@@ -158,6 +182,73 @@ void addEffectControls(const QString& key, LayerEffects* fx, QVBoxLayout* lay, Q
     } else if (key == "chromatic") {
         bar(T("Shift"), -40, 40, 1, &fx->chromaShift, 1, " px");
         bar(T("Angle"), -180, 180, 0, &fx->chromaAngle, 1, QString(QChar(0xB0)));
+        auto* sb = bar(T("Softness"), 0, 1, 2, &fx->chromaSoftness, 100, "%");
+        sb->setToolTip(T("Smooths the drifted colors: on a noisy picture you get colored edges, not colored specks"));
+        checkBox(T("Like a lens: clean in the middle, stronger toward the edges"), &fx->chromaLens);
+    } else if (key == "steps") {
+        intBar(T("Steps"), 2, 16, &fx->stepsCount);
+        combo(T("Steps by"), {T("Brightness (keeps the colors)"), T("Each color")}, &fx->stepsMode);
+        bar(T("Soft borders"), 0, 1, 2, &fx->stepsSoftness, 100, "%");
+        bar(T("Rough borders"), 0, 1, 2, &fx->stepsNoise, 100, "%")->setToolTip(T("Noise on the borders between the steps"));
+        bar(T("Grain size"), 1, 16, 1, &fx->stepsGrain, 1, " px");
+        bar(T("From brightness"), 0, 1, 2, &fx->stepsLow, 100, "%")->setToolTip(T("Works only on tones brighter than this"));
+        bar(T("To brightness"), 0, 1, 2, &fx->stepsHigh, 100, "%")->setToolTip(T("Works only on tones darker than this"));
+        checkBox(T("Keep dark lines"), &fx->stepsKeepLines);
+        bar(T("Opacity"), 0, 1, 2, &fx->stepsOpacity, 100, "%");
+        auto* seed = new QPushButton(T("New random pattern"), body);
+        QObject::connect(seed, &QPushButton::clicked, ctx, [fx, changed] { ++fx->stepsSeed; changed(); });
+        lay->addWidget(seed);
+    } else if (key == "dither") {
+        auto* pr = new QHBoxLayout;  // presets: one click, then fine tuning below
+        lay->addLayout(pr);
+        auto* levels = intBar(T("Colors per channel"), 2, 64, &fx->ditherLevels);
+        auto* pattern = combo(T("Pattern"), {T("Grid 2x2"), T("Grid 4x4"), T("Grid 8x8"), T("Noise"), T("Smooth noise")}, &fx->ditherPattern);
+        auto* strength = bar(T("Strength"), 0, 1, 2, &fx->ditherStrength, 100, "%");
+        auto* pixel = intBar(T("Pixel size"), 1, 8, &fx->ditherPixel, " px");
+        auto* palette = combo(T("Palette"), {T("Full color"), T("Gray"), T("Game Boy"), T("Own colors")}, &fx->ditherPalette);
+        auto* own = new QPushButton(T("Own colors: the main, sub and recent colors"), body);
+        own->setToolTip(T("Fills the palette \"Own colors\" with your main and sub color and the colors you used last"));
+        lay->addWidget(own);
+        auto* opacity = bar(T("Opacity"), 0, 1, 2, &fx->ditherOpacity, 100, "%");
+        auto show = [=] {  // the controls follow a preset
+            levels->setValue(fx->ditherLevels);
+            pattern->setCurrentIndex(fx->ditherPattern);
+            strength->setValue(fx->ditherStrength);
+            pixel->setValue(fx->ditherPixel);
+            palette->setCurrentIndex(fx->ditherPalette);
+            opacity->setValue(fx->ditherOpacity);
+        };
+        auto preset = [&](const QString& name, std::function<void(LayerEffects&)> set) {
+            auto* b = new QPushButton(name, body);
+            QObject::connect(b, &QPushButton::clicked, ctx, [fx, set, changed, show] {
+                set(*fx);
+                show();
+                changed();
+            });
+            pr->addWidget(b);
+        };
+        preset(T("PS1"), [](LayerEffects& f) {
+            f.ditherLevels = 32; f.ditherPattern = 1; f.ditherStrength = 1; f.ditherPixel = 1; f.ditherPalette = 0; f.ditherOpacity = 1;
+        });
+        preset(T("Game Boy"), [](LayerEffects& f) {
+            f.ditherPattern = 1; f.ditherStrength = 1; f.ditherPixel = 2; f.ditherPalette = 2; f.ditherOpacity = 1;
+        });
+        preset(T("8 colors"), [](LayerEffects& f) {
+            f.ditherLevels = 2; f.ditherPattern = 2; f.ditherStrength = 1; f.ditherPixel = 1; f.ditherPalette = 0; f.ditherOpacity = 1;
+        });
+        QObject::connect(own, &QPushButton::clicked, ctx, [fx, changed, palette] {
+            QVector<QColor> v;
+            auto addColor = [&v](const QColor& c) {
+                if (c.isValid() && !v.contains(c) && v.size() < 32) v << c;
+            };
+            addColor(app()->foreground());
+            addColor(app()->background());
+            for (const QColor& c : app()->colorHistory()) addColor(c);
+            fx->ditherColors = v;
+            fx->ditherPalette = 3;
+            palette->setCurrentIndex(3);
+            changed();
+        });
     }
 }
 

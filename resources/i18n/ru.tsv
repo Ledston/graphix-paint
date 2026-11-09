@@ -1494,3 +1494,35 @@ Stabilizer and cursor	Стабилизатор и курсор
 Stroke	Штрих
 The whole stroke is never more opaque than this (the digit keys 1..0 set it)	Весь штрих никогда не плотнее этого (меняется цифрами 1..0)
 This brush has its own stabilizer (brush settings > Stabilizer and cursor)	У этой кисти свой стабилизатор (настройки кисти > Стабилизатор и курсор)
+8 colors	8 цветов
+Brightness (keeps the colors)	Яркость (цвета сохраняются)
+Color steps	Цветовые ступени
+Color steps...	Цветовые ступени...
+Colors per channel	Цветов на канал
+Dithering	Дизеринг
+Dithering...	Дизеринг...
+Each color	Каждый цвет
+Fills the palette "Own colors" with your main and sub color and the colors you used last	Заполняет палитру «Свои цвета» основным и дополнительным цветом и последними использованными
+From brightness	От яркости
+Full color	Полный цвет
+Game Boy	Game Boy
+Grid 2x2	Решётка 2×2
+Grid 4x4	Решётка 4×4
+Grid 8x8	Решётка 8×8
+Keep dark lines	Не трогать тёмные линии
+Like a lens: clean in the middle, stronger toward the edges	Как у объектива: в центре чисто, к краям сильнее
+Noise on the borders between the steps	Шум на границах между ступенями
+Own colors	Свои цвета
+Own colors: the main, sub and recent colors	Свои цвета: основной, дополнительный и последние
+PS1	PS1
+Pixel size	Размер пикселя
+Rough borders	Рваные границы
+Smooth noise	Плавный шум
+Smooths the drifted colors: on a noisy picture you get colored edges, not colored specks	Сглаживает разъехавшиеся цвета: на зашумлённой картинке получаются цветные края, а не цветная крупа
+Soft borders	Мягкие границы
+Softness	Мягкость
+Steps	Ступени
+Steps by	Ступени по
+To brightness	До яркости
+Works only on tones brighter than this	Работает только на тонах светлее этого
+Works only on tones darker than this	Работает только на тонах темнее этого

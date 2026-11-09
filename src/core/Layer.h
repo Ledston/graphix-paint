@@ -84,12 +84,38 @@ struct LayerEffects {
     bool chromatic = false;          // chromatic aberration: red and blue drift apart
     float chromaShift = 4.f;         // px
     float chromaAngle = 0.f;         // degrees
+    float chromaSoftness = 0.f;      // 0..1: smooths the drifted colors (no colored speckles on noisy pictures)
+    bool chromaLens = false;         // like a lens: clean in the middle, stronger toward the edges
+
+    // Dithering: few colors, the in-between tones laid out as a pattern of dots (old consoles)
+    bool dither = false;
+    int ditherLevels = 32;           // levels per channel (32 = PlayStation 15-bit color)
+    int ditherPattern = 1;           // 0 grid 2x2, 1 grid 4x4, 2 grid 8x8, 3 noise, 4 smooth noise
+    float ditherStrength = 1.f;      // 0..1 how much the pattern shows
+    int ditherPixel = 1;             // pixel size, 1..8
+    int ditherPalette = 0;           // 0 full color, 1 gray, 2 Game Boy, 3 own colors
+    QVector<QColor> ditherColors;    // the own colors
+    float ditherOpacity = 1.f;
+
+    // Color steps: smooth shading breaks into flat steps with rough, grainy borders
+    bool steps = false;
+    int stepsCount = 5;              // 2..16
+    int stepsMode = 0;               // 0 by brightness (keeps the hues), 1 by colors
+    float stepsSoftness = 0.1f;      // 0..1 how soft the step borders are
+    float stepsNoise = 0.35f;        // 0..1 how rough / grainy the borders are
+    float stepsGrain = 2.f;          // px, size of the grain on the borders
+    float stepsLow = 0.f, stepsHigh = 1.f;  // the brightness range it works in
+    bool stepsKeepLines = true;      // dark line art stays as it is
+    float stepsOpacity = 1.f;
+    int stepsSeed = 1;
 
     bool anyActive() const {
         return outline || shadow || blur || overlay || texture || innerShadow || outerGlow || innerGlow || gradientOverlay || grain ||
-               screentone || chromatic;
+               screentone || chromatic || dither || steps;
     }
-    bool needsNeighborhood() const { return outline || shadow || blur || innerShadow || outerGlow || innerGlow || chromatic; }
+    bool needsNeighborhood() const {
+        return outline || shadow || blur || innerShadow || outerGlow || innerGlow || chromatic || (dither && ditherPixel > 1);
+    }
     int margin() const;
     QJsonObject toJson() const;
     static LayerEffects fromJson(const QJsonObject& o);

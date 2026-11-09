@@ -234,7 +234,15 @@ void LayerDelegate::paint(QPainter* p, const QStyleOptionViewItem& opt, const QM
     p->drawPixmap(eyeRect(r), Theme::iconPixmap(l->visible ? "eye" : "eye-off", 20, l->visible ? fg : dim));
     QRect tr = thumbRect(r);
     if (l->clipping) {
-        p->fillRect(QRect(tr.left() - 5, r.top() + 3, 3, r.height() - 6), sel ? c.accentText : c.accent);
+        // clipped: an arrow pointing down to the layer it is clipped to
+        const QColor ac = sel ? c.accentText : c.accent;
+        p->setRenderHint(QPainter::Antialiasing, true);
+        p->setPen(QPen(ac, 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        const double ax = tr.left() - 4.5, ay = r.bottom() - 4.0;
+        p->drawLine(QPointF(ax, r.top() + 5.0), QPointF(ax, ay));
+        p->drawLine(QPointF(ax - 3.0, ay - 4.0), QPointF(ax, ay));
+        p->drawLine(QPointF(ax + 3.0, ay - 4.0), QPointF(ax, ay));
+        p->setRenderHint(QPainter::Antialiasing, false);
     }
     if (l->isGroup()) {
         p->drawPixmap(tr.adjusted(4, 4, -4, -4), Theme::iconPixmap("folder", kThumb - 8, fg));
@@ -770,6 +778,8 @@ void LayerPanel::contextMenu(const QPoint& pos) {
     fxToggle(fxM, T("Paper texture"), &LayerEffects::texture, "texture");
     fxToggle(fxM, T("Grain (noise)"), &LayerEffects::grain, "grain");
     fxToggle(fxM, T("Screentone"), &LayerEffects::screentone, "screentone");
+    fxToggle(fxM, T("Color steps"), &LayerEffects::steps, "steps");
+    fxToggle(fxM, T("Dithering"), &LayerEffects::dither, "dither");
 
     // ---- channels (alpha and color channels)
     QMenu* ch = m.addMenu(Theme::icon("channels"), T("Channels"));

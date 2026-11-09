@@ -116,9 +116,13 @@ Layer* insertLayer(Document& doc, LayerPtr layer, Layer* above, bool undo, const
     if (ref && ref->parent) {
         parent = ref->parent;
         index = parent->indexOf(ref) + 1;
-        // A new layer above a clipped layer joins the clipping group (like Photoshop).
-        if (ref->clipping && layer->hasPixels()) layer->clipping = true;
     }
+    // A new empty layer inside a clipping group (a clipped layer right above it) joins the group,
+    // so the group stays whole. Anywhere else (on top of a group too) a layer keeps its own
+    // setting: a new layer, a pasted picture or an import is free and works with the whole picture.
+    const bool insideGroup = index < int(parent->children.size()) && parent->children[size_t(index)]->clipping;
+    const bool emptyNew = layer->isRaster() && static_cast<const RasterLayer*>(layer.get())->pixels.isEmpty();
+    if (insideGroup && emptyNew) layer->clipping = true;
     Layer* raw = layer.get();
     parent->insert(index, std::move(layer));
     doc.setCurrentLayer(raw->id);

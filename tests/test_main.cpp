@@ -14,6 +14,8 @@
 
 #include "brush/BrushStroke.h"
 #include "core/Compositor.h"
+#include "core/Effects.h"
+#include <QSet>
 #include "core/Document.h"
 #include "core/ReplaceColor.h"
 #include "tools/FramesTool.h"
@@ -1031,6 +1033,220 @@ static void testFramesAndBalloons() {
     CHECK(tl.cache.pixel(int(in.x()), int(in.y())) == 0xffffffffu);
 }
 
+static void testClippingLikeClipStudio() {
+    // a clipped layer blends with the whole picture below, only where the base has paint
+    Document d(QSize(64, 64));
+    auto* back = ops::addRasterLayer(d, "back");
+    back->pixels.fillRect(d.bounds(), premulFromColor(QColor(0, 0, 255)));
+    auto* base = ops::addRasterLayer(d, "base");
+    base->pixels.fillRect(QRect(0, 0, 32, 64), premulFromColor(QColor(255, 255, 255, 128)));  // half transparent white
+    auto* mul = ops::addRasterLayer(d, "multiply");
+    mul->pixels.fillRect(d.bounds(), premulFromColor(QColor(128, 128, 128)));
+    mul->blend = BlendMode::Multiply;
+    mul->clipping = true;
+    // under the base: blue + half white = (.5, .5, 1); multiplied by gray .5 where the base covers half
+    // = lerp((.5,.5,1), (.25,.25,.5), .5) = (.375, .375, .75)
+    QColor c = merged(d, 10, 10);
+    std::printf("INFO clipped multiply over a half transparent base: %d %d %d\n", c.red(), c.green(), c.blue());
+    CHECK(std::abs(c.red() - 96) <= 3 && std::abs(c.green() - 96) <= 3 && std::abs(c.blue() - 191) <= 3);
+    CHECK(merged(d, 50, 10) == QColor(0, 0, 255));  // no base: the clipped layer does not show
+    // Screen on a base in Multiply mode: the clipped layer works on the picture, not only on the base
+    Document e(QSize(16, 16));
+    auto* b2 = ops::addRasterLayer(e, "back");
+    b2->pixels.fillRect(e.bounds(), premulFromColor(QColor(200, 100, 0)));
+    auto* shade = ops::addRasterLayer(e, "shade");
+    shade->pixels.fillRect(e.bounds(), premulFromColor(QColor(128, 128, 128)));
+    shade->blend = BlendMode::Multiply;
+    auto* light = ops::addRasterLayer(e, "light");
+    light->pixels.fillRect(e.bounds(), premulFromColor(QColor(0, 0, 255)));
+    light->blend = BlendMode::Screen;
+    light->clipping = true;
+    const QColor sc = merged(e, 4, 4);
+    std::printf("INFO screen clipped to a multiply base: %d %d %d\n", sc.red(), sc.green(), sc.blue());
+    CHECK(std::abs(sc.red() - 100) <= 3 && std::abs(sc.green() - 50) <= 3 && sc.blue() > 250);
+
+    // new layers: an empty one inside a clipping group joins it, on top of the group it is free,
+    // a pasted picture keeps its own setting
+    Document g(QSize(32, 32));
+    auto* gb = ops::addRasterLayer(g, "base");
+    auto* c1 = ops::addRasterLayer(g, "c1");
+    c1->clipping = true;
+    auto* c2 = ops::addRasterLayer(g, "c2");
+    c2->clipping = true;
+    g.setCurrentLayer(c2->id);
+    auto* free1 = ops::addRasterLayer(g, "on top");
+    CHECK(!free1->clipping);
+    g.setCurrentLayer(c1->id);
+    auto* inside = ops::addRasterLayer(g, "inside");
+    CHECK(inside->clipping);
+    g.setCurrentLayer(gb->id);
+    auto pasted = std::make_shared<RasterLayer>();
+    pasted->pixels.fillRect(QRect(0, 0, 8, 8), premulFromColor(Qt::red));
+    Layer* pl = ops::insertLayer(g, pasted, gb, true, "Paste");
+    CHECK(pl && !pl->clipping);
+    g.setCurrentLayer(c2->id);
+    auto pasted2 = std::make_shared<RasterLayer>();
+    pasted2->pixels.fillRect(QRect(0, 0, 8, 8), premulFromColor(Qt::red));
+    Layer* pl2 = ops::insertLayer(g, pasted2, c2, true, "Paste");
+    CHECK(pl2 && !pl2->clipping);
+
+    // merging a clipped layer down gives what was on the screen
+    Document m(QSize(32, 32));
+    auto* mb = ops::addRasterLayer(m, "base");
+    mb->pixels.fillRect(QRect(0, 0, 16, 32), premulFromColor(QColor(200, 150, 100)));
+    auto* mc = ops::addRasterLayer(m, "clip");
+    mc->pixels.fillRect(m.bounds(), premulFromColor(QColor(128, 128, 128)));
+    mc->blend = BlendMode::Multiply;
+    mc->clipping = true;
+    const QColor before = merged(m, 5, 5), beforeOut = merged(m, 25, 5);
+    m.setCurrentLayer(mc->id);
+    CHECK(ops::mergeDown(m, mc->id));
+    CHECK(merged(m, 5, 5) == before && merged(m, 25, 5) == beforeOut);
+}
+
+static QColor bakedAt(const RasterLayer& l, const LayerEffects& fx, const QRect& area, int x, int y) {
+    RasterSurface s = bakeEffects(l, fx, area, nullptr);
+    return colorFromPremul(s.pixel(x, y));
+}
+
+static void testNewEffects() {
+    // chromatic aberration: a white square on nothing gets a red edge on one side, blue on the
+    // other, and no white is added outside
+    auto sq = std::make_shared<RasterLayer>();
+    sq->pixels.fillRect(QRect(40, 40, 40, 40), premulFromColor(Qt::white));
+    LayerEffects ch;
+    ch.chromatic = true;
+    ch.chromaShift = 4;
+    const QRect area(0, 0, 128, 128);
+    const QColor right = bakedAt(*sq, ch, area, 81, 60), left = bakedAt(*sq, ch, area, 38, 60);
+    std::printf("INFO aberration fringes: right %d,%d,%d,%d left %d,%d,%d,%d\n", right.red(), right.green(), right.blue(), right.alpha(),
+                left.red(), left.green(), left.blue(), left.alpha());
+    CHECK(right.red() > 240 && right.green() < 10 && right.blue() < 10 && right.alpha() > 240);
+    CHECK(left.blue() > 240 && left.red() < 10 && left.green() < 10);
+    CHECK(bakedAt(*sq, ch, area, 60, 60) == QColor(Qt::white));
+    // softness: on noise the drifted colors are calmer
+    auto noisy = std::make_shared<RasterLayer>();
+    for (int y = 0; y < 128; ++y)
+        for (int x = 0; x < 128; ++x) {
+            const int v = 128 + int(grainNoise(x, y, 0, 5) * 200);
+            noisy->pixels.setPixel(x, y, premulFromColor(QColor(v, v, v)));
+        }
+    auto chroma = [&](float soft) {
+        LayerEffects f = ch;
+        f.chromaSoftness = soft;
+        RasterSurface s = bakeEffects(*noisy, f, area, nullptr);
+        double sum = 0;
+        for (int y = 30; y < 98; ++y)
+            for (int x = 30; x < 98; ++x) {
+                const QColor c = colorFromPremul(s.pixel(x, y));
+                sum += std::abs(c.red() - c.green()) + std::abs(c.blue() - c.green());
+            }
+        return sum / (68.0 * 68.0);
+    };
+    const double hard = chroma(0), soft = chroma(1);
+    std::printf("INFO color speckles on noise: softness 0 -> %.1f, softness 100%% -> %.1f\n", hard, soft);
+    CHECK(soft < hard * 0.6);
+    // lens mode: nothing in the middle of the picture, a shift toward the edges
+    auto wide = std::make_shared<RasterLayer>();
+    wide->pixels.fillRect(QRect(0, 0, 128, 128), premulFromColor(QColor(90, 90, 90)));
+    wide->pixels.fillRect(QRect(60, 0, 8, 128), premulFromColor(Qt::white));
+    wide->pixels.fillRect(QRect(118, 0, 4, 128), premulFromColor(Qt::white));
+    LayerEffects lens = ch;
+    lens.chromaLens = true;
+    lens.chromaShift = 6;
+    const QColor mid = bakedAt(*wide, lens, area, 63, 64);
+    CHECK(mid == QColor(Qt::white));
+    const QColor edge = bakedAt(*wide, lens, area, 123, 64);
+    CHECK(edge.red() > edge.blue() + 60);
+
+    // dithering
+    auto grad = std::make_shared<RasterLayer>();
+    for (int y = 0; y < 64; ++y)
+        for (int x = 0; x < 128; ++x) grad->pixels.setPixel(x, y, premulFromColor(QColor(x * 2, 255 - x * 2, x)));
+    LayerEffects di;
+    di.dither = true;  // PS1: 32 levels, 4x4 grid
+    RasterSurface ps1 = bakeEffects(*grad, di, QRect(0, 0, 128, 64), nullptr);
+    bool levelsOk = true;
+    for (int x = 0; x < 128; x += 3) {
+        const QColor c = colorFromPremul(ps1.pixel(x, 10));
+        for (int v : {c.red(), c.green(), c.blue()}) {
+            const double l = v / 255.0 * 31.0;
+            if (std::abs(l - std::round(l)) > 0.06) levelsOk = false;
+        }
+    }
+    CHECK(levelsOk);
+    LayerEffects gray = di;
+    gray.ditherPalette = 1;
+    gray.ditherLevels = 2;
+    RasterSurface bw = bakeEffects(*grad, gray, QRect(0, 0, 128, 64), nullptr);
+    int blacks = 0, whites = 0, others = 0;
+    for (int x = 0; x < 128; ++x) {
+        const QColor c = colorFromPremul(bw.pixel(x, 20));
+        if (c == QColor(0, 0, 0)) ++blacks;
+        else if (c == QColor(255, 255, 255)) ++whites;
+        else ++others;
+    }
+    CHECK(others == 0 && blacks > 20 && whites > 20);
+    LayerEffects gb = di;
+    gb.ditherPalette = 2;
+    gb.ditherPixel = 4;
+    RasterSurface gbs = bakeEffects(*grad, gb, QRect(0, 0, 128, 64), nullptr);
+    const QSet<QRgb> gbColors = {qRgb(15, 56, 15), qRgb(48, 98, 48), qRgb(139, 172, 15), qRgb(155, 188, 15)};
+    bool onlyGb = true, blocks = true;
+    for (int y = 0; y < 64; y += 5)
+        for (int x = 0; x < 128; x += 3) {
+            const QColor c = colorFromPremul(gbs.pixel(x, y));
+            if (!gbColors.contains(c.rgb())) onlyGb = false;
+            if (gbs.pixel(x, y) != gbs.pixel(x / 4 * 4, y / 4 * 4)) blocks = false;
+        }
+    CHECK(onlyGb && blocks);
+    LayerEffects half = di;
+    half.ditherOpacity = 0;
+    CHECK(bakeEffects(*grad, half, QRect(0, 0, 128, 64), nullptr).pixel(77, 9) == grad->pixels.pixel(77, 9));
+
+    // color steps
+    auto ramp = std::make_shared<RasterLayer>();
+    for (int y = 0; y < 32; ++y)
+        for (int x = 0; x < 128; ++x) ramp->pixels.setPixel(x, y, premulFromColor(QColor(x * 2, x * 2, x * 2)));
+    LayerEffects st;
+    st.steps = true;
+    st.stepsCount = 4;
+    st.stepsNoise = 0;
+    st.stepsSoftness = 0;
+    st.stepsKeepLines = false;
+    RasterSurface sts = bakeEffects(*ramp, st, QRect(0, 0, 128, 32), nullptr);
+    QSet<int> values;
+    for (int x = 0; x < 128; ++x) values.insert(colorFromPremul(sts.pixel(x, 5)).red());
+    std::printf("INFO steps: %d different values\n", int(values.size()));
+    CHECK(values.size() == 4);
+    st.stepsNoise = 0.6f;  // rough borders: the border moves from row to row
+    RasterSurface rough = bakeEffects(*ramp, st, QRect(0, 0, 128, 32), nullptr);
+    QSet<int> borders;
+    for (int y = 0; y < 32; ++y) {
+        int first = -1;
+        for (int x = 1; x < 128 && first < 0; ++x)
+            if (colorFromPremul(rough.pixel(x, y)).red() > 60) first = x;
+        borders.insert(first);
+    }
+    CHECK(borders.size() > 3);
+    st.stepsKeepLines = true;
+    st.stepsNoise = 0;
+    RasterSurface keep = bakeEffects(*ramp, st, QRect(0, 0, 128, 32), nullptr);
+    CHECK(keep.pixel(5, 5) == ramp->pixels.pixel(5, 5));  // dark: untouched
+    st.stepsLow = 0.6f;
+    RasterSurface ranged = bakeEffects(*ramp, st, QRect(0, 0, 128, 32), nullptr);
+    CHECK(ranged.pixel(50, 5) == ramp->pixels.pixel(50, 5));  // below the range: untouched
+    CHECK(ranged.pixel(110, 5) != ramp->pixels.pixel(110, 5));
+
+    // saved and loaded
+    LayerEffects all;
+    all.chromatic = true; all.chromaSoftness = 0.4f; all.chromaLens = true;
+    all.dither = true; all.ditherLevels = 7; all.ditherPattern = 4; all.ditherPixel = 3; all.ditherPalette = 3;
+    all.ditherColors = {QColor(10, 20, 30), QColor(200, 100, 50)};
+    all.steps = true; all.stepsCount = 9; all.stepsMode = 1; all.stepsLow = 0.2f; all.stepsHigh = 0.8f; all.stepsKeepLines = false;
+    CHECK(LayerEffects::fromJson(all.toJson()) == all);
+}
+
 int main(int argc, char** argv) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QGuiApplication app(argc, argv);
@@ -1056,6 +1272,8 @@ int main(int argc, char** argv) {
     testSaiBrushes();
     testSeamlessAndReplace();
     testFramesAndBalloons();
+    testClippingLikeClipStudio();
+    testNewEffects();
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }
